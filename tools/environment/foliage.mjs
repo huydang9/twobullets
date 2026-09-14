@@ -7,7 +7,15 @@
 //
 // All card and impostor renders of a model share one RGBA atlas, so every level beyond the trunk is a single material.
 import sharp from "sharp";
-import { bounds, simplifyPart, triangleCount } from "./geometry.mjs";
+import { bounds, keepTriangles, simplifyPart, triangleCount } from "./geometry.mjs";
+
+/** Triangles whose centroid is below `height`. */
+function clipAbove(part, height) {
+  const { positions: p, indices: idx } = part;
+  const keep = new Uint8Array(idx.length / 3);
+  for (let t = 0; t < keep.length; t++) keep[t] = (p[idx[t * 3] * 3 + 1] + p[idx[t * 3 + 1] * 3 + 1] + p[idx[t * 3 + 2] * 3 + 1]) / 3 < height ? 1 : 0;
+  return keepTriangles(part, keep);
+}
 
 const SUPERSAMPLE = 2;
 const ALPHA_CUTOFF = 0.5;
@@ -41,7 +49,11 @@ export async function buildFoliage(doc, modelId, items, atlasSize) {
     let fullSoup = null;
     const plan = { prop, trunk, cardParts, soup, canopy, levels: [] };
     for (const [index, lod] of prop.foliage.lods.entries()) {
-      if (lod.impostor) {
+      if (lod.sourceCards) {
+        // Already game-ready cards (a hand-made crown): keep them with their own sprite texture, which reuses sprites
+        // far more densely than a unique atlas can. Only their normals and occlusion follow the baked cards.
+        plan.levels.push({ lod, source: true });
+      } else if (lod.impostor) {
         const views = impostorViews(parts, canopy);
         plan.levels.push({ lod, views });
         tiles.push(...views.map((view) => ({ kind: "impostor", width: view.width, height: view.height, owner: view, render: () => renderSoup(view, (fullSoup ??= triangleSoup(parts)), samplers, canopy, true) })));
@@ -68,9 +80,18 @@ export async function buildFoliage(doc, modelId, items, atlasSize) {
 
   const result = new Map();
   for (const plan of plans) {
-    const levels = plan.levels.map(({ lod, clusters, views }) => {
-      if (views) return [impostorPart(views, material)];
+    const levels = plan.levels.map(({ lod, clusters, views, source }) => {
+      if (views) {
+        // Big trunks are cover: `trunk` keeps a real, simplified trunk (below `trunkBelow`) under the impostor quads.
+        if (!lod.trunk) return [impostorPart(views, material)];
+        const solid = plan.trunk
+          .map((p) => (lod.trunkBelow === undefined ? p : clipAbove(p, lod.trunkBelow)))
+          .filter((p) => p.indices.length > 0)
+          .map((p) => simplifyPart(p, Math.min(1, lod.trunk / Math.max(1, triangleCount([p]))), 0.05, ["Prune", "Permissive"]));
+        return [...solid, impostorPart(views, material)];
+      }
       const trunk = plan.trunk.map((p) => simplifyPart(p, Math.min(1, lod.trunk / Math.max(1, triangleCount([p]))), 0.02 + lod.distance / 2000));
+      if (source) return [...trunk, ...plan.cardParts.map((p) => sourceCardsPart(p, plan.canopy))];
       return [...trunk, cardsPart(clusters, plan.canopy, material)];
     });
     result.set(plan.prop.id, { levels, trunk: plan.trunk });
@@ -275,6 +296,20 @@ function fitCard(soup, tris, forcedNormal) {
   };
 }
 
+/** Source cards with the baked cards' bent normals and canopy occlusion colors. */
+function sourceCardsPart(part, canopy) {
+  const { positions: p } = part;
+  const normals = new Float32Array(part.normals.length);
+  const colors = new Float32Array(p.length);
+  for (let i = 0; i < p.length; i += 3) {
+    const radial = normalize([p[i] - canopy.center[0], (p[i + 1] - canopy.center[1]) * 0.6, p[i + 2] - canopy.center[2]]);
+    const n = [part.normals[i], part.normals[i + 1], part.normals[i + 2]];
+    normals.set(normalize([0, 1, 2].map((d) => radial[d] * 0.75 + n[d] * 0.25 + (d === 1 ? 0.25 : 0))), i);
+    colors.fill(canopyOcclusion(canopy, p[i], p[i + 1], p[i + 2]), i, i + 3);
+  }
+  return { ...part, normals, colors };
+}
+
 function cardsPart(clusters, canopy, material) {
   const count = clusters.length;
   const positions = new Float32Array(count * 12);
@@ -443,9 +478,12 @@ function renderTris(card, count, partOf, localOf, samplers, canopy, occludeByCan
 async function bakeAtlas(tiles, size) {
   const kinds = Object.keys(ATLAS_SHARE);
   const densities = {};
+  // Shares of the kinds present, renormalized (a model whose LOD0 keeps its source cards has no cards0 tiles).
+  const present = kinds.filter((kind) => tiles.some((t) => t.kind === kind));
+  const shareSum = present.reduce((a, kind) => a + ATLAS_SHARE[kind], 0);
   for (const kind of kinds) {
     const area = tiles.filter((t) => t.kind === kind).reduce((a, t) => a + t.width * t.height, 0);
-    densities[kind] = area > 0 ? Math.sqrt((ATLAS_SHARE[kind] * size * size * 0.8) / area) : 0;
+    densities[kind] = area > 0 ? Math.sqrt(((ATLAS_SHARE[kind] / shareSum) * size * size * 0.8) / area) : 0;
   }
   for (let attempt = 0; attempt < 30; attempt++) {
     for (const t of tiles) {

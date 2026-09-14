@@ -16,6 +16,7 @@ import {
   collisionOf,
   extractParts,
   footprintRadius,
+  keepTriangles,
   mat4,
   simplifierReady,
   simplifyPart,
@@ -26,6 +27,7 @@ import {
 } from "./geometry.mjs";
 import { buildFoliage, writePreview } from "./foliage.mjs";
 import { readBuildRecord, reportSizes, writeBuildRecord, writeManifest } from "./manifest.mjs";
+import { externalSource, prepareExternalMaterials, readExternalModel } from "./external.mjs";
 
 setTimeout(() => {
   console.error("aborted after 1500 s");
@@ -40,7 +42,9 @@ async function main() {
   await mkdir(PROPS_OUT_DIR, { recursive: true });
   const io = await createIO();
   const pool = new TextureEncoderPool(CACHE_DIR, 1);
-  const credits = JSON.parse(await readFile(path.join(OUT_DIR, "credits.json"), "utf8")).assets;
+  const creditsFile = path.join(OUT_DIR, "credits.json");
+  const creditsBody = JSON.parse(await readFile(creditsFile, "utf8"));
+  const credits = creditsBody.assets;
   const record = await readBuildRecord();
   record.props ??= {};
   try {
@@ -51,6 +55,7 @@ async function main() {
       const entries = await buildModel(io, pool, model, props, credits.find((c) => c.id === model.id));
       Object.assign(record.props, entries);
       await writeBuildRecord(record);
+      if (model.credits && upsertCredits(credits, model.credits)) await writeFile(creditsFile, `${JSON.stringify(creditsBody, null, 2)}\n`);
       console.log(`${model.id}: ${((performance.now() - started) / 1000).toFixed(1)} s, rss ${(process.memoryUsage().rss / 1e6).toFixed(0)} MB`);
     }
   } finally {
@@ -62,11 +67,12 @@ async function main() {
 
 async function buildModel(io, pool, model, props, credit) {
   const dir = path.join(SRC_DIR, "models", model.id);
-  const doc = await io.read(path.join(dir, model.meshes ? `${model.id}.subset.gltf` : `${model.id}.gltf`));
+  const doc = model.files ? await readExternalModel(io, model) : await io.read(path.join(dir, model.meshes ? `${model.id}.subset.gltf` : `${model.id}.gltf`));
   const root = doc.getRoot();
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
   const sourceNodes = root.listNodes();
-  await mergeAlphaMaps(doc, model, dir);
+  if (model.files) await prepareExternalMaterials(doc, model);
+  else await mergeAlphaMaps(doc, model, dir);
 
   const entries = {};
   const url = `props/${model.id}.glb`;
@@ -76,7 +82,15 @@ async function buildModel(io, pool, model, props, credit) {
     const parts = extractParts(doc, prop.nodes);
     placeParts(parts, prop);
     if (prop.foliage) foliage.push({ prop, parts });
-    else built.push({ prop, levels: buildLevels(parts, prop.lods) });
+    else {
+      const levels = buildLevels(parts, prop.lods);
+      built.push({ prop, levels });
+      // Debug side views of every level for props from external sources (their scale and orientation are hand-set).
+      if (model.files) {
+        await mkdir(path.join(CACHE_DIR, "previews"), { recursive: true });
+        await writePreview(levels, path.join(CACHE_DIR, "previews", `${prop.id}.png`));
+      }
+    }
   }
   if (foliage.length > 0) {
     const result = await buildFoliage(doc, model.id, foliage, model.atlas ?? 2048);
@@ -102,7 +116,7 @@ async function buildModel(io, pool, model, props, credit) {
       bounds: babylonBounds(levels[0]),
       footprintRadius: footprintRadius(levels[0]),
       collision: collisionOf(prop.collision, levels[0], { trunk: prop.collision === "cylinder" ? trunk : undefined }),
-      source: sourceOf(model.id, credit),
+      source: model.credits ? externalSource(model) : sourceOf(model.id, credit),
     };
     console.log(`  ${prop.id.padEnd(20)} ${lods.map((l) => l.triangles).join(" / ")} tris`);
   }
@@ -114,6 +128,10 @@ async function buildModel(io, pool, model, props, credit) {
   }
   const limits = { ...DEFAULT_TEXTURES, ...MODEL_TEXTURES[model.id] };
   const rules = [
+    // Per-material limits first (first matching rule wins).
+    ...Object.entries(limits.materials ?? {}).flatMap(([name, sizes]) =>
+      Object.entries(sizes).map(([slot, maxSize]) => ({ material: new RegExp(`^${name}$`), slot, maxSize, codec: slot === "normal" ? "uastc" : "etc1s" })),
+    ),
     { slot: "baseColor", maxSize: limits.baseColor, codec: "etc1s" },
     { slot: "normal", maxSize: limits.normal, codec: "uastc" },
     { slot: "orm", maxSize: limits.orm, codec: "etc1s" },
@@ -128,21 +146,56 @@ async function buildModel(io, pool, model, props, credit) {
   return entries;
 }
 
-/** Applies the prop's rotate/scale, then centers XZ on the origin and grounds it. */
-export function placeParts(parts, { rotate, scale, ground = "min" }) {
+/**
+ * Applies the prop's rotate/scale, then centers XZ on the origin and grounds it. With `pivot` (source units, before
+ * rotate/scale) that point becomes the origin instead: trees and stumps keep their trunk axis on the pivot, not the
+ * center of an asymmetric crown or ground patch. `trim { radius, below }` (meters, afterwards) drops triangles farther
+ * than `radius` from the Y axis and lower than `below`, e.g. the scanned ground skirt around a stump.
+ */
+export function placeParts(parts, { rotate, scale, ground = "min", pivot, trim }) {
+  if (pivot) {
+    const offset = mat4.translation(pivot.map((v) => -v));
+    for (const part of parts) transformPart(part, offset);
+  }
   if (rotate || scale) {
     const m = mat4.multiply(mat4.scale(scale ?? 1), mat4.rotation(rotate ?? [0, 0, 0]));
     for (const part of parts) transformPart(part, m);
   }
-  const { min, max } = bounds(parts);
-  const offset = mat4.translation([-(min[0] + max[0]) / 2, ground === "min" ? -min[1] : 0, -(min[2] + max[2]) / 2]);
-  for (const part of parts) transformPart(part, offset);
+  if (!pivot) {
+    const { min, max } = bounds(parts);
+    const offset = mat4.translation([-(min[0] + max[0]) / 2, ground === "min" ? -min[1] : 0, -(min[2] + max[2]) / 2]);
+    for (const part of parts) transformPart(part, offset);
+  }
+  if (trim) {
+    for (let i = 0; i < parts.length; i++) {
+      const { positions: p, indices: idx } = parts[i];
+      const keep = new Uint8Array(idx.length / 3);
+      for (let t = 0; t < keep.length; t++) {
+        const c = [0, 1, 2].map((d) => (p[idx[t * 3] * 3 + d] + p[idx[t * 3 + 1] * 3 + d] + p[idx[t * 3 + 2] * 3 + d]) / 3);
+        keep[t] = c[1] < trim.below && Math.hypot(c[0], c[2]) > trim.radius ? 0 : 1;
+      }
+      parts[i] = keepTriangles(parts[i], keep);
+    }
+  }
+}
+
+/** Adds or replaces credits.json entries by id; true when something changed. */
+function upsertCredits(credits, entries) {
+  let changed = false;
+  for (const entry of entries) {
+    const index = credits.findIndex((c) => c.id === entry.id);
+    if (index >= 0 && JSON.stringify(credits[index]) === JSON.stringify(entry)) continue;
+    if (index >= 0) credits[index] = entry;
+    else credits.push(entry);
+    changed = true;
+  }
+  return changed;
 }
 
 /** LOD0 is capped at `maxTriangles` by simplification, or for `thin` levels (grass) by dropping whole blades. */
 function buildLevels(parts, lods) {
   const reduce = (source, ratio, lod) =>
-    source.map((p) => (lod.thin ? thinComponents(p, ratio) : simplifyPart(p, ratio, lod.error ?? 0.01, ratio < 0.1 ? ["Prune"] : [])));
+    source.map((p) => (lod.thin ? thinComponents(p, ratio) : simplifyPart(p, ratio, lod.error ?? 0.01, [...(ratio < 0.1 ? ["Prune"] : []), ...(lod.flags ?? [])])));
   const [first, ...rest] = lods;
   const total = triangleCount(parts);
   const lod0 = total > first.maxTriangles ? reduce(parts, first.maxTriangles / total, first) : parts;

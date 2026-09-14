@@ -69,8 +69,11 @@ export function transformPart(part, m) {
 }
 
 /**
- * Reads the given scene nodes (names or { name, translate }) into parts with world transforms baked, merged per material.
- * `nodes` undefined means every node with a mesh.
+ * Reads the given scene nodes into parts with world transforms baked, merged per material. `nodes` undefined means every
+ * node with a mesh. A node spec is a name or `{ name, translate?, rotate?, scale?, crop?, clipBelow? }`:
+ * - `crop { min, max }` keeps the connected components whose bounds center lies in the box, and `clipBelow` drops
+ *   triangles whose centroid is below that height; both in the node's world space (source units);
+ * - then `scale` (uniform), `rotate` (degrees XYZ) and `translate` are applied in that order.
  */
 export function extractParts(doc, nodes) {
   const all = doc.getRoot().listNodes();
@@ -79,12 +82,15 @@ export function extractParts(doc, nodes) {
         const name = typeof spec === "string" ? spec : spec.name;
         const node = all.find((n) => n.getName() === name);
         if (!node?.getMesh()) throw new Error(`node ${name} not found or has no mesh`);
-        return { node, translate: spec.translate };
+        return typeof spec === "string" ? { node } : { ...spec, node };
       })
     : all.filter((n) => n.getMesh()).map((node) => ({ node }));
   const byMaterial = new Map();
-  for (const { node, translate } of specs) {
-    const world = translate ? mat4.multiply(mat4.translation(translate), node.getWorldMatrix()) : node.getWorldMatrix();
+  for (const { node, translate, rotate, scale, crop, clipBelow } of specs) {
+    const filtered = crop !== undefined || clipBelow !== undefined;
+    // Without filters the extra transform folds into the world matrix (the original translate-only path).
+    const extra = rotate || scale || translate ? mat4.multiply(mat4.translation(translate ?? [0, 0, 0]), mat4.multiply(mat4.rotation(rotate ?? [0, 0, 0]), mat4.scale(scale ?? 1))) : null;
+    const world = extra && !filtered ? mat4.multiply(extra, node.getWorldMatrix()) : node.getWorldMatrix();
     for (const prim of node.getMesh().listPrimitives()) {
       const position = prim.getAttribute("POSITION");
       const count = position.getCount();
@@ -97,11 +103,54 @@ export function extractParts(doc, nodes) {
         indices: prim.getIndices() ? Uint32Array.from(prim.getIndices().getArray()) : Uint32Array.from({ length: count }, (_, i) => i),
       };
       transformPart(part, world);
-      const key = part.material ?? "none";
-      byMaterial.set(key, [...(byMaterial.get(key) ?? []), part]);
+      let kept = part;
+      if (filtered) {
+        kept = filterPart(part, { crop, clipBelow });
+        if (kept.indices.length === 0) continue;
+        if (extra) transformPart(kept, extra);
+      }
+      const key = kept.material ?? "none";
+      byMaterial.set(key, [...(byMaterial.get(key) ?? []), kept]);
     }
   }
   return [...byMaterial.values()].map(mergeParts);
+}
+
+/** `crop` keeps whole components whose bounds center is inside the box; `clipBelow` drops triangles by centroid height. */
+function filterPart(part, { crop, clipBelow }) {
+  const { positions: p, indices: idx } = part;
+  const keep = new Uint8Array(idx.length / 3).fill(1);
+  if (crop) {
+    for (const tris of components(part, true)) {
+      const min = [Infinity, Infinity, Infinity];
+      const max = [-Infinity, -Infinity, -Infinity];
+      for (const t of tris) {
+        for (let k = 0; k < 3; k++) {
+          const v = idx[t * 3 + k] * 3;
+          for (let d = 0; d < 3; d++) {
+            min[d] = Math.min(min[d], p[v + d]);
+            max[d] = Math.max(max[d], p[v + d]);
+          }
+        }
+      }
+      const inside = [0, 1, 2].every((d) => (min[d] + max[d]) / 2 >= crop.min[d] && (min[d] + max[d]) / 2 <= crop.max[d]);
+      if (!inside) for (const t of tris) keep[t] = 0;
+    }
+  }
+  if (clipBelow !== undefined) {
+    for (let t = 0; t < keep.length; t++) {
+      const y = (p[idx[t * 3] * 3 + 1] + p[idx[t * 3 + 1] * 3 + 1] + p[idx[t * 3 + 2] * 3 + 1]) / 3;
+      if (y < clipBelow) keep[t] = 0;
+    }
+  }
+  return keepTriangles(part, keep);
+}
+
+/** Part with only the triangles flagged in `keep` (one byte per triangle), vertices compacted. */
+export function keepTriangles(part, keep) {
+  const indices = [];
+  for (let t = 0; t < keep.length; t++) if (keep[t]) indices.push(part.indices[t * 3], part.indices[t * 3 + 1], part.indices[t * 3 + 2]);
+  return compactPart(part, Uint32Array.from(indices));
 }
 
 export function mergeParts(parts) {
@@ -171,6 +220,11 @@ export function compactPart(part, indices) {
 export function simplifyPart(part, ratio, error, flags = []) {
   const target = Math.max(3, Math.floor((part.indices.length / 3) * ratio)) * 3;
   if (target >= part.indices.length) return part;
+  if (flags.includes("Permissive") && part.uv0) {
+    // Collapses across UV seams are weighed by the UV change, so textures don't smear along the seams.
+    const [indices] = MeshoptSimplifier.simplifyWithAttributes(part.indices, part.positions, 3, part.uv0, 2, [0.5, 0.5], null, target, error, flags);
+    return compactPart(part, indices);
+  }
   const [indices] = MeshoptSimplifier.simplify(part.indices, part.positions, 3, target, error, flags);
   return compactPart(part, indices);
 }

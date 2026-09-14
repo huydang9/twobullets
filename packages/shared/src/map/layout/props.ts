@@ -36,6 +36,11 @@ export interface MapPropDef {
   readonly alignToTerrain?: boolean;
   /** Pushed this far into the ground so slopes don't expose the base, m at scale 1. */
   readonly sink?: number;
+  /**
+   * Cover that must never be culled by distance. The client's `isCover` also derives it from collision (blocking and
+   * taller than 0.5 m); this flag states it explicitly for props added as cover.
+   */
+  readonly cover?: boolean;
 }
 
 const DEFS = [
@@ -76,6 +81,21 @@ const DEFS = [
   { id: "sandbags", category: "prop", footprint: 1, collision: { kind: "box", size: [2.4, 0.9, 0.7], bulletproof: true }, surface: "dirt" },
   { id: "hay_bale", category: "prop", footprint: 1, collision: { kind: "box", size: [1.3, 1.5, 1.5], bulletproof: true }, surface: "grass" },
   { id: "hay_stack", category: "prop", footprint: 1.6, collision: { kind: "box", size: [2.6, 1.9, 1.3], bulletproof: true }, surface: "grass" },
+  // Big trees and cover props from real models (environment manifest, 2026-09-15). Not placed on Map v1 yet; see
+  // docs/map/cover-props.md. Boxes are inner approximations of the measured bounds (irregular scans, straws, open doors).
+  { id: "tree_oak_large", category: "tree", footprint: 3.5, collision: { kind: "cylinder", radius: 0.62, height: 3.5 }, surface: "wood", sink: 0.2, cover: true },
+  { id: "tree_oak_fungi", category: "tree", footprint: 2.5, collision: { kind: "cylinder", radius: 0.36, height: 5.8 }, surface: "wood", sink: 0.2, cover: true },
+  { id: "log_mossy", category: "prop", footprint: 1.5, collision: { kind: "box", size: [2.7, 0.8, 0.7], bulletproof: true }, surface: "wood", sink: 0.1, cover: true },
+  { id: "stump_boubin", category: "prop", footprint: 1.6, collision: { kind: "cylinder", radius: 0.95, height: 1.05 }, surface: "wood", sink: 0.1, cover: true },
+  { id: "car_wreck", category: "prop", footprint: 2.7, collision: { kind: "box", size: [1.9, 1.3, 5], bulletproof: true }, surface: "metal", sink: 0.05, cover: true },
+  { id: "pipe_stack", category: "prop", footprint: 2.7, collision: { kind: "box", size: [5, 1.37, 1.9], bulletproof: true }, surface: "concrete", cover: true },
+  { id: "hay_bale_stack", category: "prop", footprint: 0.75, collision: { kind: "box", size: [0.94, 1.16, 0.94], bulletproof: true }, surface: "grass", sink: 0.03, cover: true },
+  { id: "hay_bale_wall", category: "prop", footprint: 1.6, collision: { kind: "box", size: [2.9, 1.16, 0.47], bulletproof: true }, surface: "grass", sink: 0.03, cover: true },
+  { id: "sandbag_barrier", category: "prop", footprint: 2.3, collision: { kind: "box", size: [4.5, 1, 0.7], bulletproof: true }, surface: "dirt", sink: 0.03, cover: true },
+  { id: "cable_spool", category: "prop", footprint: 0.75, collision: { kind: "cylinder", radius: 0.7, height: 1.4 }, surface: "wood", cover: true },
+  // An open scanned face (no back): place with its back into a slope or cliff, facing downhill.
+  { id: "rock_face_large", category: "rock", footprint: 2.6, collision: { kind: "box", size: [3.8, 3.2, 2.6], bulletproof: true }, surface: "concrete", sink: 0.4, cover: true },
+  { id: "rock_boulder_large", category: "rock", footprint: 1.4, collision: { kind: "box", size: [2.1, 1.75, 2.1], bulletproof: true }, surface: "concrete", alignToTerrain: true, sink: 0.2, cover: true },
 ] as const satisfies readonly MapPropDef[];
 
 export type MapPropId = (typeof DEFS)[number]["id"];

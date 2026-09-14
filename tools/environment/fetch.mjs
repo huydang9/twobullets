@@ -73,6 +73,11 @@ async function main() {
   credits.push(creditEntry(HDRI.id, info, "hdri", [entry.url]));
 
   for (const model of MODELS) {
+    // Sketchfab and manually fetched 2K models are not downloaded here; keep their credits.
+    if (model.files) {
+      credits.push(...(model.credits ?? []));
+      continue;
+    }
     console.log(model.id);
     const [info, files] = await Promise.all([getJson(`${POLY_HAVEN_API}/info/${model.id}`), getJson(`${POLY_HAVEN_API}/files/${model.id}`)]);
     const gltf = files.gltf?.["1k"]?.gltf;

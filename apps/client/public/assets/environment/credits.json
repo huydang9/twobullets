@@ -988,6 +988,159 @@
         "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/island_tree_01/island_tree_01.bin",
         "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/island_tree_01/island_tree_01_leaves_alpha_1k.jpg"
       ]
+    },
+    {
+      "id": "namaqualand_boulder_04",
+      "name": "Namaqualand Boulder 04",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Jenelle van Heerden",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/namaqualand_boulder_04",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/namaqualand_boulder_04/namaqualand_boulder_04_2k.gltf"
+      ]
+    },
+    {
+      "id": "rock_face_02",
+      "name": "Rock Face 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Dario Barresi",
+          "role": "All"
+        },
+        {
+          "name": "Rico Cilliers",
+          "role": "Processing"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rock_face_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/rock_face_02/rock_face_02_2k.gltf"
+      ]
+    },
+    {
+      "id": "mossy_old_tree_log",
+      "name": "Mossy old tree log",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Julian Malik",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/mossy-old-tree-log-c65a00ca4a174653beb4c59cb42b9143"
+    },
+    {
+      "id": "boubin_stump",
+      "name": "Boubín Stump",
+      "type": "model",
+      "authors": [
+        {
+          "name": "3dhdscan",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/boubin-stump-b968b5dc462148989cb87b072885da85"
+    },
+    {
+      "id": "destroyed_car_03",
+      "name": "Destroyed Car 03 / Backrooms Car (Gameready ver)",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Renafox",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/destroyed-car-03-backrooms-car-gameready-ver-efc4dfe2c7284a64bc9281eb4f61d402"
+    },
+    {
+      "id": "concrete_pipes_12_mb",
+      "name": "Concrete Pipes_12_MB",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Mehdi Shahsavan",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/concrete-pipes-12-mb-7b156401a8aa4f01880618c938a219f9"
+    },
+    {
+      "id": "hay_bales",
+      "name": "Hay bales",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Zbrojmistrz",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/hay-bales-d6e087f9a2a9416c94918f0503943c17"
+    },
+    {
+      "id": "sandbag_barrier",
+      "name": "Sandbag Barrier (Ready for Unreal Engine)",
+      "type": "model",
+      "authors": [
+        {
+          "name": "G4AGamingLabs",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/sandbag-barrier-ready-for-unreal-engine-593800671c8e45eca93b8b7c765c0f77"
+    },
+    {
+      "id": "cable_spool",
+      "name": "Cable Spool",
+      "type": "model",
+      "authors": [
+        {
+          "name": "wolfgar74",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/cable-spool-22ddb8e02f944fb7b5662f14fdc50e5e"
+    },
+    {
+      "id": "large_oak_tree_with_parasitic_fungi",
+      "name": "Large oak tree with parasitic fungi",
+      "type": "model",
+      "authors": [
+        {
+          "name": "ZiemniaQ",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/large-oak-tree-with-parasitic-fungi-1a475a11690d4bf5aa1af1850c628fff"
+    },
+    {
+      "id": "oak_tree",
+      "name": "Oak tree",
+      "type": "model",
+      "authors": [
+        {
+          "name": "massive-graphisme",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://sketchfab.com/3d-models/oak-tree-3dc59560f2d24345bdbe65c44636453b"
     }
   ]
 }
