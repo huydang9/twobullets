@@ -155,17 +155,45 @@ async function mergeAlphaMaps(doc, model, dir) {
     const material = doc.getRoot().listMaterials().find((m) => m.getName() === materialName);
     const texture = material?.getBaseColorTexture();
     if (!texture) throw new Error(`${model.id}: material ${materialName} has no base color texture`);
-    const color = sharp(texture.getImage()).removeAlpha();
-    const { width, height } = await color.metadata();
+    // Decode to raw first: sharp applies removeAlpha() after joinChannel() in one pipeline, which silently dropped the
+    // merged opacity (cutouts shipped as opaque RGB KTX2s).
+    const { data: rgb, info } = await sharp(texture.getImage()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
     const alpha = await sharp(await readFile(path.join(dir, "textures", `${model.id}_${key}_1k.jpg`)))
       .resize(width, height)
       .extractChannel(0)
+      .raw()
       .toBuffer();
-    const png = await color.joinChannel(alpha).png().toBuffer();
+    const rgba = bleedUnderCutout(rgb, alpha, width * height);
+    const png = await sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();
+    const channels = (await sharp(png).metadata()).channels;
+    if (channels !== 4) throw new Error(`${model.id}: merged ${materialName} texture has ${channels} channels`);
     // Several materials can share one albedo image: give each merged texture its own URI so they don't collide.
     texture.setImage(new Uint8Array(png)).setMimeType("image/png").setURI(`${materialName}_alpha.png`);
     material.setAlphaMode("MASK").setAlphaCutoff(0.5);
   }
+}
+
+/**
+ * RGBA from RGB + alpha, with texels below the cutoff recolored to the mean color of the kept ones. Poly Haven paints
+ * the holes black, so mips averaged thin wire or leaves toward black at distance.
+ */
+function bleedUnderCutout(rgb, alpha, pixels) {
+  const sum = [0, 0, 0];
+  let kept = 0;
+  for (let i = 0; i < pixels; i++) {
+    if (alpha[i] < 128) continue;
+    for (let c = 0; c < 3; c++) sum[c] += rgb[i * 3 + c];
+    kept++;
+  }
+  const mean = sum.map((s) => Math.round(s / Math.max(1, kept)));
+  const rgba = new Uint8Array(pixels * 4);
+  for (let i = 0; i < pixels; i++) {
+    const hole = alpha[i] < 128;
+    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = hole ? mean[c] : rgb[i * 3 + c];
+    rgba[i * 4 + 3] = alpha[i];
+  }
+  return rgba;
 }
 
 function sourceOf(id, credit) {

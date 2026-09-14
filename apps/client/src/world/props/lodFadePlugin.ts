@@ -17,7 +17,12 @@ export const LOD_FADE_ATTRIBUTE = "lodFade";
 /** Alpha multiplier added per mip level below the base texture (Golus' "alpha to coverage mip scale"). */
 const ALPHA_MIP_SCALE = 0.25;
 
+/** Mip band over which sparse cutouts hand the fixed cutoff over to a dithered one (wires ~6 texels wide in the source). */
+const DITHER_MIP_START = 1.5;
+const DITHER_MIP_END = 3;
+
 const distanceFadeMeshes = new WeakSet<AbstractMesh>();
+const ditheredCutouts = new WeakSet<Material>();
 const distanceFade = { inner: 0, outer: 0 };
 const plugins = new WeakMap<Material, LodFadePlugin>();
 
@@ -52,15 +57,18 @@ const FRAGMENT_DEFINITIONS = /* glsl */ `
 varying float vLodFade;
 #endif
 float lodAlphaScale = 1.0;
+float lodAlphaBias = 0.0;
 `;
 
 // Screen-door cross-fade with interleaved gradient noise, which is stable in screen space: a fading-in copy (fade p)
 // keeps the pixels whose noise is below p and its fading-out partner (1 + p) exactly the others. Then the mip coverage
 // term: cutout alpha averages down in smaller mips, so leaves thin out and crawl with distance unless alpha is scaled up.
+// Sparse cutouts (wire mesh) instead move the cutoff onto the same noise once the wires get thinner than a pixel, so the
+// averaged alpha becomes the share of pixels kept: a faint screen door at distance, never a solid or vanished panel.
 const FRAGMENT_MAIN_BEGIN = /* glsl */ `
+float lodNoise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 #ifdef LOD_FADE
 if (abs(vLodFade - 1.0) > 0.001) {
-  float lodNoise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   if (vLodFade < 1.0 ? lodNoise >= vLodFade : lodNoise < vLodFade - 1.0) discard;
 }
 #endif
@@ -69,7 +77,12 @@ if (abs(vLodFade - 1.0) > 0.001) {
   vec2 lodTexel = vAlbedoUV * lodAlphaMip.xy;
   vec2 lodDx = dFdx(lodTexel);
   vec2 lodDy = dFdy(lodTexel);
-  lodAlphaScale = 1.0 + max(0.0, 0.5 * log2(max(dot(lodDx, lodDx), dot(lodDy, lodDy)))) * lodAlphaMip.z;
+  float lodMip = max(0.0, 0.5 * log2(max(dot(lodDx, lodDx), dot(lodDy, lodDy))));
+#ifdef LOD_ALPHA_DITHER
+  lodAlphaBias = (ALPHATESTVALUE - lodNoise) * smoothstep(${DITHER_MIP_START.toFixed(1)}, ${DITHER_MIP_END.toFixed(1)}, lodMip);
+#else
+  lodAlphaScale = 1.0 + lodMip * lodAlphaMip.z;
+#endif
 }
 #endif
 `;
@@ -78,12 +91,13 @@ if (abs(vLodFade - 1.0) > 0.001) {
  * Vegetation and prop stability features for PBR materials of thin-instanced batches:
  * - LOD_FADE: dithered LOD cross-fade from the per-instance `lodFade` attribute (meshes that have it);
  * - LOD_ALPHA_MIP: alpha-tested materials scale cutout alpha by mip level so foliage keeps its coverage at distance;
+ * - LOD_ALPHA_DITHER: sparse cutouts marked with `ditherCutoutCoverage` dither their averaged alpha instead (not a flag);
  * - LOD_DISTANCE_FADE: meshes registered with `enableDistanceFade` shrink out over a camera distance band (grass).
  * The shadow depth pass uses Babylon's own shader, so shadows switch without dithering.
  */
 export class LodFadePlugin extends MaterialPluginBase {
   constructor(material: Material) {
-    super(material, "LodFade", 220, { LOD_FADE: false, LOD_ALPHA_MIP: false, LOD_DISTANCE_FADE: false }, true, true);
+    super(material, "LodFade", 220, { LOD_FADE: false, LOD_ALPHA_MIP: false, LOD_ALPHA_DITHER: false, LOD_DISTANCE_FADE: false }, true, true);
   }
 
   override getClassName(): string {
@@ -99,6 +113,7 @@ export class LodFadePlugin extends MaterialPluginBase {
     defines["LOD_FADE"] = mesh.isVerticesDataPresent(LOD_FADE_ATTRIBUTE);
     defines["LOD_DISTANCE_FADE"] = distanceFadeMeshes.has(mesh);
     defines["LOD_ALPHA_MIP"] = material.transparencyMode === PBRMaterial.MATERIAL_ALPHATEST && material.albedoTexture !== null;
+    defines["LOD_ALPHA_DITHER"] = ditheredCutouts.has(material);
   }
 
   override getAttributes(attributes: string[], _scene: Scene, mesh: AbstractMesh): void {
@@ -130,7 +145,7 @@ export class LodFadePlugin extends MaterialPluginBase {
       CUSTOM_FRAGMENT_DEFINITIONS: FRAGMENT_DEFINITIONS,
       CUSTOM_FRAGMENT_MAIN_BEGIN: FRAGMENT_MAIN_BEGIN,
       // The cutout test runs inside pbrBlockAlbedoOpacity, before any custom point, so the scale goes into its alpha term.
-      "!alpha\\*=albedoTexture\\.a;": "alpha*=albedoTexture.a*lodAlphaScale;",
+      "!alpha\\*=albedoTexture\\.a;": "alpha*=albedoTexture.a*lodAlphaScale+lodAlphaBias;",
     };
   }
 }
@@ -139,6 +154,14 @@ export class LodFadePlugin extends MaterialPluginBase {
 export function attachLodFade(material: Material | null): void {
   if (!(material instanceof PBRMaterial) || plugins.has(material)) return;
   plugins.set(material, new LodFadePlugin(material));
+}
+
+/**
+ * Marks an alpha-tested material whose true coverage is low (chain-link wire): past a few mips its cutout keeps the
+ * averaged share of pixels by dithering instead of scaling alpha up. Call before the material first compiles.
+ */
+export function ditherCutoutCoverage(material: Material): void {
+  ditheredCutouts.add(material);
 }
 
 /** Registers a mesh for the vertex distance fade (before its first render). The band is shared by all such meshes, m. */

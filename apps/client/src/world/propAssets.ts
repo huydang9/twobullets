@@ -16,6 +16,7 @@ import { configureDecoders } from "../assets/decoders";
 import type { AssetManifest, DecoderUrls } from "../assets/manifest";
 import { PROP_MANIFEST_GENERATED } from "./environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT } from "./materials";
+import { ditherCutoutCoverage } from "./props/lodFadePlugin";
 
 /*
  * Props and vegetation contract between the environment asset pipeline (tools/environment) and the map runtime.
@@ -393,6 +394,9 @@ function extractLevel(container: AssetContainer, nodeName: string | undefined, n
   });
 }
 
+/** Cutouts with low true coverage (thin wire): they dither to their averaged alpha at distance instead of vanishing. */
+const SPARSE_CUTOUT_MATERIALS = new Set(["modular_chainlink_fence_wire"]);
+
 /**
  * Cutouts (foliage, cards, impostors, fence wire) arrive as glTF MASK, i.e. alpha test with their cutoff. Both faces use
  * the same normal: card normals are authored to point out of the canopy, so flipping them would darken back faces.
@@ -401,6 +405,7 @@ function configureMaterial(material: PBRMaterial): void {
   if (material.transparencyMode === PBRMaterial.MATERIAL_ALPHATEST) {
     material.backFaceCulling = false;
     material.twoSidedLighting = false;
+    if (SPARSE_CUTOUT_MATERIALS.has(material.name)) ditherCutoutCoverage(material);
   }
   material.enableSpecularAntiAliasing = true;
 }

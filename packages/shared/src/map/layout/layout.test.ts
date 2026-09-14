@@ -45,6 +45,38 @@ describe("geometry", () => {
     const north = segmentLine("fence_wood", [[0, 0], [0, 8]]);
     expect(north[0]!.yaw).toBeCloseTo(-Math.PI / 2, 12);
   });
+
+  // Covered [start, end] spans along an X-axis line of `segment` pieces.
+  const spans = (line: ReturnType<typeof segmentLine>, segment = 4) => line.map((p): [number, number] => [p.position[0] - segment / 2, p.position[0] + segment / 2]);
+
+  it("keeps gap edges where they are authored instead of dropping every piece that touches them", () => {
+    // Military Compound breach: 6 m, not the 8 m left by snapping to leg-wide 4 m pieces.
+    const wall = spans(segmentLine("wall_concrete", [[0, 0], [100, 0]], { gaps: [[64, 70]] }));
+    expect(Math.max(...wall.filter(([, b]) => b <= 67).map(([, b]) => b))).toBeCloseTo(64, 9);
+    expect(Math.min(...wall.filter(([a]) => a >= 67).map(([a]) => a))).toBeCloseTo(70, 9);
+    expect(wall.some(([a, b]) => a < 70 - 1e-9 && b > 64 + 1e-9)).toBe(false);
+    // Both ends stay closed.
+    expect(wall[0]![0]).toBeCloseTo(0, 9);
+    expect(wall.at(-1)![1]).toBeCloseTo(100, 9);
+    // A 3 m garden gate between stretches of 13 and 14 m.
+    const yard = spans(segmentLine("fence_wood", [[0, 0], [30, 0]], { gaps: [[13, 16]] }));
+    expect(yard.filter(([a, b]) => a < 16 - 1e-9 && b > 13 + 1e-9)).toEqual([]);
+    expect(yard.some(([, b]) => Math.abs(b - 13) < 1e-9) && yard.some(([a]) => Math.abs(a - 16) < 1e-9)).toBe(true);
+  });
+
+  it("handles short stretches with whole pieces, widening a gap slightly rather than closing a gate", () => {
+    // 5 m before the gap: one piece against the leg start, the gap widens by 1 m; 11 m after it: three flush pieces.
+    expect(segmentLine("fence_wood", [[0, 0], [20, 0]], { gaps: [[5, 9]] }).map((p) => p.position[0])).toEqual([2, 11, 14.5, 18]);
+    // A 3 m sliver would overhang a 2 m gate by 1 m (> 25 %): dropped.
+    expect(segmentLine("fence_wood", [[0, 0], [21, 0]], { gaps: [[3, 5]] }).map((p) => p.position[0])).toEqual([7, 11, 15, 19]);
+    // The same sliver next to a 12 m gate keeps its piece.
+    expect(segmentLine("fence_wood", [[0, 0], [31, 0]], { gaps: [[3, 15]] }).map((p) => p.position[0])).toEqual([2, 17, 21, 25, 29]);
+    // A gap across a corner opens both legs; legs without gaps are laid as before.
+    const corner = segmentLine("fence_wood", [[0, 0], [20, 0], [20, 20]], { gaps: [[16, 24]] });
+    expect(corner.filter((p) => Math.abs(p.yaw) < 1e-12).map((p) => p.position[0])).toEqual([2, 6, 10, 14]);
+    expect(corner.filter((p) => Math.abs(p.yaw) > 1e-12).map((p) => p.position[2])).toEqual([6, 10, 14, 18]);
+    expect(segmentLine("fence_wood", [[0, 0], [30, 0]], { gaps: [[40, 50]] })).toEqual(segmentLine("fence_wood", [[0, 0], [30, 0]]));
+  });
 });
 
 describe("terrain bake", () => {

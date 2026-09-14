@@ -4,6 +4,6 @@ export const MAP_V1_BAKE = {
   inputsHash: "1dc5ef23",
   terrainChecksum: "5e374718-c9aae53e",
   /** Buildings, props and scatter (buildMapLayout). */
-  layoutChecksum: "9301da19",
+  layoutChecksum: "22ab0987",
   bytes: 2422736,
 } as const;
