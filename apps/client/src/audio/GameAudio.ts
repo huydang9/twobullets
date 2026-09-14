@@ -38,6 +38,12 @@ const FEET_LIFT = 0.6;
  * tuned (distance attenuation already keeps them well under the local player's own shots).
  */
 const REMOTE_MAKEUP = 1.6;
+/** Bullet-into-flesh shaping per hit zone (the spatial impact the world hears, not the shooter's hit-confirm tick). */
+const FLESH_ZONE: Readonly<Record<HitZone, { gain: number; rate: number; snap: number }>> = {
+  head: { gain: 1, rate: 1.2, snap: 0.14 },
+  body: { gain: 0.85, rate: 1, snap: 0 },
+  limb: { gain: 0.7, rate: 1.08, snap: 0 },
+};
 
 interface Placement {
   readonly distance: number;
@@ -340,13 +346,14 @@ export class GameAudio {
     const place = this.place(event.position, 3, AUDIBLE_RANGE.impact, 1, event.age);
     if (!place) return;
     const heavy = event.weaponId === "sniper" ? 1.25 : event.weaponId === "shotgun" ? 0.6 : 1;
+    const flesh = surface === "flesh" ? FLESH_ZONE[event.zone ?? "body"] : null;
     const voice = this.engine.voice({
       bus: "impacts",
       priority: Priority.normal,
       label: IMPACT_SOUND[surface],
       position: event.position,
       panning: place.distance < 20 ? "HRTF" : "equalpower",
-      gain: place.gain * heavy,
+      gain: place.gain * heavy * (flesh?.gain ?? 1),
       lowpass: place.lowpass,
       room: 0.25 * this.probe.enclosure,
       echo: 0.08,
@@ -355,7 +362,11 @@ export class GameAudio {
     });
     if (!voice) return;
     const when = ctx.currentTime + place.delay;
-    this.layer(voice, IMPACT_SOUND[surface], { when, rate: 0.9 + Math.random() * 0.2 });
+    this.layer(voice, IMPACT_SOUND[surface], { when, rate: (flesh?.rate ?? 1) * (0.9 + Math.random() * 0.2) });
+    if (flesh && flesh.snap > 0) {
+      // Short bright transient on top of the thud: the wetter, harder crack of a head hit.
+      voice.addNoise({ when, gain: flesh.snap, filter: "highpass", frequency: 3200, decay: 0.012 });
+    }
     if ((surface === "concrete" || surface === "metal") && Math.random() < 0.15) {
       // Occasional ricochet whine.
       const from = 2600 + Math.random() * 1400;

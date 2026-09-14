@@ -64,7 +64,7 @@ export class AudioDebug {
             "__audio.ab(a='sniper', b='rifle', distance=0, gap=1.6)   // A/B two guns: first person at 0, spatial otherwise",
             "__audio.nearMiss(weapon='rifle', miss=1.5, fromBearing=0)",
             "__audio.footsteps(surface='concrete', stance='run', distance=8, bearing=90, steps=8)",
-            "__audio.impact(surface='metal', distance=15, bearing=-30)",
+            "__audio.impact(surface='metal', distance=15, bearing=-30)   // surface='flesh' takes a 4th arg zone='head'",
             "__audio.explosion(distance=60, bearing=0, power=1)",
             "__audio.mech(kind='boltOpen', weapon='sniper')",
             "__audio.hit(zone='head', killed=false)",
@@ -98,8 +98,8 @@ export class AudioDebug {
           this.later((i * stride) / speed, () => audio.playFootstep({ position: this.around(distance, bearing, -MOVEMENT.standEyeHeight, offset), surface, stance, isLocal: false }));
         }
       },
-      impact: (surface: AcousticSurface | "flesh" = "concrete", distance = 15, bearing = 0) =>
-        audio.playImpact({ position: this.around(distance, bearing, -1), surface, weaponId: "rifle" }),
+      impact: (surface: AcousticSurface | "flesh" = "concrete", distance = 15, bearing = 0, zone: HitZone = "body") =>
+        audio.playImpact({ position: this.around(distance, bearing, -1), surface, weaponId: "rifle", zone }),
       explosion: (distance = 60, bearing = 0, power = 1) => audio.playExplosion({ position: this.around(distance, bearing, -1.5), power }),
       mech: (kind: MechanicalAudioEvent["kind"] = "boltOpen", weaponId: WeaponId = "sniper") => audio.playMechanical({ kind, weaponId, position: null, span: 0.3 }),
       hit: (zone: HitZone = "body", killed = false) => audio.playHitConfirm({ zone, killed }),

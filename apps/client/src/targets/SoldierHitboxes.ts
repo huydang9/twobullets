@@ -23,10 +23,11 @@ export interface SoldierHitboxPart {
   readonly colliderId: string;
   /** Root-level node the body follows; its position is the shape center. */
   readonly node: TransformNode;
+  /** Skeleton node the shape is placed along; its world matrix stays current every frame, even while disabled. */
+  readonly bone: TransformNode;
 }
 
 interface Part extends SoldierHitboxPart {
-  readonly bone: TransformNode;
   readonly body: PhysicsBody;
   /** Shape center along the bone's +Y axis, world meters. */
   readonly offset: number;
@@ -99,8 +100,9 @@ export class SoldierHitboxes {
   }
 
   update(): void {
-    if (!this.active) return;
+    // Kept fresh while disabled too: attachments like blood wounds follow these bones on a dead body.
     this.refreshWorldMatrices();
+    if (!this.active) return;
     for (const part of this.items) place(part);
   }
 

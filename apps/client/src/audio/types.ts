@@ -58,6 +58,8 @@ export interface ImpactAudioEvent {
   readonly normal?: Vec3Like;
   /** "flesh" for hits on characters. */
   readonly surface?: AcousticSurface | "flesh";
+  /** Flesh only: head hits are sharper and brighter, limbs a little softer. */
+  readonly zone?: HitZone;
   readonly weaponId?: WeaponId;
   readonly age?: number;
 }

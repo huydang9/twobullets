@@ -14,9 +14,19 @@ import type { AssetLibrary } from "../assets";
 import { AudioDirector } from "../audio/AudioDirector";
 import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "../combat/types";
 import type { PlayerController } from "../player/PlayerController";
+import type { TargetRange } from "../targets/TargetRange";
 import { VIEWMODEL_RENDERING_GROUP, Viewmodel, type ViewmodelFrame } from "../viewmodel/Viewmodel";
 import { VIEWMODEL_PROFILES } from "../viewmodel/weaponProfiles";
 import type { Environment } from "../world/environment";
+import { BLOOD_ATLAS_COLUMNS, BLOOD_ATLAS_ROWS, createBloodAtlas } from "./bloodAtlas";
+import {
+  BLOOD_DECAL_BATCH_CAPACITY,
+  BLOOD_PARTICLE_BATCH_CAPACITY,
+  BloodEffects,
+  HavokBloodWorld,
+  type BloodBody,
+} from "./BloodEffects";
+import { bloodSettings, type BloodSettings } from "./bloodSettings";
 import { createFxAtlas } from "./fxAtlas";
 import { FxBatch } from "./FxBatch";
 import { ImpactEffects } from "./ImpactEffects";
@@ -30,6 +40,8 @@ const MAX_PENDING_EJECTS = 8;
 const MAX_IMPACT_SOUNDS_PER_FRAME = 3;
 const TICK_SECONDS = 1 / SIMULATION.tickRate;
 const HIT_ZONE_RANK: Readonly<Record<HitZone, number>> = { limb: 0, body: 1, head: 2 };
+/** On-screen floor for blood mist, px (half size), so a hit still reads as a puff through a scope at 150 m. */
+const BLOOD_MIST_MIN_PIXELS = 3;
 
 interface PendingEject {
   time: number;
@@ -47,6 +59,11 @@ interface PendingEject {
 export class WeaponPresentation {
   private readonly viewmodel: Viewmodel;
   private readonly atlas: DynamicTexture;
+  private readonly bloodAtlas: DynamicTexture;
+  private readonly bloodParticles: FxBatch;
+  private readonly bloodDecals: FxBatch;
+  private readonly blood: BloodEffects;
+  private readonly bodies = new Map<string, BloodBody>();
   private readonly worldAdditive: FxBatch;
   private readonly worldAlpha: FxBatch;
   private readonly decalBatch: FxBatch;
@@ -85,6 +102,7 @@ export class WeaponPresentation {
   private readonly right = new Vector3();
   private readonly up = new Vector3();
   private readonly forward = new Vector3();
+  private readonly shotDirection = new Vector3();
 
   // DEV preview state (see debug* methods).
   private previewWeapon: WeaponId | null = null;
@@ -134,12 +152,36 @@ export class WeaponPresentation {
     this.casings = new ShellCasings(scene);
     this.casings.onBounce = (position) => this.audio.casing(this.frame.weaponId, position);
 
+    // Blood: textured, fogged alpha batches. Decals draw before bullet holes so holes stay on top.
+    this.bloodAtlas = createBloodAtlas(scene);
+    const bloodLayout = { atlasColumns: BLOOD_ATLAS_COLUMNS, atlasRows: BLOOD_ATLAS_ROWS, textureColor: true, fog: true } as const;
+    this.bloodDecals = new FxBatch("fx_bloodDecals", scene, this.bloodAtlas, {
+      ...bloodLayout,
+      capacity: BLOOD_DECAL_BATCH_CAPACITY,
+      blend: "alpha",
+      renderingGroupId: 0,
+      alphaIndex: -1,
+      zOffset: -2,
+    });
+    this.bloodParticles = new FxBatch("fx_bloodParticles", scene, this.bloodAtlas, {
+      ...bloodLayout,
+      capacity: BLOOD_PARTICLE_BATCH_CAPACITY,
+      blend: "alpha",
+      renderingGroupId: 0,
+      alphaIndex: 1,
+      minSpritePixels: BLOOD_MIST_MIN_PIXELS,
+    });
+    this.blood = new BloodEffects(this.bloodParticles, this.bloodDecals, new HavokBloodWorld(scene, player.physicsBody), environment.sun.direction);
+    // CombatView doesn't expose targets, but CombatSystem does (read-only use, as in AudioDirector).
+    const range = (combat as Partial<{ readonly targets: TargetRange }>).targets;
+    for (const dummy of range?.dummies ?? []) this.bodies.set(dummy.id, dummy.soldier);
+
     this.shotObserver = combat.onShot.add((event) => this.handleShot(event.shot));
     this.weaponObserver = combat.onWeaponEvent.add((event) => this.handleWeaponEvent(event));
     this.impactObserver = combat.onImpact.add((event) =>
-      this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone),
+      this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone, event.targetId),
     );
-    this.damageObserver = combat.onDamage.add((event) => this.handleDamage(event.zone, event.killed, event.point));
+    this.damageObserver = combat.onDamage.add((event) => this.handleDamage(event.zone, event.killed, event.targetId));
     this.renderObserver = scene.onBeforeRenderObservable.add(() => this.afterAnimations());
   }
 
@@ -178,6 +220,9 @@ export class WeaponPresentation {
     this.worldAlpha.dispose();
     this.decalBatch.dispose();
     this.viewmodelAdditive.dispose();
+    this.bloodParticles.dispose();
+    this.bloodDecals.dispose();
+    this.bloodAtlas.dispose();
     this.flash.dispose();
     this.casings.dispose();
     this.atlas.dispose();
@@ -237,13 +282,23 @@ export class WeaponPresentation {
     this.handleWeaponEvent({ type: "dryFire", weaponId: this.viewmodel.weaponId });
   }
 
-  /** Target hit burst + hit sound 4 m in front of the camera. */
-  debugHit(zone: HitZone = "body", killed = false): void {
+  /**
+   * Blood hit (mist, droplets, splatter on whatever is within reach behind it, drip below) plus flesh and
+   * hit-confirm sounds, `distance` m in front of the camera. No body, so no wounds or pool.
+   */
+  debugHit(zone: HitZone = "body", killed = false, distance = 4): void {
     const camera = this.player.camera;
     const forward = camera.getDirection(Vector3.Forward());
-    const point = camera.position.add(forward.scale(4));
-    this.handleImpact(this.viewmodel.weaponId, point, forward.negate(), "target", zone);
-    this.handleDamage(zone, killed, point);
+    const point = camera.position.add(forward.scale(distance));
+    this.handleImpact(this.viewmodel.weaponId, point, forward.negate(), "target", zone, "debug");
+    this.handleDamage(zone, killed, "debug");
+  }
+
+  /** Tweaks the live blood settings (e.g. `{ intensity: 0.5 }`, `{ enabled: false }`) and logs them with pool usage. */
+  debugBlood(settings: Partial<BloodSettings> = {}): void {
+    Object.assign(bloodSettings, settings);
+    if (!bloodSettings.enabled) this.blood.clear();
+    console.info("[blood]", { ...bloodSettings }, this.blood.stats());
   }
 
   // --- Frame steps --------------------------------------------------------------------------------------------------
@@ -278,15 +333,20 @@ export class WeaponPresentation {
     this.worldAlpha.begin();
     this.decalBatch.begin();
     this.viewmodelAdditive.begin();
+    this.bloodParticles.begin();
+    this.bloodDecals.begin();
     this.flash.update(dt, this.muzzle, this.muzzleForward, this.viewmodel.visible);
     this.tracers.update(dt, camera.position, this.combat.projectiles, this.debugProjectiles);
     this.sparks.update(dt);
     this.dust.update(dt);
     this.impacts.update(dt);
+    this.blood.update(dt);
     this.worldAdditive.end();
     this.worldAlpha.end();
     this.decalBatch.end();
     this.viewmodelAdditive.end();
+    this.bloodParticles.end();
+    this.bloodDecals.end();
 
     this.casings.update(dt);
   }
@@ -324,21 +384,36 @@ export class WeaponPresentation {
     }
   }
 
-  private handleImpact(weaponId: WeaponId, point: Vector3, normal: Vector3, surface: "world" | "target", zone: HitZone | null): void {
-    if (surface === "world") this.impacts.world(point, normal, weaponId === "sniper");
-    else this.impacts.target(point, normal, zone);
+  private handleImpact(
+    weaponId: WeaponId,
+    point: Vector3,
+    normal: Vector3,
+    surface: "world" | "target",
+    zone: HitZone | null,
+    targetId: string | null,
+  ): void {
     this.tracers.noteImpact(weaponId, point);
-    if (this.impactSoundsThisFrame < MAX_IMPACT_SOUNDS_PER_FRAME) {
-      this.impactSoundsThisFrame++;
-      this.audio.impact(weaponId, point, normal, surface === "target");
+    let sound = this.impactSoundsThisFrame < MAX_IMPACT_SOUNDS_PER_FRAME;
+    if (surface === "world") {
+      this.impacts.world(point, normal, weaponId === "sniper");
+      if (sound) this.audio.impact(weaponId, point, normal);
+    } else {
+      const id = targetId ?? "";
+      const hitZone = zone ?? "body";
+      // Every shot is the local player's for now, so the bullet came from the camera.
+      this.shotDirection.copyFrom(point).subtractInPlace(this.player.camera.position).normalize();
+      const firstOnTarget = this.blood.hit(id, this.bodies.get(id) ?? null, point, normal, this.shotDirection, hitZone, weaponId === "sniper");
+      sound &&= firstOnTarget;
+      if (sound) this.audio.fleshImpact(weaponId, point, hitZone);
     }
+    if (sound) this.impactSoundsThisFrame++;
   }
 
-  private handleDamage(zone: HitZone, killed: boolean, point: Vector3): void {
+  private handleDamage(zone: HitZone, killed: boolean, targetId: string): void {
     if (this.hitZone === null || HIT_ZONE_RANK[zone] > HIT_ZONE_RANK[this.hitZone]) this.hitZone = zone;
     if (killed) {
       this.hitKilled = true;
-      this.impacts.kill(point);
+      this.blood.kill(targetId);
     }
   }
 
@@ -392,7 +467,7 @@ export class WeaponPresentation {
       if (projectile.distance >= projectile.hitDistance) {
         this.debugProjectiles.splice(i, 1);
         if (projectile.hitDistance < Infinity) {
-          this.handleImpact(projectile.weaponId, projectile.hitPoint, projectile.hitNormal, "world", null);
+          this.handleImpact(projectile.weaponId, projectile.hitPoint, projectile.hitNormal, "world", null, null);
         }
       } else if (projectile.distance > projectile.maxRange) {
         this.debugProjectiles.splice(i, 1);

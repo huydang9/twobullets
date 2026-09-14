@@ -85,8 +85,13 @@ export class AudioDirector {
     if (plan.cues.length > 0) this.weapon.actionCycle(weaponId, plan);
   }
 
-  impact(weaponId: WeaponId, point: Vector3, normal: Vector3, target: boolean): void {
-    this.audio.playImpact({ position: point, normal, weaponId, surface: target ? "flesh" : undefined });
+  impact(weaponId: WeaponId, point: Vector3, normal: Vector3): void {
+    this.audio.playImpact({ position: point, normal, weaponId });
+  }
+
+  /** Bullet into a character; play once per merged hit (shotgun pellets on one target share it). */
+  fleshImpact(weaponId: WeaponId, point: Vector3, zone: HitZone): void {
+    this.audio.playImpact({ position: point, weaponId, surface: "flesh", zone });
   }
 
   hitConfirm(zone: HitZone, killed: boolean): void {

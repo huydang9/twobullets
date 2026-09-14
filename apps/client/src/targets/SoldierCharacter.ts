@@ -1,6 +1,8 @@
-import { Color3, TransformNode, Vector3, type AbstractMesh, type Mesh, type Scene } from "@babylonjs/core";
+import { TransformNode, Vector3, type AbstractMesh, type Mesh, type Scene } from "@babylonjs/core";
+import type { HitZone } from "@twobullets/shared";
 import type { CharacterInstance } from "../assets";
 import type { Damageable, HitboxRegistry } from "../combat/hitboxes";
+import type { BloodBody } from "../fx/BloodEffects";
 import type { Environment } from "../world/environment";
 import { SoldierAnimator, createSoldierMotion, type AirState, type SoldierMotion } from "./SoldierAnimator";
 import { SoldierHitboxes } from "./SoldierHitboxes";
@@ -14,9 +16,6 @@ export interface SoldierCharacterOptions {
   readonly damage?: { readonly registry: HitboxRegistry; readonly owner: Damageable };
 }
 
-const FLASH_SECONDS = 0.08;
-const FLASH_COLOR = new Color3(1, 0.85, 0.8);
-const FLASH_ALPHA = 0.22;
 const FORWARD = new Vector3(0, 0, 1);
 const direction = new Vector3();
 
@@ -26,7 +25,7 @@ const direction = new Vector3();
  * The owner places `root` (feet, yaw about Y; the model faces +Z) and each frame writes `motion`, triggers events
  * (`fire`, `reload`, `hit`, `die`, `revive`), then calls `update(dt)` before `scene.render()`.
  */
-export class SoldierCharacter {
+export class SoldierCharacter implements BloodBody {
   readonly root: TransformNode;
   readonly model: CharacterInstance;
   /** Per-frame locomotion input; mutate in place. */
@@ -34,9 +33,8 @@ export class SoldierCharacter {
   readonly hitboxes: SoldierHitboxes | null;
 
   private readonly animator: SoldierAnimator;
-  private readonly meshes: AbstractMesh[];
   private readonly rifle: Mesh | null = null;
-  private flashTimer = 0;
+  private lives = 0;
 
   constructor(scene: Scene, resources: SoldierResources, environment: Environment, options: SoldierCharacterOptions) {
     const { name, damage } = options;
@@ -47,7 +45,7 @@ export class SoldierCharacter {
     // Keeps the loader's handedness flip on Z.
     this.model.root.scaling.scaleInPlace(scale);
 
-    this.meshes = this.model.meshes.filter((mesh) => mesh.getTotalVertices() > 0);
+    const meshes: AbstractMesh[] = this.model.meshes.filter((mesh) => mesh.getTotalVertices() > 0);
     if (resources.rifle && resources.grip) {
       const holder = new TransformNode(`${name}_rifleGrip`, scene);
       holder.parent = this.model.bones.rightHand;
@@ -56,12 +54,10 @@ export class SoldierCharacter {
       holder.scaling.copyFrom(resources.grip.scaling);
       this.rifle = resources.rifle.clone(`${name}_rifle`, holder, true);
       this.rifle.setEnabled(true);
-      this.meshes.push(this.rifle);
+      meshes.push(this.rifle);
     }
-    for (const mesh of this.meshes) {
+    for (const mesh of meshes) {
       mesh.isPickable = false;
-      mesh.overlayColor = FLASH_COLOR;
-      mesh.overlayAlpha = FLASH_ALPHA;
       environment.addShadowCaster(mesh);
       // PBR materials are lit by the IBL; the hemispheric fill is for non-PBR materials only.
       environment.skyFill.excludedMeshes.push(mesh);
@@ -74,6 +70,15 @@ export class SoldierCharacter {
 
   get dead(): boolean {
     return this.animator.dead;
+  }
+
+  /** Increments on every revive, so per-life decorations (blood) know to go. */
+  get life(): number {
+    return this.lives;
+  }
+
+  get pelvis(): TransformNode {
+    return this.model.bones.hips;
   }
 
   get currentAction(): ActionName | null {
@@ -93,10 +98,9 @@ export class SoldierCharacter {
     this.animator.reload(seconds);
   }
 
-  /** Flinch plus a brief highlight. */
+  /** Upper-body flinch. */
   hit(): void {
     this.animator.hit();
-    this.flashTimer = FLASH_SECONDS;
   }
 
   /**
@@ -112,27 +116,36 @@ export class SoldierCharacter {
       fromBehind = Vector3.Dot(direction, shotDirection) > 0;
     }
     this.animator.die(fromBehind ? "back" : "front");
-    this.flashTimer = FLASH_SECONDS;
     this.hitboxes?.setEnabled(false);
   }
 
   /** Blends back to locomotion; hitboxes stay off until `setHitboxesEnabled(true)` so the owner decides when. */
   revive(): void {
     this.animator.revive();
+    this.lives++;
   }
 
   setHitboxesEnabled(enabled: boolean): void {
     this.hitboxes?.setEnabled(enabled);
   }
 
+  /** Bone under the hitbox of `zone` nearest to a world-space hit point (hitbox pose as of the last render). */
+  woundBone(point: Vector3, zone: HitZone): TransformNode | null {
+    let best: TransformNode | null = null;
+    let bestDistance = Infinity;
+    for (const part of this.hitboxes?.parts ?? []) {
+      if (part.zone !== zone) continue;
+      const distance = Vector3.DistanceSquared(part.node.position, point);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = part.bone;
+      }
+    }
+    return best;
+  }
+
   update(dt: number): void {
     this.animator.update(dt);
-    if (this.flashTimer > 0) {
-      // Shared PBR materials stay untouched; the overlay is a per-mesh tint pass.
-      const on = this.flashTimer > dt;
-      this.flashTimer = on ? this.flashTimer - dt : 0;
-      for (const mesh of this.meshes) mesh.renderOverlay = on;
-    }
   }
 
   dispose(): void {
