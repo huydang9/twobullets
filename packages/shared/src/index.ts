@@ -21,3 +21,4 @@ export * from "./tickClock";
 export * from "./hitreg/index";
 export * from "./bots/index";
 export * from "./match/types";
+export * from "./match/index";
