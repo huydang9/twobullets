@@ -1,9 +1,12 @@
 import { Color3, Constants, Mesh, Scene, ShaderMaterial, Vector2, Vector3, VertexData, type Camera, type Texture } from "@babylonjs/core";
 import { SMOKE, SMOKE_PUFF_STRIDE, smokePuffs, type SmokeCloud, type Vec3 } from "@twobullets/shared";
 import type { Environment } from "../../world/environment";
-import { EqCell } from "./equipmentAtlas";
-import { EQ_ALPHA_INDEX, SpriteRecord, type EquipmentFx } from "./fxPools";
+import { EQ_ALPHA_INDEX, type EquipmentFx } from "./fxPools";
 import { TICK_SECONDS, type EquipmentFxSettings } from "./support";
+import { aces } from "./vfxLighting";
+import { VFX_SHEETS } from "./vfxManifest";
+import { VfxRecord } from "./VfxParticles";
+import { VfxRandom } from "./vfxRandom";
 
 /** Clouds drawn at once (nearest first when there are more). */
 export const MAX_SMOKE_CLOUDS = 16;
@@ -20,6 +23,12 @@ const SUPPORT = 1.25;
 const SNAPSHOT_SECONDS = 0.1;
 const SMOKE_ALBEDO = 0.72;
 const FORWARD = new Vector3(0, 0, 1);
+/** Flipbook sprites per gameplay puff on High (10 puffs → 200 per grenade, plus ≤ ~35 canister jet particles). */
+const SPRITES_PER_PUFF = 20;
+const LAYOUT_STRIDE = 7;
+const CLOUD = VFX_SHEETS.smokeCloud;
+/** Clouds farther than this draw half their sprites (bigger, so coverage holds). */
+const LOD_DISTANCE = 90;
 
 const SHARED_GLSL = /* glsl */ `
 uniform vec3 cameraPosition;
@@ -37,7 +46,7 @@ const float EXTINCTION = ${SMOKE.extinction.toFixed(4)};
 const float SUPPORT = ${SUPPORT.toFixed(4)};
 
 // Analytic optical depth of one soft puff along a ray, clipped to the camera and the cloud's ground plane.
-// puff: centre xyz, rendered radius. info: density, floor y, seed, unused.
+// puff: centre xyz, rendered radius. info: density, floor y, seed, weight (inside pass fade-in; 1 for billboards).
 void integratePuff(vec3 ro, vec3 rd, vec4 puff, vec4 info, inout float tau, inout vec3 light, inout float firstHit) {
   float radius = puff.w;
   vec3 oc = ro - puff.xyz;
@@ -81,7 +90,7 @@ void integratePuff(vec3 ro, vec3 rd, vec4 puff, vec4 info, inout float tau, inou
   float n = texture2D(noiseTex, uvA).r * 0.55 + texture2D(noiseTex, uvB).g * 0.45;
   float core = clamp(integral / (1.3333 * radius) * 1.6, 0.0, 1.0);
   float erosion = mix(0.2 + 1.3 * n, 0.8 + 0.4 * n, core);
-  depth = EXTINCTION * info.x * (1.5 / SUPPORT) * integral * erosion;
+  depth = EXTINCTION * info.x * info.w * (1.5 / SUPPORT) * integral * erosion;
 
   // Fake single scattering: sun side of the puff brighter, bottom of the cloud tinted by the ground bounce.
   vec3 normal = (mid - puff.xyz) / radius;
@@ -212,6 +221,10 @@ class SmokeVisual {
   ageB = -1;
   count = 0;
   emitTimer = 0;
+  /** Seeded sprite layout per puff: offset xyz (unit sphere), size factor, rotation, spin, frame offset. */
+  readonly layout = new Float32Array(PUFFS * SPRITES_PER_PUFF * LAYOUT_STRIDE);
+  /** This frame's inside-pass weight per puff (0 = camera outside). */
+  readonly insideWeight = new Float32Array(PUFFS);
   /** Mutable stand-in for re-deriving puffs at an arbitrary age without allocating. */
   readonly probe: { id: number; base: Vec3; seed: number; age: number; driftX: number; driftZ: number; extents: readonly number[] } = {
     id: 0,
@@ -225,22 +238,23 @@ class SmokeVisual {
 }
 
 /**
- * Smoke grenade clouds as analytic volumetric impostors that render exactly the seeded puff cluster the gameplay tests
- * sight against (smokePuffs / smokeTransmittance), so smoke blocks the view from outside, from inside and through
- * scopes alike.
+ * Smoke grenade clouds that render exactly the seeded puff cluster the gameplay tests sight against (smokePuffs /
+ * smokeTransmittance), so the visual volume grows, drifts and fades with the shared rules (radius → smokeRadius(t)).
  *
- * Technique: one camera-facing quad per puff (thin instances, depth-sorted back to front) whose fragment shader
- * intersects the view ray with the puff sphere and integrates a soft density profile in closed form: no ray march.
- * Two drifting noise taps erode the rim. The quad sits at the sphere's front depth, so walls in front hide it, and the
- * ray is clipped against the cloud's ground plane, so the ground contact is soft without a scene depth pass. Puffs
- * containing the camera are summed in a single fullscreen pass. Lighting is precomputed from the sun and sky fill into
- * display-space colors (the FX shaders write after tone mapping), so smoke is lit and never glows.
+ * Seen from outside, each puff is a seeded cluster of Cloud01 flipbook sprites (docs/fx-throwables.md): one wide core
+ * sprite plus ~19 around it inside the puff sphere, slowly orbiting and animating, depth-sorted back to front with the
+ * other smoke in one draw call. Their tint is the sun/sky lighting in display space (sun side brighter, underside
+ * ground-bounced), divided by the sheet's baked brightness. Soft particles fade against the cloud's ground plane and
+ * near the camera instead of sampling scene depth (no depth prepass). As the density fades over the last seconds the
+ * sprites spread and thin out. Core sprites are near opaque, so a player inside a grown cloud is hidden from outside.
  *
- * Cost (1440p, M2 Pro class GPU): ~12 ALU + 2 texture taps per covered pixel per overlapping puff. From outside a
- * cloud typically covers a third of the screen ~4 puffs deep (~5M fragments, ≈0.5 ms); standing inside is one
- * fullscreen pass over ≤16 puffs (3.7M fragments × 16 closed-form intersections, ≈1–1.5 ms). A raymarched volume
- * with a scene depth prepass would cost a full extra geometry pass on Map v1 plus 16–32 taps per pixel; layered
- * sprites need 50+ fullscreen layers inside the cloud and still pop at the near plane.
+ * With the camera inside a puff, its sprites fade (they would be fullscreen layers) and the analytic volume takes over:
+ * one fullscreen pass integrates the same soft density in closed form for up to 16 puffs, weighted in by how deep the
+ * camera is, so walking in never pops. `settings.smokeDebug` draws the gameplay spheres (magenta) as analytic
+ * billboards instead of sprites.
+ *
+ * Cost (1080p, M2 Pro class GPU): a grown cloud at 20 m covers about a third of the screen ~8 sprites deep with two
+ * texture taps per fragment (≈5M fragments, ~0.5 ms); inside, one fullscreen closed-form pass (≈1 ms at 1440p).
  */
 export class SmokeRenderer {
   private readonly visuals = Array.from({ length: MAX_SMOKE_CLOUDS }, () => new SmokeVisual());
@@ -256,23 +270,26 @@ export class SmokeRenderer {
   private readonly distances = new Float32Array(MAX_PUFFS);
   private readonly puffVisual = new Int32Array(MAX_PUFFS);
   private readonly puffIndex = new Int32Array(MAX_PUFFS);
+  private readonly random = new VfxRandom(0x5304e);
   private frame = 0;
   private time = 0;
-  /** Puffs drawn last frame (billboards, inside), for stats. */
+  /** Puffs drawn last frame (analytic billboards in debug mode, inside pass), and flipbook sprites, for stats. */
   drawnPuffs = 0;
   insidePuffs = 0;
+  drawnSprites = 0;
 
   private readonly sunDirection = new Vector3();
   private readonly litColor = new Color3();
   private readonly shadeColor = new Color3();
   private readonly bottomColor = new Color3();
-  private readonly wispColor = new Color3();
+  private readonly jetColor = new Color3();
+  private readonly spriteColor = new Color3();
   private readonly right = new Vector3();
   private readonly up = new Vector3();
   private readonly forward = new Vector3();
-  private readonly tmp = new Vector3();
   private readonly tanHalfFov = new Vector2();
-  private readonly billow = new SpriteRecord();
+  private readonly sprite = new VfxRecord();
+  private readonly lightingKey = new Float64Array(9);
 
   constructor(
     private readonly scene: Scene,
@@ -308,12 +325,14 @@ export class SmokeRenderer {
       noise,
     );
     this.setupMesh(this.inside, this.insideMaterial, EQ_ALPHA_INDEX.smoke + 0.5);
+    this.sprite.additive = 0;
     this.refreshLighting();
   }
 
-  /** Recomputes the display-space smoke colors from the sun and sky fill (call after lighting changes). */
+  /** Recomputes the display-space smoke and VFX colors from the sun and sky fill (automatic when they change). */
   refreshLighting(): void {
     const { sun, skyFill } = this.environment;
+    this.fx.vfx.lighting.refresh(sun, skyFill, this.scene);
     this.sunDirection.copyFrom(sun.direction).scaleInPlace(-1).normalize();
     const exposure = this.scene.imageProcessingConfiguration.exposure;
     const sr = sun.diffuse.r * sun.intensity;
@@ -328,9 +347,38 @@ export class SmokeRenderer {
     displayColor(this.litColor, SMOKE_ALBEDO * exposure, sr * 0.85 + ar, sg * 0.85 + ag, sb * 0.85 + ab);
     displayColor(this.shadeColor, SMOKE_ALBEDO * exposure, sr * 0.15 + ar, sg * 0.15 + ag, sb * 0.15 + ab);
     displayColor(this.bottomColor, SMOKE_ALBEDO * exposure, ar * 0.6 + gr * 0.35, ag * 0.6 + gg * 0.35, ab * 0.6 + gb * 0.35);
-    Color3.LerpToRef(this.shadeColor, this.litColor, 0.6, this.wispColor);
-    this.billow.color.copyFrom(this.wispColor);
-    this.billow.cell = EqCell.smoke;
+    Color3.LerpToRef(this.shadeColor, this.litColor, 0.6, this.jetColor);
+    this.jetColor.scaleInPlace(1 / CLOUD.meanLuma);
+  }
+
+  /** True when the sun, sky fill or exposure differ from the last refresh (compares fields, so nothing is boxed). */
+  private lightingChanged(): boolean {
+    const { sun, skyFill } = this.environment;
+    const k = this.lightingKey;
+    const exposure = this.scene.imageProcessingConfiguration.exposure;
+    if (
+      k[0] === sun.intensity &&
+      k[1] === sun.direction.x &&
+      k[2] === sun.direction.y &&
+      k[3] === sun.direction.z &&
+      k[4] === sun.diffuse.r + sun.diffuse.g * 3 + sun.diffuse.b * 7 &&
+      k[5] === skyFill.intensity &&
+      k[6] === skyFill.diffuse.r + skyFill.diffuse.g * 3 + skyFill.diffuse.b * 7 &&
+      k[7] === skyFill.groundColor.r + skyFill.groundColor.g * 3 + skyFill.groundColor.b * 7 &&
+      k[8] === exposure
+    ) {
+      return false;
+    }
+    k[0] = sun.intensity;
+    k[1] = sun.direction.x;
+    k[2] = sun.direction.y;
+    k[3] = sun.direction.z;
+    k[4] = sun.diffuse.r + sun.diffuse.g * 3 + sun.diffuse.b * 7;
+    k[5] = skyFill.intensity;
+    k[6] = skyFill.diffuse.r + skyFill.diffuse.g * 3 + skyFill.diffuse.b * 7;
+    k[7] = skyFill.groundColor.r + skyFill.groundColor.g * 3 + skyFill.groundColor.b * 7;
+    k[8] = exposure;
+    return true;
   }
 
   get activeClouds(): number {
@@ -361,7 +409,10 @@ export class SmokeRenderer {
 
   render(dt: number): void {
     this.time += dt;
+    // Explosions and fire read the same lighting (fx.vfx.lighting), so this runs with or without clouds.
+    if (this.lightingChanged()) this.refreshLighting();
     const enabled = this.settings.smoke;
+    const debug = this.settings.smokeDebug;
     let puffCount = 0;
     const camera = this.camera.globalPosition;
     const visuals = this.visuals;
@@ -373,6 +424,7 @@ export class SmokeRenderer {
         continue;
       }
       this.refreshPuffs(visual);
+      visual.insideWeight.fill(0);
       if (!enabled) continue;
       this.emit(visual, dt);
       for (let k = 0; k < visual.count; k++) {
@@ -405,7 +457,7 @@ export class SmokeRenderer {
     const nearClip = this.camera.minZ;
     let billboards = 0;
     let inside = 0;
-    // Nearest puffs are last; the ones around the camera go to the fullscreen pass.
+    // Nearest puffs are last; the ones around the camera go to the fullscreen pass, weighted in by depth.
     for (let n = puffCount - 1; n >= 0; n--) {
       const p = order[n]!;
       const visual = this.visuals[this.puffVisual[p]!]!;
@@ -413,27 +465,37 @@ export class SmokeRenderer {
       const radius = visual.puffs[o + 3]! * SUPPORT;
       const within = radius + nearClip * 4;
       if (inside < MAX_INSIDE && distances[p]! < within * within) {
-        this.writePuff(this.insideA, this.insideB, inside * 4, visual, o);
+        const weight = debug ? 1 : smoothstep(within, radius * 0.7, Math.sqrt(distances[p]!));
+        visual.insideWeight[o / SMOKE_PUFF_STRIDE] = weight;
+        this.writePuff(this.insideA, this.insideB, inside * 4, visual, o, weight);
         this.puffVisual[p] = -1;
         inside++;
       }
     }
-    for (let n = 0; n < puffCount; n++) {
-      const p = order[n]!;
-      if (this.puffVisual[p]! < 0) continue;
-      const visual = this.visuals[this.puffVisual[p]!]!;
-      const o = this.puffIndex[p]!;
-      this.writePuff(this.bufferA, this.bufferB, billboards * 4, visual, o);
-      billboards++;
+    if (debug) {
+      for (let n = 0; n < puffCount; n++) {
+        const p = order[n]!;
+        if (this.puffVisual[p]! < 0) continue;
+        const visual = this.visuals[this.puffVisual[p]!]!;
+        this.writePuff(this.bufferA, this.bufferB, billboards * 4, visual, this.puffIndex[p]!, 1);
+        billboards++;
+      }
+    }
+    let sprites = 0;
+    if (enabled && !debug) {
+      for (let v = 0; v < visuals.length; v++) {
+        const visual = visuals[v]!;
+        if (visual.active && visual.seenFrame === this.frame) sprites += this.drawSprites(visual);
+      }
     }
     this.drawnPuffs = billboards;
     this.insidePuffs = inside;
+    this.drawnSprites = sprites;
 
-    const visible = billboards > 0 || inside > 0;
     this.billboards.thinInstanceCount = billboards;
     this.billboards.isVisible = billboards > 0;
     this.inside.isVisible = inside > 0;
-    if (!visible) return;
+    if (billboards === 0 && inside === 0) return;
     this.updateUniforms(this.billboardMaterial);
     if (billboards > 0) {
       this.billboards.thinInstanceBufferUpdated("smokeA");
@@ -529,7 +591,101 @@ export class SmokeRenderer {
     probe.id = cloud.id;
     probe.base = cloud.base;
     probe.seed = cloud.seed;
+    this.layoutSprites(slot, cloud.seed);
     return slot;
+  }
+
+  /** Seeded from the cloud, so every client lays out the same sprites. Sprite 0 of each puff is its wide core. */
+  private layoutSprites(visual: SmokeVisual, seed: number): void {
+    const r = this.random.reseed(seed ^ 0x9e3779b9);
+    const layout = visual.layout;
+    for (let k = 0; k < PUFFS; k++) {
+      for (let j = 0; j < SPRITES_PER_PUFF; j++) {
+        const l = (k * SPRITES_PER_PUFF + j) * LAYOUT_STRIDE;
+        const u = r.signed();
+        const phi = r.next() * Math.PI * 2;
+        const ring = Math.sqrt(1 - u * u);
+        // Biased toward the rim, where sprites shape the silhouette.
+        const reach = j === 0 ? 0 : 0.35 + 0.65 * Math.cbrt(r.next());
+        layout[l] = Math.cos(phi) * ring * reach;
+        layout[l + 1] = u * reach;
+        layout[l + 2] = Math.sin(phi) * ring * reach;
+        layout[l + 3] = j === 0 ? 0.95 : r.range(0.5, 0.8);
+        // Small rotations only: the flipbook's lighting is baked from the upper left.
+        layout[l + 4] = r.signed() * 0.7;
+        layout[l + 5] = r.signed() * 0.03;
+        layout[l + 6] = r.next() * CLOUD.frames;
+      }
+    }
+  }
+
+  /** Pushes a cloud's flipbook sprites; returns how many. */
+  private drawSprites(visual: SmokeVisual): number {
+    const vfx = this.fx.vfx;
+    const batch = vfx.smokeBatch;
+    const camera = this.camera.globalPosition;
+    const dx = visual.base.x - camera.x;
+    const dz = visual.base.z - camera.z;
+    const far = dx * dx + dz * dz > LOD_DISTANCE * LOD_DISTANCE;
+    const high = vfx.count(SPRITES_PER_PUFF, 6);
+    const perPuff = far ? Math.ceil(high / 2) : high;
+    const sizeBoost = far ? 1.2 : 1;
+    const toSun = this.sunDirection;
+    const floorY = visual.base.y - 0.1;
+    const fadeLeft = SMOKE.lifetime - visual.age;
+    // Over the last seconds the sprites drift apart, grow and thin (the density fade itself comes from the rules).
+    const dissipate = fadeLeft < SMOKE.fadeSeconds ? 1 - Math.max(0, fadeLeft) / SMOKE.fadeSeconds : 0;
+    const time = this.time;
+    const sprite = this.sprite;
+    const color = this.spriteColor;
+    const invLuma = 1 / CLOUD.meanLuma;
+    let drawn = 0;
+    for (let k = 0; k < visual.count; k++) {
+      const o = k * SMOKE_PUFF_STRIDE;
+      const density = visual.puffs[o + 4]!;
+      if (density < 0.01) continue;
+      const cx = visual.puffs[o]!;
+      const cy = visual.puffs[o + 1]!;
+      const cz = visual.puffs[o + 2]!;
+      const radius = visual.puffs[o + 3]!;
+      const spread = radius * (0.72 + 0.3 * dissipate);
+      const visibility = density * (1 - 0.7 * visual.insideWeight[k]!);
+      if (visibility < 0.01) continue;
+      for (let j = 0; j < perPuff; j++) {
+        const l = (k * SPRITES_PER_PUFF + j) * LAYOUT_STRIDE;
+        const layout = visual.layout;
+        const ox = layout[l]!;
+        const oy = layout[l + 1]!;
+        const oz = layout[l + 2]!;
+        const spin = layout[l + 5]!;
+        const angle = time * spin * 4;
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        const rx = ox * c - oz * s;
+        const rz = ox * s + oz * c;
+        const x = cx + rx * spread;
+        const y = cy + oy * spread * 0.75;
+        const z = cz + rz * spread;
+        // Sun side brighter, underside picks up the ground bounce.
+        const sun = Math.min(1, Math.max(0, (rx * toSun.x + oy * toSun.y + rz * toSun.z) * 0.5 + 0.55));
+        const height = Math.min(1, Math.max(0, (y - floorY) / 4));
+        const mixUp = 0.4 + 0.6 * height;
+        color.r = (this.bottomColor.r + (this.shadeColor.r + (this.litColor.r - this.shadeColor.r) * sun - this.bottomColor.r) * mixUp) * invLuma;
+        color.g = (this.bottomColor.g + (this.shadeColor.g + (this.litColor.g - this.shadeColor.g) * sun - this.bottomColor.g) * mixUp) * invLuma;
+        color.b = (this.bottomColor.b + (this.shadeColor.b + (this.litColor.b - this.shadeColor.b) * sun - this.bottomColor.b) * mixUp) * invLuma;
+        const half = radius * layout[l + 3]! * (1 + 0.35 * dissipate) * sizeBoost;
+        sprite.position.set(x, y, z);
+        sprite.axis.set(floorY, 0.9, half * 0.9);
+        sprite.drawSize = half;
+        sprite.rotation = layout[l + 4]! + angle * 0.5;
+        sprite.frame = (layout[l + 6]! + time * CLOUD.fps * (0.8 + 0.4 * Math.abs(spin) * 33)) % CLOUD.frames;
+        sprite.color.copyFrom(color);
+        sprite.drawAlpha = visibility * (j === 0 ? 0.95 : 0.85) * (1 - 0.35 * dissipate);
+        batch.push(sprite);
+        drawn++;
+      }
+    }
+    return drawn;
   }
 
   /** Keeps two snapshots of the shared puff function bracketing the render age. */
@@ -558,7 +714,7 @@ export class SmokeRenderer {
     visual.count = smokePuffs(visual.probe, visual.puffsB);
   }
 
-  private writePuff(a: Float32Array | number[], b: Float32Array | number[], offset: number, visual: SmokeVisual, o: number): void {
+  private writePuff(a: Float32Array | number[], b: Float32Array | number[], offset: number, visual: SmokeVisual, o: number, weight: number): void {
     const puffs = visual.puffs;
     a[offset] = puffs[o]!;
     a[offset + 1] = puffs[o + 1]!;
@@ -567,59 +723,41 @@ export class SmokeRenderer {
     b[offset] = puffs[o + 4]!;
     b[offset + 1] = visual.base.y - 0.25;
     b[offset + 2] = visual.seed + o * 0.137;
-    b[offset + 3] = 0;
+    b[offset + 3] = weight;
   }
 
-  /** Canister jet while the cloud builds, and slow rim billows that break up the silhouette. */
+  /** Canister jet while the cloud builds: flipbook puffs spraying out of the grenade. */
   private emit(visual: SmokeVisual, dt: number): void {
-    const age = visual.age;
-    if (age < SMOKE.growSeconds + 1) {
-      visual.emitTimer -= dt;
-      while (visual.emitTimer <= 0) {
-        visual.emitTimer += 0.05;
-        const p = this.fx.alpha.spawn();
-        p.position.set(visual.base.x, visual.base.y + 0.08, visual.base.z);
-        const angle = Math.random() * Math.PI * 2;
-        const out = 1.5 + Math.random() * 2.5;
-        p.velocity.set(Math.cos(angle) * out, 1.2 + Math.random() * 2.2, Math.sin(angle) * out);
-        p.life = 1.4 + Math.random() * 1.2;
-        p.size0 = 0.15;
-        p.size1 = 1.3 + Math.random() * 0.9;
-        p.drag = 1.6;
-        p.gravity = -0.15;
-        p.cell = EqCell.smoke;
-        p.rotation = Math.random() * Math.PI * 2;
-        p.spin = (Math.random() - 0.5) * 0.6;
-        p.color.copyFrom(this.wispColor);
-        p.alpha = 0.55;
-        p.fadePower = 1.2;
-      }
-    }
-    // Two billows per puff hugging the silhouette, rotating slowly.
-    const camera = this.camera.globalPosition;
-    for (let k = 0; k < visual.count; k++) {
-      const o = k * SMOKE_PUFF_STRIDE;
-      const density = visual.puffs[o + 4]!;
-      if (density < 0.02) continue;
-      const cx = visual.puffs[o]!;
-      const cy = visual.puffs[o + 1]!;
-      const cz = visual.puffs[o + 2]!;
-      const radius = visual.puffs[o + 3]!;
-      this.tmp.set(camera.x - cx, 0, camera.z - cz);
-      const flat = Math.sqrt(this.tmp.x * this.tmp.x + this.tmp.z * this.tmp.z) || 1;
-      const sx = -this.tmp.z / flat;
-      const sz = this.tmp.x / flat;
-      for (let i = 0; i < 2; i++) {
-        const phase = visual.seed * 17 + k * 2.3 + i * 3.1 + this.time * 0.05;
-        const side = Math.cos(phase) * radius * 0.95;
-        const lift = Math.sin(phase) * radius * 0.7;
-        const billow = this.billow;
-        billow.position.set(cx + sx * side, cy + lift, cz + sz * side);
-        billow.drawSize = radius * 0.75;
-        billow.rotation = phase * 0.4;
-        billow.drawAlpha = 0.45 * density;
-        this.fx.alphaBatch.spriteFrom(billow);
-      }
+    if (visual.age >= SMOKE.growSeconds + 1 || this.settings.smokeDebug) return;
+    const vfx = this.fx.vfx;
+    const r = this.random;
+    visual.emitTimer -= dt;
+    const interval = 0.08 / vfx.quality;
+    while (visual.emitTimer <= 0) {
+      visual.emitTimer += interval;
+      const p = vfx.smoke.spawn();
+      p.position.set(visual.base.x, visual.base.y + 0.1, visual.base.z);
+      const angle = r.next() * Math.PI * 2;
+      const out = r.range(1.5, 4);
+      p.velocity.set(Math.cos(angle) * out, r.range(1.2, 3.4), Math.sin(angle) * out);
+      p.life = r.range(1.6, 2.6);
+      p.size0 = 0.2;
+      p.size1 = r.range(1.2, 1.9);
+      p.growPower = 2;
+      p.drag = 1.6;
+      p.gravity = -0.15;
+      p.frame0 = r.next() * CLOUD.frames;
+      p.frameRate = CLOUD.fps * 2;
+      p.frameCount = CLOUD.frames;
+      p.rotation = r.signed() * 0.7;
+      p.spin = r.signed() * 0.3;
+      p.color.copyFrom(this.jetColor);
+      p.alpha = 0.6;
+      p.fadeIn = 0.1;
+      p.fadePower = 1.2;
+      p.floorY = visual.base.y - 0.1;
+      p.softness = 0.5;
+      p.nearFade = 1;
     }
   }
 }
@@ -629,7 +767,7 @@ function displayColor(result: Color3, scale: number, r: number, g: number, b: nu
   result.set(aces(r * scale), aces(g * scale), aces(b * scale));
 }
 
-function aces(x: number): number {
-  const mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-  return Math.pow(Math.min(1, Math.max(0, mapped)), 1 / 2.2);
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }

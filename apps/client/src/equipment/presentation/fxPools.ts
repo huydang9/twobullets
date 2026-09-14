@@ -3,6 +3,8 @@ import { FxBatch, type FxDecal, type FxSprite } from "../../fx/FxBatch";
 import { ParticlePool } from "../../fx/ParticlePool";
 import { VIEWMODEL_RENDERING_GROUP } from "../../viewmodel/renderGroups";
 import { EQ_ATLAS_COLUMNS, EQ_ATLAS_ROWS } from "./equipmentAtlas";
+import { VFX_CAPS, VfxLibrary } from "./VfxLibrary";
+import { VfxRandom, coneToRef } from "./vfxRandom";
 
 /** Pool caps (see docs in the final report): particles recycle the oldest, decals overwrite the oldest. */
 export const EQ_POOL_CAPS = {
@@ -13,6 +15,7 @@ export const EQ_POOL_CAPS = {
   alphaSprites: 900,
   viewmodelSprites: 24,
   arcSprites: 128,
+  vfx: VFX_CAPS,
 } as const;
 
 /**
@@ -39,15 +42,21 @@ class TimedDecal implements FxDecal {
   size = 0;
 }
 
-/** Ring buffer of timed surface decals (scorch, burn, scuff) drawn through one FxBatch. */
+/** Anything that draws DecalStore records: the atlas FxBatch or a flipbook VfxBatch. */
+export interface DecalSink {
+  decalFrom(decal: FxDecal): void;
+}
+
+/** Ring buffer of timed surface decals (scorch, burn, scuff) drawn through one batch. */
 export class DecalStore {
   private readonly decals: TimedDecal[];
+  private readonly random = new VfxRandom(0xdeca1);
   private next = 0;
   private time = 0;
 
   constructor(
     capacity: number,
-    private readonly batch: FxBatch,
+    private readonly batch: DecalSink,
   ) {
     this.decals = Array.from({ length: capacity }, () => new TimedDecal());
   }
@@ -58,7 +67,7 @@ export class DecalStore {
     decal.position.copyFrom(normal).scaleInPlace(0.01).addInPlace(position);
     decal.normal.copyFrom(normal);
     decal.size = halfSize;
-    decal.rotation = Math.random() * Math.PI * 2;
+    decal.rotation = this.random.next() * Math.PI * 2;
     decal.cell = cell;
     decal.color.copyFrom(color);
     decal.baseAlpha = alpha;
@@ -99,7 +108,11 @@ export class DecalStore {
   }
 }
 
-/** The batches, particle pools and decals every equipment effect draws through. One begin/end per frame. */
+/**
+ * The batches, particle pools and decals every equipment effect draws through. One begin/end per frame. The atlas
+ * batches (procedural `equipmentAtlas`) serve the hands, grenades in flight and the throw arc; detonations, smoke and
+ * fire draw through the flipbook library (`vfx`) and its lit scorch decals.
+ */
 export class EquipmentFx {
   readonly decalBatch: FxBatch;
   readonly alphaBatch: FxBatch;
@@ -110,6 +123,9 @@ export class EquipmentFx {
   readonly additive: ParticlePool;
   readonly alpha: ParticlePool;
   readonly decals: DecalStore;
+  readonly vfx: VfxLibrary;
+  /** Lit burned-ground decals (frag blast marks, molotov burns) on `vfx.decalBatch`. */
+  readonly scorch: DecalStore;
 
   constructor(scene: Scene, atlas: Texture) {
     const layout = { atlasColumns: EQ_ATLAS_COLUMNS, atlasRows: EQ_ATLAS_ROWS, textureColor: true } as const;
@@ -121,6 +137,8 @@ export class EquipmentFx {
     this.additive = new ParticlePool(EQ_POOL_CAPS.additiveParticles, this.additiveBatch);
     this.alpha = new ParticlePool(EQ_POOL_CAPS.alphaParticles, this.alphaBatch);
     this.decals = new DecalStore(EQ_POOL_CAPS.decals, this.decalBatch);
+    this.vfx = new VfxLibrary(scene);
+    this.scorch = new DecalStore(VFX_CAPS.decals, this.vfx.decalBatch);
   }
 
   begin(): void {
@@ -129,6 +147,7 @@ export class EquipmentFx {
     this.additiveBatch.begin();
     this.viewmodelBatch.begin();
     this.arcBatch.begin();
+    this.vfx.begin();
   }
 
   /** Steps pooled particles and decals into the batches (renderers push their own sprites between begin and end). */
@@ -136,6 +155,8 @@ export class EquipmentFx {
     this.additive.update(dt);
     this.alpha.update(dt);
     this.decals.update(dt);
+    this.vfx.step(dt);
+    this.scorch.update(dt);
   }
 
   end(): void {
@@ -144,16 +165,20 @@ export class EquipmentFx {
     this.additiveBatch.end();
     this.viewmodelBatch.end();
     this.arcBatch.end();
+    this.vfx.end();
   }
 
   clear(): void {
     this.additive.clear();
     this.alpha.clear();
     this.decals.clear();
+    this.vfx.clear();
+    this.scorch.clear();
   }
 
   dispose(): void {
     for (const batch of [this.decalBatch, this.alphaBatch, this.additiveBatch, this.viewmodelBatch, this.arcBatch]) batch.dispose();
+    this.vfx.dispose();
   }
 }
 
@@ -171,16 +196,9 @@ export class SpriteRecord implements FxSprite {
   hot = 0;
 }
 
-/** Random unit vector in a cone around `axis` (spread 0 = along it, ~1.5 = nearly flat). */
-export function randomCone(axis: Vector3, spread: number, result: Vector3, tangent: Vector3, bitangent: Vector3): Vector3 {
-  const reference = Math.abs(axis.y) < 0.95 ? Vector3.UpReadOnly : Vector3.RightReadOnly;
-  Vector3.CrossToRef(reference, axis, tangent);
-  tangent.normalize();
-  Vector3.CrossToRef(axis, tangent, bitangent);
-  const angle = Math.random() * Math.PI * 2;
-  const radius = Math.random() * spread;
-  const c = Math.cos(angle) * radius;
-  const s = Math.sin(angle) * radius;
-  result.set(axis.x + tangent.x * c + bitangent.x * s, axis.y + tangent.y * c + bitangent.y * s, axis.z + tangent.z * c + bitangent.z * s);
-  return result.normalize();
+const coneRandom = new VfxRandom(0xc0de);
+
+/** Random unit vector in a cone around `axis` (spread 0 = along it, ~1.5 = nearly flat). Pass `random` for seeded variation. */
+export function randomCone(axis: Vector3, spread: number, result: Vector3, tangent: Vector3, bitangent: Vector3, random: VfxRandom = coneRandom): Vector3 {
+  return coneToRef(axis, spread, random, result, tangent, bitangent);
 }

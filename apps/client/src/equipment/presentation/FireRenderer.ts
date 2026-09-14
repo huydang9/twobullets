@@ -1,23 +1,29 @@
 import { Color3, Vector3, type Camera } from "@babylonjs/core";
 import { FIRE, FIRE_CELL_STRIDE, type FirePatch } from "@twobullets/shared";
-import { EqCell, FLAME_FRAMES } from "./equipmentAtlas";
-import { SpriteRecord, type EquipmentFx } from "./fxPools";
+import type { EquipmentFx } from "./fxPools";
 import { TICK_SECONDS, type EquipmentFxSettings, type EquipmentLights } from "./support";
+import { VfxMode } from "./VfxBatch";
+import { PCell, ScorchCell } from "./VfxLibrary";
+import { VFX_SHEETS } from "./vfxManifest";
+import { VfxRecord } from "./VfxParticles";
+import { VfxRandom } from "./vfxRandom";
 
 export const MAX_FIRE_PATCHES = 12;
 const MAX_CELLS = FIRE.maxCells;
-const TONGUES_PER_CELL = 3;
-/** Flames drawn per frame across all patches (the additive batch has room for embers and explosions too). */
-const MAX_TONGUES = 600;
+/** Flame billboards per burning cell on High (Balanced and Performance draw fewer). */
+const FLAMES_PER_CELL = 3;
+/** Flames drawn per frame across all patches. */
+const MAX_FLAMES = 600;
 const GROW_SECONDS = 0.35;
 const DIE_SECONDS = 1.6;
 const BURN_MARK_SECONDS = 28;
 
-const FLAME = new Color3(1, 1, 1);
-const BASE_GLOW = Color3.FromHexString("#ff7a22");
-const EMBER = Color3.FromHexString("#ff9d42");
-const SMOKE = Color3.FromHexString("#3a3632");
-const BURN = new Color3(1, 1, 1);
+const FLAME = VFX_SHEETS.flame;
+const WISPY = VFX_SHEETS.smokeWispy;
+const FLAME_TINT = new Color3(1.3, 1.12, 1.0);
+const BASE_GLOW = new Color3(1, 0.42, 0.12);
+const EMBER = new Color3(2, 1.05, 0.4);
+const WHITE = new Color3(1, 1, 1);
 const UP = new Vector3(0, 1, 0);
 
 class FireVisual {
@@ -36,31 +42,43 @@ class FireVisual {
 }
 
 /**
- * Molotov fire patches on their gameplay grid cells: per burning cell a few camera-facing flame tongues (vertical
- * ribbons, so they stand up even when seen from above) animated from a 6-frame procedural flipbook, a ground glow,
- * rising embers and a dark smoke plume, plus a charred burn decal per cell that outlives the fire. Ignition and
- * burn-out follow the cells' igniteAt/dieAt, with render-time ages interpolated between ticks. The nearest patches
- * get a flickering point light. Heat distortion is omitted: it needs a scene color copy every frame.
+ * Molotov fire patches on their gameplay grid cells (docs/fx-throwables.md): per burning cell a few upright Flame03
+ * flipbook billboards (they turn about world up, so they stand even when seen from above), spread and jittered over
+ * the 1 m cell so the whole shared fire area reads as burning, each on its own frame offset and speed with a swaying
+ * tip; an additive ground glow; rising ember streaks; a dark WispySmoke plume drifting off the top; and a lit
+ * burned-ground decal per cell that outlives the fire. Ignition and burn-out follow the cells' igniteAt/dieAt, with
+ * render-time ages interpolated between ticks. The nearest patches get a flickering point light. Heat distortion is
+ * omitted: it needs a scene color copy every frame.
  */
 export class FireRenderer {
   private readonly visuals = Array.from({ length: MAX_FIRE_PATCHES }, () => new FireVisual());
+  private readonly random = new VfxRandom(0xf12e);
   private frame = 0;
   private time = 0;
-  /** Flame tongues drawn last frame, for stats. */
+  /** Flame billboards drawn last frame, for stats. */
   drawnTongues = 0;
 
   private readonly base = new Vector3();
-  private readonly glow = spriteRecord(EqCell.fireball, BASE_GLOW);
-  private readonly flame = spriteRecord(EqCell.flame0, FLAME, 0.85);
+  private readonly glow = new VfxRecord();
+  private readonly flame = new VfxRecord();
   private readonly normal = new Vector3();
   private readonly centroid = new Vector3();
+  private readonly smokeColor = new Color3();
 
   constructor(
     private readonly camera: Camera,
     private readonly fx: EquipmentFx,
     private readonly lights: EquipmentLights,
     private readonly settings: EquipmentFxSettings,
-  ) {}
+  ) {
+    this.glow.frame = PCell.glow;
+    this.glow.additive = 1;
+    this.glow.color.copyFrom(BASE_GLOW);
+    this.glow.axis.set(-1e6, 1, 0);
+    this.flame.mode = VfxMode.upright;
+    this.flame.additive = 0.82;
+    this.flame.color.copyFrom(FLAME_TINT);
+  }
 
   get activePatches(): number {
     let n = 0;
@@ -85,11 +103,14 @@ export class FireRenderer {
   render(dt: number): void {
     this.time += dt;
     const time = this.time;
-    let tongues = 0;
+    const vfx = this.fx.vfx;
+    let flames = 0;
     const camera = this.camera.globalPosition;
-    const batch = this.fx.additiveBatch;
+    const flameBatch = vfx.flameBatch;
+    const glowBatch = vfx.particlesBatch;
     const glow = this.glow;
     const flame = this.flame;
+    const perCell = vfx.count(FLAMES_PER_CELL, 1);
     const visuals = this.visuals;
     for (let v = 0; v < visuals.length; v++) {
       const visual = visuals[v]!;
@@ -117,7 +138,7 @@ export class FireRenderer {
           visual.marked[k] = 1;
           this.normal.set(visual.normals[k * 3]!, visual.normals[k * 3 + 1]!, visual.normals[k * 3 + 2]!);
           this.base.set(x, y, z);
-          this.fx.decals.add(this.base, this.normal, 0.62 + 0.2 * phase, EqCell.burn, BURN, 0.85, dieAt - igniteAt + BURN_MARK_SECONDS, 1.2, 6, 0.4);
+          this.fx.scorch.add(this.base, this.normal, 0.78 + 0.22 * phase, ScorchCell.burn, WHITE, 0.9, dieAt - igniteAt + BURN_MARK_SECONDS, 1.2, 6, 0.4);
         }
         const intensity = Math.min(1, (age - igniteAt) / GROW_SECONDS) * Math.min(1, Math.max(0, (dieAt - age) / DIE_SECONDS));
         if (intensity <= 0) continue;
@@ -126,24 +147,29 @@ export class FireRenderer {
         this.centroid.addInPlaceFromFloats(x, y, z);
 
         // Low ground glow under the flames.
-        glow.position.set(x, y + 0.15, z);
-        glow.drawSize = 0.55 * intensity;
+        glow.position.set(x, y + 0.25, z);
+        glow.drawSize = 0.95 * intensity;
         glow.rotation = phase * 6;
-        glow.drawAlpha = 0.22 * intensity;
-        batch.spriteFrom(glow);
-        for (let i = 0; i < TONGUES_PER_CELL && tongues < MAX_TONGUES; i++, tongues++) {
+        glow.drawAlpha = 0.16 * intensity;
+        glowBatch.push(glow);
+
+        for (let i = 0; i < perCell && flames < MAX_FLAMES; i++, flames++) {
           const seed = phase * 7.13 + i * 2.39;
-          const ox = Math.sin(seed * 3.7) * 0.34;
-          const oz = Math.cos(seed * 5.1) * 0.34;
-          const flicker = 1 + 0.18 * Math.sin(time * (8.5 + i * 1.7) + seed * 4);
-          const height = (0.55 + 0.45 * fract(seed * 1.93)) * intensity * flicker * (i === 0 ? 1.2 : 1);
-          this.base.set(x + ox, y + 0.02, z + oz);
-          // Tips sway with a slow gust and lean a little toward the cell centre.
+          const main = i === 0;
+          // Spread over the cell (1 m grid) so neighbouring cells' flames interleave.
+          const ox = Math.sin(seed * 3.7) * (main ? 0.18 : 0.42);
+          const oz = Math.cos(seed * 5.1) * (main ? 0.18 : 0.42);
+          const flicker = 1 + 0.12 * Math.sin(time * (7.5 + i * 1.9) + seed * 4);
+          // Half width; the sheet's 1:2 cells make the flame four half-widths tall.
+          const half = (main ? 0.3 : 0.2 + 0.08 * fract(seed * 1.93)) * (0.45 + 0.55 * intensity) * flicker;
+          flame.position.set(x + ox, y - 0.04, z + oz);
           const sway = Math.sin(time * 2.1 + seed) * 0.1 + Math.sin(time * 5.3 + seed * 2) * 0.04;
-          flame.position.set(x + ox * 0.6 + sway, y + height, z + oz * 0.6 + sway * 0.6);
-          flame.cell = EqCell.flame0 + (Math.floor(time * 16 + seed * 5) % FLAME_FRAMES);
-          flame.drawSize = (0.2 + 0.12 * fract(seed * 3.3)) * (0.6 + 0.4 * intensity);
-          batch.streakFrom(this.base, flame, 1);
+          flame.axis.set(sway, 0, sway * 0.6);
+          flame.drawSize = half;
+          flame.rotation = 0;
+          flame.frame = (fract(seed * 0.37) * FLAME.frames + time * FLAME.fps * (0.75 + 0.5 * fract(seed * 2.71))) % FLAME.frames;
+          flame.drawAlpha = Math.min(1, intensity * 1.4);
+          flameBatch.push(flame);
         }
       }
       if (burning === 0) continue;
@@ -153,7 +179,7 @@ export class FireRenderer {
       this.centroid.y += 0.8;
       this.lights.requestFire(this.centroid, 5 * Math.sqrt(intensitySum) * flicker, Vector3.Distance(this.centroid, camera));
     }
-    this.drawnTongues = tongues;
+    this.drawnTongues = flames;
   }
 
   clear(): void {
@@ -161,51 +187,62 @@ export class FireRenderer {
   }
 
   private emit(visual: FireVisual, dt: number, burning: number, intensity: number): void {
+    const vfx = this.fx.vfx;
+    const r = this.random;
+    const quality = vfx.quality;
     // Rates saturate on big patches: the pools recycle anyway, and every spawn costs a little.
-    visual.emberTimer -= dt * Math.min(burning, 10);
+    visual.emberTimer -= dt * Math.min(burning, 10) * quality;
     while (visual.emberTimer <= 0) {
-      visual.emberTimer += 0.28;
+      visual.emberTimer += 0.22;
       const k = this.randomBurningCell(visual);
       if (k < 0) break;
       const o = k * FIRE_CELL_STRIDE;
-      const ember = this.fx.additive.spawn();
-      ember.position.set(visual.cells[o]! + (Math.random() - 0.5) * 0.8, visual.cells[o + 1]! + 0.2 + Math.random() * 0.5, visual.cells[o + 2]! + (Math.random() - 0.5) * 0.8);
-      ember.velocity.set((Math.random() - 0.5) * 0.8, 1.2 + Math.random() * 2, (Math.random() - 0.5) * 0.8);
-      ember.life = 0.7 + Math.random() * 1.1;
-      ember.size0 = 0.014;
-      ember.size1 = 0.004;
+      const ember = vfx.particles.spawn();
+      ember.position.set(visual.cells[o]! + r.signed() * 0.45, visual.cells[o + 1]! + r.range(0.2, 0.8), visual.cells[o + 2]! + r.signed() * 0.45);
+      ember.velocity.set(r.signed() * 0.5, r.range(1.5, 3.2), r.signed() * 0.5);
+      ember.life = r.range(0.8, 1.8);
+      ember.size0 = 0.022;
+      ember.size1 = 0.008;
       ember.drag = 0.9;
-      ember.gravity = -0.4;
-      ember.cell = EqCell.dot;
-      ember.streakSeconds = 0.025;
+      ember.gravity = -0.6;
+      ember.frame0 = ember.frame1 = PCell.trace;
+      ember.streakSeconds = 0.05;
       ember.color.copyFrom(EMBER);
+      ember.additive0 = ember.additive1 = 1;
       ember.fadePower = 0.7;
     }
-    visual.smokeTimer -= dt * Math.min(Math.sqrt(burning), 3) * intensity;
+    // Dark plume: soot from the fuel, lit by the sky from above.
+    vfx.lighting.displayToRef(0.05, 0.048, 0.045, 0.6, 1, 0.3, this.smokeColor).scaleInPlace(1 / WISPY.meanLuma);
+    visual.smokeTimer -= dt * Math.min(Math.sqrt(burning), 3) * intensity * quality;
     while (visual.smokeTimer <= 0) {
-      visual.smokeTimer += 0.35;
+      visual.smokeTimer += 0.3;
       const k = this.randomBurningCell(visual);
       if (k < 0) break;
       const o = k * FIRE_CELL_STRIDE;
-      const puff = this.fx.alpha.spawn();
-      puff.position.set(visual.cells[o]!, visual.cells[o + 1]! + 1.1, visual.cells[o + 2]!);
-      puff.velocity.set((Math.random() - 0.5) * 0.4 + 0.25, 1 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4);
-      puff.life = 3 + Math.random() * 1.5;
-      puff.size0 = 0.35;
-      puff.size1 = 2.2 + Math.random();
-      puff.drag = 0.25;
-      puff.gravity = -0.12;
-      puff.cell = EqCell.smoke;
-      puff.rotation = Math.random() * Math.PI * 2;
-      puff.spin = (Math.random() - 0.5) * 0.4;
-      puff.color.copyFrom(SMOKE);
-      puff.alpha = 0.4;
+      const puff = vfx.wispy.spawn();
+      puff.position.set(visual.cells[o]! + r.signed() * 0.3, visual.cells[o + 1]! + 1.3, visual.cells[o + 2]! + r.signed() * 0.3);
+      puff.velocity.set(r.signed() * 0.25 + 0.25, r.range(1.1, 1.8), r.signed() * 0.25);
+      puff.life = r.range(4, 6);
+      puff.size0 = 0.45;
+      puff.size1 = r.range(2.2, 3);
+      puff.growPower = 1.6;
+      puff.drag = 0.3;
+      puff.gravity = -0.1;
+      puff.frame0 = r.next() * WISPY.frames;
+      puff.frameRate = WISPY.fps;
+      puff.frameCount = WISPY.frames;
+      puff.rotation = r.signed() * 0.6;
+      puff.spin = r.signed() * 0.15;
+      puff.color.copyFrom(this.smokeColor);
+      puff.alpha = 0.5;
+      puff.fadeIn = 0.5;
       puff.fadePower = 1.3;
+      puff.nearFade = 1.2;
     }
   }
 
   private randomBurningCell(visual: FireVisual): number {
-    const start = Math.floor(Math.random() * visual.cellCount);
+    const start = this.random.int(visual.cellCount);
     for (let n = 0; n < visual.cellCount; n++) {
       const k = (start + n) % visual.cellCount;
       const o = k * FIRE_CELL_STRIDE;
@@ -238,7 +275,7 @@ export class FireRenderer {
     visual.marked.fill(0);
     visual.emberTimer = 0;
     visual.smokeTimer = 0;
-    visual.flickerSeed = Math.random() * 10;
+    visual.flickerSeed = fract(Math.sin((patch.id + 7) * 91.345) * 47453.5453) * 10;
     const cells = visual.cells;
     for (let k = 0; k < visual.cellCount; k++) {
       visual.phase[k] = fract(Math.sin((patch.id + 1) * 12.9898 + k * 78.233) * 43758.5453);
@@ -272,14 +309,6 @@ function heightSlope(cells: Float32Array, count: number, x: number, y: number, z
   if (!Number.isNaN(ahead)) return (ahead - y) / step;
   if (!Number.isNaN(behind)) return (y - behind) / step;
   return 0;
-}
-
-function spriteRecord(cell: number, color: Color3, alpha = 1): SpriteRecord {
-  const record = new SpriteRecord();
-  record.cell = cell;
-  record.color.copyFrom(color);
-  record.drawAlpha = alpha;
-  return record;
 }
 
 function fract(x: number): number {

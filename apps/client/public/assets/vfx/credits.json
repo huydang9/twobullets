@@ -1,0 +1,109 @@
+{
+  "note": "All shipped VFX textures are CC0 (public domain). Attribution is not required but given here.",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "generated": "2026-09-14",
+  "pipeline": "tools/vfx/build.mjs (premultiplied alpha, KTX2 UASTC + zstd)",
+  "sources": [
+    {
+      "id": "unity-labs",
+      "title": "Free VFX Image Sequences & Flipbooks",
+      "authors": [
+        "Thomas Iché (Unity Labs Paris)"
+      ],
+      "license": "CC0",
+      "url": "https://unity.com/blog/engine-platform/free-vfx-image-sequences-flipbooks",
+      "download": "https://unity3d.com/files/labs/downloads/vfx/assets01/<Name>/<Name>-flipbooks.zip",
+      "files": [
+        "explosion ← Explosion01_5x5.tga",
+        "explosion-dust ← Explosion01-nofire_5x5.tga",
+        "smoke-cloud ← Cloud01_8x8.tga",
+        "smoke-wispy ← WispySmoke01_8x8.tga",
+        "flame ← Flame03_16x4.tga"
+      ]
+    },
+    {
+      "id": "kenney-particle-pack",
+      "title": "Particle Pack 1.1",
+      "authors": [
+        "Kenney Vleugels (Kenney.nl)"
+      ],
+      "license": "CC0",
+      "url": "https://kenney.nl/assets/particle-pack",
+      "download": "https://kenney.nl/media/pages/assets/particle-pack/f8fe0f8cb8-1677578741/kenney_particle-pack.zip",
+      "files": [
+        "particles ← trace_01, dirt_01, dirt_02, circle_05, flare_01, star_04, light_01",
+        "scorch (masks) ← scorch_01, scorch_03"
+      ]
+    },
+    {
+      "id": "burned_ground_01",
+      "title": "Burned Ground 01",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/burned_ground_01",
+      "source": "Poly Haven (https://polyhaven.com)",
+      "files": [
+        "scorch ← https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/burned_ground_01/burned_ground_01_diff_2k.jpg",
+        "scorch (AO) ← https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/burned_ground_01/burned_ground_01_arm_2k.jpg"
+      ]
+    }
+  ],
+  "textures": {
+    "explosion.ktx2": {
+      "bytes": 410499,
+      "sources": [
+        "unity-labs:Explosion01/Explosion01_5x5.tga"
+      ]
+    },
+    "explosion-dust.ktx2": {
+      "bytes": 117221,
+      "sources": [
+        "unity-labs:Explosion01-nofire/Explosion01-nofire_5x5.tga"
+      ]
+    },
+    "smoke-cloud.ktx2": {
+      "bytes": 577439,
+      "sources": [
+        "unity-labs:Cloud01/Cloud01_8x8.tga"
+      ]
+    },
+    "smoke-wispy.ktx2": {
+      "bytes": 170997,
+      "sources": [
+        "unity-labs:WispySmoke01/WispySmoke01_8x8.tga"
+      ]
+    },
+    "flame.ktx2": {
+      "bytes": 239480,
+      "sources": [
+        "unity-labs:Flame03/Flame03_16x4.tga"
+      ]
+    },
+    "particles.ktx2": {
+      "bytes": 100030,
+      "sources": [
+        "kenney:trace_01.png",
+        "kenney:dirt_01.png",
+        "kenney:dirt_02.png",
+        "kenney:circle_05.png",
+        "kenney:flare_01.png",
+        "kenney:star_04.png",
+        "kenney:light_01.png"
+      ]
+    },
+    "scorch.ktx2": {
+      "bytes": 404784,
+      "sources": [
+        "polyhaven:burned_ground_01_diff_2k.jpg",
+        "polyhaven:burned_ground_01_arm_2k.jpg",
+        "kenney:scorch_01.png",
+        "kenney:scorch_03.png"
+      ]
+    }
+  }
+}
