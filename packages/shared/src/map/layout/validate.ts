@@ -5,9 +5,10 @@ import type { MapData } from "../types";
 import { terrainRangeUnder } from "./buildings";
 import { distance, distanceToRect, offsetPoint, rectsOverlap, segmentDistance, type OrientedRect } from "./geometry";
 import type { MapLayout } from "./mapLayout";
-import { getMapProp } from "./props";
+import type { LineOpening } from "./placement";
+import { getMapProp, type MapPropDef } from "./props";
 import { mapPaths } from "./roads";
-import { INSTANCE_STRIDE } from "./scatter";
+import { ENTRANCE_CLEARANCE, INSTANCE_STRIDE } from "./scatter";
 
 export type MapIssueKind =
   | "building-overlap"
@@ -17,7 +18,11 @@ export type MapIssueKind =
   | "building-out-of-bounds"
   | "poi-spacing"
   | "spawn"
-  | "prop-on-road";
+  | "prop-on-road"
+  /** A collidable prop within ENTRANCE_CLEARANCE of a building entrance. */
+  | "prop-at-entrance"
+  /** A collidable prop in or next to a fence gate or wall breach (`ValidationOptions.openings`). */
+  | "prop-in-opening";
 
 export interface MapIssue {
   readonly kind: MapIssueKind;
@@ -31,7 +36,12 @@ export interface ValidationOptions {
   readonly buildingGap?: number;
   /** Gap kept between building outlines and road edges, m. */
   readonly roadGap?: number;
+  /** Fence gates and wall breaches to keep clear (PoiFrame.openings). */
+  readonly openings?: readonly LineOpening[];
 }
+
+/** Fence and wall pieces line the openings themselves. */
+const LINE_PROPS = new Set(["fence_wood", "fence_chainlink", "wall_concrete"]);
 
 const MAX_SPAWN_SLOPE_TAN = 0.577; // 30°
 
@@ -107,6 +117,36 @@ export function validateMapLayout(map: MapData, terrain: Terrain, layout: MapLay
     }
   }
 
+  // Collidable props clear of entrances and openings.
+  const entrances: [number, number, string][] = [];
+  for (const b of buildings) {
+    if (b.stackOn) continue;
+    getBuildingPrefab(b.prefab).entrances.forEach(([lx, , lz], i) => {
+      const [ex, ez] = offsetPoint([b.position[0], b.position[2]], b.yaw, lx, lz);
+      entrances.push([ex, ez, `${b.id} entrance ${i}`]);
+    });
+  }
+  const openings = options.openings ?? [];
+  for (const set of layout.props) {
+    const def = getMapProp(set.prop);
+    if (def.collision.kind === "none") continue;
+    for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
+      const px = set.data[i]!;
+      const pz = set.data[i + 2]!;
+      const where = `${set.prop} at (${px.toFixed(1)}, ${pz.toFixed(1)})`;
+      for (const [ex, ez, name] of entrances) {
+        if (Math.abs(ex - px) > 12 || Math.abs(ez - pz) > 12) continue;
+        if (colliderDistance(def, set.data, i, ex, ez) < ENTRANCE_CLEARANCE) issue("prop-at-entrance", `${where} is within ${ENTRANCE_CLEARANCE} m of ${name}`);
+      }
+      if (LINE_PROPS.has(set.prop)) continue;
+      for (const opening of openings) {
+        const [ox, oz] = opening.center;
+        if (Math.abs(ox - px) > 20 || Math.abs(oz - pz) > 20) continue;
+        if (colliderDistance(def, set.data, i, ox, oz) < opening.width / 2 + ENTRANCE_CLEARANCE) issue("prop-in-opening", `${where} blocks the ${opening.width} m opening at (${ox}, ${oz})`);
+      }
+    }
+  }
+
   // Spawns: inside, walkable, clear of buildings and collidable props.
   for (const [index, spawn] of map.spawns.entries()) {
     const [sx, sz] = spawn.position;
@@ -123,6 +163,15 @@ export function validateMapLayout(map: MapData, terrain: Terrain, layout: MapLay
     }
   }
   return issues;
+}
+
+/** Distance from a point to the collider footprint of the instance at `i`. */
+function colliderDistance(def: MapPropDef, data: Float32Array, i: number, x: number, z: number): number {
+  const scale = data[i + 4]!;
+  const c = def.collision;
+  if (c.kind === "cylinder") return Math.max(0, distance(x, z, data[i]!, data[i + 2]!) - c.radius * scale);
+  if (c.kind === "box") return distanceToRect({ center: [data[i]!, data[i + 2]!], halfExtents: [(c.size[0] * scale) / 2, (c.size[2] * scale) / 2], yaw: data[i + 3]! }, x, z);
+  return Infinity;
 }
 
 function distanceToPoints(points: readonly (readonly [number, number])[], x: number, z: number): number {

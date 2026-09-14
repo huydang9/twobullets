@@ -6,8 +6,9 @@ import type { FlattenRegion, MapData, TerrainSpec } from "../types";
 import { bandAlong, catmullRom, distanceToRect, pointInPolygon, rectsOverlap } from "./geometry";
 import { buildMapLayout } from "./mapLayout";
 import { buildMapWorld } from "./mapWorld";
-import { segmentLine } from "./placement";
-import { ScatterContext, INSTANCE_STRIDE, type ScatterRule } from "./scatter";
+import { lineOpenings, segmentLine } from "./placement";
+import { getMapProp } from "./props";
+import { ScatterContext, INSTANCE_STRIDE, isHardCover, type ScatterRule } from "./scatter";
 
 const SMALL: TerrainSpec = { ...TERRAIN_V1, resolution: 129 };
 const REGIONS: readonly FlattenRegion[] = [
@@ -76,6 +77,13 @@ describe("geometry", () => {
     expect(corner.filter((p) => Math.abs(p.yaw) < 1e-12).map((p) => p.position[0])).toEqual([2, 6, 10, 14]);
     expect(corner.filter((p) => Math.abs(p.yaw) > 1e-12).map((p) => p.position[2])).toEqual([6, 10, 14, 18]);
     expect(segmentLine("fence_wood", [[0, 0], [30, 0]], { gaps: [[40, 50]] })).toEqual(segmentLine("fence_wood", [[0, 0], [30, 0]]));
+  });
+
+  it("reports gap midpoints along a polyline, across corners too", () => {
+    expect(lineOpenings([[0, 0], [20, 0], [20, 20]], [[16, 24], [30, 34]])).toEqual([
+      { center: [20, 0], width: 8 },
+      { center: [20, 12], width: 4 },
+    ]);
   });
 });
 
@@ -156,6 +164,39 @@ describe("scatter", () => {
         expect(Math.hypot(x, z + 150)).toBeGreaterThan(2.5);
         expect(set.data[i + 1]!).toBeLessThan(terrain.sampleHeight(x, z));
       }
+    }
+  });
+
+  it("spaces, fills gaps, and turns rock faces downhill (cover options)", () => {
+    const context = new ScatterContext(map, terrain, buildMapLayout(map, terrain).buildings);
+    const out = new Map<string, number[]>();
+    const spaced = context.expand({ id: "spaced", props: [{ prop: "rock_boulder_large", weight: 1 }], area: square, density: 0.5, minDistance: 30 }, out);
+    const boulders = out.get("rock_boulder_large")!;
+    expect(spaced).toBeGreaterThan(20);
+    for (let i = 0; i < boulders.length; i += INSTANCE_STRIDE) {
+      for (let j = i + INSTANCE_STRIDE; j < boulders.length; j += INSTANCE_STRIDE) {
+        expect(Math.hypot(boulders[i]! - boulders[j]!, boulders[i + 2]! - boulders[j + 2]!)).toBeGreaterThanOrEqual(30);
+      }
+    }
+    // The spaced boulders are hard cover: a filler with a 20 m bare radius stays clear of them.
+    expect(isHardCover(getMapProp("rock_boulder_large"))).toBe(true);
+    context.expand({ id: "fill", props: [{ prop: "log_fallen", weight: 1 }], area: square, density: 0.5, bareRadius: 20 }, out);
+    const logs = out.get("log_fallen") ?? [];
+    for (let i = 0; i < logs.length; i += INSTANCE_STRIDE) {
+      for (let j = 0; j < boulders.length; j += INSTANCE_STRIDE) expect(Math.hypot(logs[i]! - boulders[j]!, logs[i + 2]! - boulders[j + 2]!)).toBeGreaterThanOrEqual(20);
+    }
+    // Explicit spots on slopes: front (local +Z) points down the fall line, seated below the downhill ground.
+    const spots: [number, number][] = [];
+    for (let x = -180; x <= 180 && spots.length < 8; x += 12) for (let z = -180; z <= 180 && spots.length < 8; z += 12) if (terrain.slopeTanAt(x, z) > 0.1) spots.push([x, z]);
+    expect(spots.length).toBeGreaterThan(0);
+    const faces = new Map<string, number[]>();
+    context.expand({ id: "faces", props: [{ prop: "rock_face_large", weight: 1 }], area: square, density: 1, spots, faceDownhill: true, avoidPads: false }, faces);
+    const placed = faces.get("rock_face_large")!;
+    expect(placed.length).toBeGreaterThan(0);
+    for (let i = 0; i < placed.length; i += INSTANCE_STRIDE) {
+      const [x, y, z, yaw] = [placed[i]!, placed[i + 1]!, placed[i + 2]!, placed[i + 3]!];
+      expect(terrain.sampleHeight(x + Math.sin(yaw) * 2, z + Math.cos(yaw) * 2)).toBeLessThan(terrain.sampleHeight(x - Math.sin(yaw) * 2, z - Math.cos(yaw) * 2));
+      expect(y).toBeLessThan(terrain.sampleHeight(x, z));
     }
   });
 

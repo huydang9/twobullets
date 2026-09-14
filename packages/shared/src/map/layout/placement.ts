@@ -11,6 +11,8 @@ import type { MapPropId } from "./props";
 export class PoiFrame {
   readonly buildings: LayoutBuilding[] = [];
   readonly props: PropPlacement[] = [];
+  /** Gates and breaches left in this frame's fences and walls, to keep clear of cover. */
+  readonly openings: LineOpening[] = [];
 
   readonly poi: string;
   readonly center: Vec2Tuple;
@@ -50,9 +52,35 @@ export class PoiFrame {
 
   /** Fence or wall segments along a local polyline; see `segmentLine`. */
   line(prop: MapPropId, points: readonly Vec2Tuple[], options: SegmentLineOptions = {}): this {
-    this.props.push(...segmentLine(prop, points.map(([lx, lz]) => this.at(lx, lz)), options));
+    const world = points.map(([lx, lz]) => this.at(lx, lz));
+    this.props.push(...segmentLine(prop, world, options));
+    this.openings.push(...lineOpenings(world, options.gaps ?? []));
     return this;
   }
+}
+
+/** A gap in a fence or wall line: its midpoint on the line and its authored width, m. */
+export interface LineOpening {
+  readonly center: Vec2Tuple;
+  readonly width: number;
+}
+
+/** Midpoints of `gaps` ([start, end] distances along a world polyline). */
+export function lineOpenings(points: readonly Vec2Tuple[], gaps: readonly (readonly [number, number])[]): LineOpening[] {
+  return gaps.map(([from, to]) => {
+    let remaining = (from + to) / 2;
+    for (let i = 0; i + 1 < points.length; i++) {
+      const [ax, az] = points[i]!;
+      const [bx, bz] = points[i + 1]!;
+      const length = distance(ax, az, bx, bz);
+      if (remaining <= length || i + 2 === points.length) {
+        const t = Math.min(1, remaining / length);
+        return { center: [round3(ax + (bx - ax) * t), round3(az + (bz - az) * t)] as Vec2Tuple, width: to - from };
+      }
+      remaining -= length;
+    }
+    return { center: points[0]!, width: to - from };
+  });
 }
 
 export interface SegmentLineOptions {

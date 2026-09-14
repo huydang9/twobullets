@@ -14,13 +14,10 @@ import { emptyPath } from "./testWorld";
  * Recorded Map v1 nav checksum (like MAP_V1_BAKE): a layout, prefab or nav build change fails here. Rerun
  * `node tools/bench/bots/nav.ts` and update after intentional changes.
  */
-const MAP_V1_NAV_CHECKSUM = "fe5a4958";
+const MAP_V1_NAV_CHECKSUM = "34f6ddee";
 
-/**
- * Known unreachable areas, by probe name prefix. The radar station's exterior stair starts 0.40 m above the flattened
- * pad (over the 0.35 m step), so its roof has no walkable link; fix the map (pad or a bottom step), then drop it here.
- */
-const KNOWN_GAPS = ["room:radar_station:roof", "loot:radar_station:roof:"];
+/** Known unreachable areas, by probe name prefix (none since the radar station's stair got its bottom step). */
+const KNOWN_GAPS: readonly string[] = [];
 const isKnownGap = (probe: NavProbe) => KNOWN_GAPS.some((prefix) => probe.name.startsWith(prefix));
 
 describe("Map v1 navigation", () => {
@@ -77,7 +74,7 @@ describe("Map v1 navigation", () => {
   it("paths up the stairs to every upper room and tower platform", () => {
     const pois = new Map(results.filter((r) => r.probe.kind === "poi").map((r) => [r.probe.poi!, r.probe]));
     const upper = results.filter((r) => r.probe.kind === "room" && r.probe.upper && !isKnownGap(r.probe));
-    expect(upper.length).toBeGreaterThanOrEqual(30);
+    expect(upper.length).toBeGreaterThanOrEqual(31);
     expect(upper.some((r) => r.probe.name.endsWith(":platform"))).toBe(true);
     for (const r of upper) {
       const status = run(pois.get(r.probe.poi!)!, r.probe);

@@ -1,7 +1,7 @@
-import { bandAlong, catmullRom, round3 } from "./layout/geometry";
-import { PoiFrame, rectLoop } from "./layout/placement";
+import { bandAlong, catmullRom, round3, segmentDistance } from "./layout/geometry";
+import { PoiFrame, rectLoop, type LineOpening } from "./layout/placement";
 import { roadFlatten, type RoadSpec } from "./layout/roads";
-import type { ScatterRule } from "./layout/scatter";
+import { seedFromId, type ScatterRule } from "./layout/scatter";
 import { TERRAIN_V1 } from "./terrain/presets";
 import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, Vec2Tuple } from "./types";
 
@@ -72,17 +72,32 @@ town
   .line("fence_wood", [[50, 22], [20, 22], [20, 42]], { gaps: [[20, 23]] })
   .line("fence_wood", [[-50, -22], [-20, -22], [-20, -42]], { gaps: [[8, 11]] })
   .line("fence_wood", [[50, -22], [20, -22], [20, -42]], { gaps: [[14, 17]] })
-  // Square: a burnt-out car and a half-built checkpoint.
+  // Square: a burnt-out car and a half-built checkpoint (sandbag walls, cable drums and a pipe stack).
   .prop("car_covered", -8, -7, 0.4)
   .prop("road_barrier", 7, -9, 0.2)
   .prop("road_barrier", -9, 7, 1.4)
-  .prop("sandbags", 10, 4.5, 0)
-  // Street clutter.
+  .prop("sandbag_barrier", 10, 4.5, 0)
+  .prop("sandbag_barrier", 10.5, -13, 0)
+  .prop("sandbag_barrier", -10.5, -13.5, 0.1)
+  .prop("sandbag_barrier", -13, 7, HALF_PI)
+  .prop("cable_spool", 12.5, -7)
+  .prop("cable_spool", -6, 12.5)
+  .prop("pipe_stack", -10, 12.5, 0)
+  // Street clutter: wrecks on the street edges, clear of the carriageway.
   .prop("car_covered", -60, 6, 0.1)
   .prop("car_covered", 34, -5.2, Math.PI + 0.15)
   .prop("car_covered", 5.5, 55, HALF_PI - 0.2)
+  .prop("car_wreck", -66, -6, HALF_PI + 0.3)
+  .prop("car_wreck", 64, 6, HALF_PI - 0.25)
+  .prop("car_wreck", -6, 60, 0.25)
+  .prop("car_wreck", 6, -54, -0.3)
+  .prop("car_wreck", -35.5, -5.3, HALF_PI + 0.12)
   .prop("log_fallen", -35, 30, 0.3)
-  .prop("hay_bale", 36, 30, 0.5);
+  .prop("hay_bale_stack", 36, 30, 0.5)
+  // Big oaks in two back gardens and off the square's south-west corner.
+  .prop("tree_oak_large", -44, 33, 0.7)
+  .prop("tree_oak_large", 42, -33, 2.3, 1.05)
+  .prop("tree_oak_large", -17, -17, 4.1, 0.95);
 
 // ---------------------------------------------------------------------------------------------------------------
 // Farm: barn, farmhouse, cottage and sheds inside a paddock fence; a plowed field and a hay meadow.
@@ -98,15 +113,26 @@ farm
   // Paddock fence, walked from the south-west corner: gates south (track to the Training Yard), east (hay meadow) and
   // west (farm road).
   .line("fence_wood", rectLoop(0, 0, 36, 32), { gaps: [[40, 52], [96, 108], [210, 222]] })
-  .prop("hay_stack", 11, 16, 0.1)
-  .prop("hay_stack", 11, 20, 0.05)
-  .prop("hay_bale", 14, 24, 0.9)
   .prop("log_fallen", -34, 0, HALF_PI)
-  .prop("car_covered", 24, 6, 1.2);
-// Hay meadow east of the yard: round bales in loose rows (cover for crossing the open field).
-for (let row = 0; row < 3; row++) {
-  for (let col = 0; col < 4; col++) farm.prop("hay_bale", 52 + col * 11 + (row % 2) * 4, -24 + row * 16, 0.3 * col + row);
+  .prop("car_covered", 24, 6, 1.2)
+  .prop("car_wreck", -10.5, -2, 0.12)
+  // Big oaks: one in the paddock, the rest round the yard and the field edges.
+  .prop("tree_oak_large", 22, -22, 1.1)
+  .prop("tree_oak_large", -48, -10, 2.9, 1.1)
+  .prop("tree_oak_large", 52, 48, 0.4, 0.95)
+  .prop("tree_oak_large", -36, 48, 5.2)
+  .prop("tree_oak_large", 40, -44, 3.6, 1.05);
+// Yard: small square bales stacked in groups of two or three.
+const HAY_GROUPS: readonly [x: number, z: number, count: number, yaw: number][] = [[11, 18, 3, 0.1], [-10, -24, 2, 0.4], [26, 20, 3, -0.2], [-12, 24, 2, 1.2]];
+for (const [x, z, count, yaw] of HAY_GROUPS) {
+  const along = [Math.cos(yaw), -Math.sin(yaw)] as const;
+  const back = [Math.sin(yaw), Math.cos(yaw)] as const;
+  farm.prop("hay_bale_stack", x - along[0] * 0.5, z - along[1] * 0.5, yaw).prop("hay_bale_stack", x + along[0] * 0.5, z + along[1] * 0.5, yaw);
+  if (count > 2) farm.prop("hay_bale_stack", x + back[0] * 1.6, z + back[1] * 1.6, yaw + 0.2);
 }
+// Hay meadow east of the yard: broken rows of bale walls, the rows 16 m apart, facing east-west crossings.
+const MEADOW_WALLS: readonly Vec2Tuple[] = [[56, -22], [56, -6], [56, 10], [72, -14], [72, 2], [88, -22], [88, -6], [88, 10]];
+MEADOW_WALLS.forEach(([x, z], i) => farm.prop("hay_bale_wall", x, z, -HALF_PI + ((i * 7) % 5 - 2) * 0.06));
 // North field edge fence.
 farm.line("fence_wood", [[-30, 40], [44, 40], [44, 84]], { gaps: [[30, 36]] });
 
@@ -132,10 +158,25 @@ military
   // Perimeter: the gate on the west side faces the road from town; a breach in the south wall faces the quarry.
   .line("wall_concrete", [[-50, -38], [50, -38], [50, 38]], { gaps: [[64, 70]] })
   .line("fence_chainlink", [[50, 38], [-50, 38], [-50, -38]], { segment: 2, gaps: [[124, 134]] })
-  .prop("sandbags", -40, -24, 0)
-  .prop("sandbags", 36, 24, 0)
-  .prop("sandbags", -36, 10, HALF_PI)
-  .prop("sandbags", -36, 16, HALF_PI)
+  // Sandbag walls: inside the gate, at the tower bases, the container-yard lanes, the courtyard and the south breach.
+  .prop("sandbag_barrier", -38, 13, HALF_PI)
+  .prop("sandbag_barrier", -40, -24, 0)
+  .prop("sandbag_barrier", -35, -30, HALF_PI)
+  .prop("sandbag_barrier", 36, 24, 0)
+  .prop("sandbag_barrier", 37, 31, HALF_PI)
+  .prop("sandbag_barrier", 20.5, -12, 0)
+  .prop("sandbag_barrier", 24, -31.5, 0)
+  .prop("sandbag_barrier", 8, -31.5, 0)
+  .prop("sandbag_barrier", -20, 5, 0.4)
+  .prop("sandbag_barrier", 5, 8, -0.2)
+  .prop("sandbag_barrier", 30, 5, 0.2)
+  .prop("sandbag_barrier", -25, -30, 0)
+  .prop("cable_spool", 4.5, -10.5)
+  .prop("cable_spool", 36, -3)
+  .prop("cable_spool", -30, 14)
+  .prop("cable_spool", 44, -31)
+  .prop("pipe_stack", -10, -34.5, 0)
+  .prop("pipe_stack", 46.5, 10, HALF_PI)
   .prop("road_barrier", -58, 14, HALF_PI)
   .prop("road_barrier", -58, 4, HALF_PI)
   .prop("road_barrier", 0, 0, 0.1)
@@ -145,7 +186,7 @@ military
   .prop("crate_military", 9, -9.5, 1.4)
   .prop("barrel_rusty", 33, -9, 0)
   .prop("barrel_rusty", 34, -8, 0)
-  .prop("utility_box", -46, 10, HALF_PI);
+  .prop("utility_box", -46, -4, HALF_PI);
 
 // ---------------------------------------------------------------------------------------------------------------
 // Radar Hill: radar station and a watchtower on the ridge crest, reached by a switchback road up the south-east flank.
@@ -156,10 +197,18 @@ const radar = new PoiFrame("radar", poi("radar").center, -0.7);
 radar
   .building("station", "radar_station", -6, 1, 0)
   .building("tower", "watchtower", 13, 2, 0)
-  .prop("sandbags", 4, -8, 0)
-  .prop("sandbags", 20, -7, 0.3)
+  // Sandbag walls along the pad edge above the switchbacks.
+  .prop("sandbag_barrier", 4, -7.5, 0)
+  .prop("sandbag_barrier", 22, -6, 0.3)
+  .prop("sandbag_barrier", -10, -7.5, 0)
+  .prop("sandbag_barrier", 15, -7, 0.2)
   .prop("road_barrier", -18, -8, 0)
   .prop("car_covered", 24, 10, 1.8);
+// Boulders on the crest approaches; fungus oaks on the lee slope below the pad.
+for (const [x, z, yaw, scale] of [[-30, -2, 0.3, 1.2], [-38, 7, 1.9, 1], [-48, -4, 4.2, 1.35], [-57, 5, 2.6, 1.1], [32, 1, 5.1, 1.25], [40, -6, 0.8, 1], [48, 5, 3.3, 1.4], [58, -2, 1.5, 1.15]] as const) {
+  radar.prop("rock_boulder_large", x, z, yaw, scale);
+}
+for (const [x, z, yaw] of [[35, -18, 0.4], [48, -11, 2.2], [-45, -13, 4.4], [-58, -6, 1.3]] as const) radar.prop("tree_oak_fungi", x, z, yaw);
 
 // ---------------------------------------------------------------------------------------------------------------
 // Quarry: a warehouse and containers on the pit floor, rock piles, the original north ramp and a second ramp east.
@@ -183,7 +232,22 @@ quarry
   .prop("car_covered", 20, -4, 2.2)
   .prop("barrel_rusty", 1, 3, 0)
   .prop("crate_military", -1, 5, 0.5)
-  .prop("tree_stump", -30, -40, 0);
+  .prop("tree_stump", -30, -40, 0)
+  // Warehouse yard: concrete pipes and cable drums.
+  .prop("pipe_stack", -30, -8, HALF_PI)
+  .prop("pipe_stack", -18, 7, 0)
+  .prop("pipe_stack", -14, -20, 0)
+  .prop("cable_spool", 4, 9)
+  .prop("cable_spool", -27, 4)
+  .prop("cable_spool", 4, -16)
+  .prop("cable_spool", -21, -19)
+  // Wrecks at the feet of both ramps.
+  .prop("car_wreck", -8, 38, -0.3)
+  .prop("car_wreck", 38, -12, 1.3);
+// Big boulders on the pit floor and beside the ramps.
+for (const [x, z, yaw, scale] of [[-35, 8, 0.4, 1.2], [-28, -26, 2.1, 1], [14, 30, 1.2, 1.3], [28, 2, 3.9, 1.1], [-2, -32, 5.5, 1.25], [-38, -14, 0.9, 0.9], [9, 58, 2.7, 1], [-9, 76, 4.6, 1.2], [58, -8, 1.8, 1.1], [80, -28, 3.1, 1]] as const) {
+  quarry.prop("rock_boulder_large", x, z, yaw, scale);
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Forest Cabins: four cabins in a clearing-less pine forest, on small pads, round a dirt loop.
@@ -205,7 +269,13 @@ const cabinSpots = CABINS.map((cabin) => {
   return { ...cabin, x, z, yaw: round3(Math.atan2(-x, -z)) };
 });
 for (const cabin of cabinSpots) forest.building(cabin.id, cabin.prefab, cabin.x, cabin.z, cabin.yaw);
-forest.prop("log_fallen", -6, 4, 0.2).prop("car_covered", 5, -5, 1.9).prop("hay_bale", -30, 20, 0).prop("log_fallen", 30, -26, 1.1);
+forest.prop("log_fallen", -6, 4, 0.2).prop("car_covered", 5, -5, 1.9).prop("hay_bale_stack", -30, 20, 0).prop("log_fallen", 30, -26, 1.1);
+const ring = (radius: number, degrees: number): Vec2Tuple => [round3(Math.cos((degrees * Math.PI) / 180) * radius), round3(Math.sin((degrees * Math.PI) / 180) * radius)];
+// Fungus oaks ring the clearing edge (the road in at ~55° and the track south at ~-100° stay open).
+[95, 125, 160, 190, 220, 235, -60, -30, 0, 28].forEach((degrees, i) => forest.prop("tree_oak_fungi", ...ring(33 + ((i * 5) % 7) - 3, degrees), i * 0.9));
+// Stumps and mossy logs between the cabins, 8–12 m out from them.
+[[16, 100], [30, 76], [15, -20], [31, -12], [16, 178], [30, -140]].forEach(([radius, degrees], i) => forest.prop("stump_boubin", ...ring(radius!, degrees!), i * 1.3));
+[[12, 120], [27, 108], [13, -8], [27, -75], [13, -178], [32, 140]].forEach(([radius, degrees], i) => forest.prop("log_mossy", ...ring(radius!, degrees!), ((degrees! + 90) * Math.PI) / 180 + i * 0.2));
 
 // ---------------------------------------------------------------------------------------------------------------
 // Countryside: field fences, hay and wrecks between POIs, so open crossings have something to run to.
@@ -218,10 +288,10 @@ countryside
   .line("fence_wood", [[118, -30], [205, -12], [236, -88]], { gaps: [[30, 38], [120, 130]] })
   .line("fence_wood", [[-205, -118], [-150, -190], [-110, -196]], { gaps: [[44, 52]] })
   .line("fence_wood", [[230, 380], [320, 400], [410, 390]], { gaps: [[70, 80]] })
-  .prop("hay_bale", 64, 152, 0.3)
-  .prop("hay_bale", 88, 164, 1.1)
-  .prop("hay_bale", 112, 150, 2.3)
-  .prop("hay_bale", 96, 136, 0.6)
+  .prop("hay_bale_wall", 64, 152, 0.3)
+  .prop("hay_bale_wall", 88, 164, 1.1)
+  .prop("hay_bale_wall", 112, 150, 2.3)
+  .prop("hay_bale_wall", 96, 136, 0.6)
   .prop("car_covered", 150, 36.5, 2.8)
   .prop("car_covered", 96, -155, 0.9)
   .prop("car_covered", -112, 21, 0.4)
@@ -230,7 +300,6 @@ countryside
   // Abandoned roadblock on the south highway.
   .prop("road_barrier", 166, -202, 0.45)
   .prop("road_barrier", 176, -222, 0.45)
-  .prop("sandbags", 160, -198, 0.45)
   .prop("log_fallen", -120, 260, 0.7)
   .prop("log_fallen", 40, 330, 2.0);
 
@@ -293,6 +362,54 @@ export const MAP_V1_ROADS: readonly RoadSpec[] = [
   { id: "farm_yard", kind: "dirt", points: [farm.at(10, -26), farm.at(10, -44), [338, 190], [356, 128], [348, 92], [334, 76]] },
 ];
 
+/**
+ * A spot on a road shoulder: the centerline point nearest `near`, moved along the road by `along` and `side` m to the left
+ * of travel (negative: right). `yaw` turns local X along the road.
+ */
+function shoulder(road: RoadSpec, near: Vec2Tuple, side: number, along = 0): { at: Vec2Tuple; yaw: number } {
+  const points = road.straight ? road.points : catmullRom(road.points, 8);
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const d = segmentDistance(near[0], near[1], points[i]![0], points[i]![1], points[i + 1]![0], points[i + 1]![1]);
+    if (d < bestDistance) [best, bestDistance] = [i, d];
+  }
+  const [ax, az] = points[best]!;
+  const [bx, bz] = points[best + 1]!;
+  const length = Math.sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+  const dx = (bx - ax) / length;
+  const dz = (bz - az) / length;
+  const t = Math.max(0, Math.min(length, (near[0] - ax) * dx + (near[1] - az) * dz)) + along;
+  return { at: [round3(ax + dx * t - dz * side), round3(az + dz * t + dx * side)], yaw: round3(Math.atan2(-dz, dx)) };
+}
+
+const road = (id: string): RoadSpec => MAP_V1_ROADS.find((r) => r.id === id)!;
+/** Wrecks on the highway and dirt-road shoulders, 80 m or more apart; cars sit along the road (their length is local Z). */
+const SHOULDER_WRECKS: readonly [road: string, near: Vec2Tuple, side: number, skew: number][] = [
+  ["highway_east", [200, 47], -7, 0.2],
+  ["highway_east", [285, 78], 7, -0.25],
+  ["highway_south", [55, -148], 7, 0.15],
+  ["farm_road", [80, 178], -6, -0.3],
+  ["farm_road", [165, 237], 6, 0.2],
+  ["west_road", [-205, -22], -6, 0.25],
+];
+for (const [id, near, side, skew] of SHOULDER_WRECKS) {
+  const { at, yaw } = shoulder(road(id), near, side);
+  countryside.prop("car_wreck", at[0], at[1], yaw + HALF_PI + skew);
+}
+// South-highway roadblock: sandbag walls on both shoulders and two wrecks angled off the lanes.
+{
+  const south = road("highway_south");
+  for (const [side, along] of [[7, -6], [7, 2], [-7, -2], [-7, 6]] as const) {
+    const { at, yaw } = shoulder(south, [171, -212], side, along);
+    countryside.prop("sandbag_barrier", at[0], at[1], yaw);
+  }
+  for (const [side, along, skew] of [[8, -16, 0.5], [-8.5, 15, -0.45]] as const) {
+    const { at, yaw } = shoulder(south, [171, -212], side, along);
+    countryside.prop("car_wreck", at[0], at[1], yaw + HALF_PI + skew);
+  }
+}
+
 const RAMPS: FlattenRegion[] = [
   // North ramp (from the draft), rim to floor at ~16°.
   { shape: "polyline", points: [[-60, -205], [-60, -298]], width: 7, falloff: 6, height: "auto", profile: "linear", surface: "dirt", surfaceFalloff: 2 },
@@ -321,6 +438,8 @@ function circle(center: Vec2Tuple, radius: number, sides = 20): Vec2Tuple[] {
 
 /** POI cores kept free of field cover. */
 const POI_CORES = MAP_V1_POIS.map((p) => circle(p.center, p.radius + 10));
+/** Fence gates and wall breaches, widened by 3 m: every non-detail rule leaves them empty. */
+const OPENING_ZONES = [town, farm, military, radar, quarry, forest, countryside].flatMap((frame) => frame.openings).map((o) => circle(o.center, o.width / 2 + 3, 12));
 
 const TREES = [
   { prop: "tree_fir_b", weight: 5 },
@@ -353,7 +472,25 @@ const highwayEast = MAP_V1_ROADS.find((r) => r.id === "highway_east")!;
 const highwaySouth = MAP_V1_ROADS.find((r) => r.id === "highway_south")!;
 const roadside = (road: RoadSpec, side: 1 | -1): Vec2Tuple[] => bandAlong(catmullRom(road.points, 8), 6, 11, side);
 
-export const MAP_V1_SCATTERS: readonly ScatterRule[] = [
+/** Hand-picked slope spots for open rock faces (backs into the slope, see `faceDownhill`): Radar Hill's north flank, the quarry terrace walls. */
+const RADAR_FACE_SPOTS: readonly Vec2Tuple[] = ([[-44, 40], [-28, 30], [-12, 24], [4, 34], [20, 24], [36, 30]] as const).map(([x, z]) => radar.at(x, z));
+const QUARRY_FACE_SPOTS: readonly Vec2Tuple[] = (
+  [
+    // [angle°, radius]: inner wall, middle wall, outer wall; the ramps at 90° and ~-14° stay clear.
+    [30, 56], [75, 56], [135, 61], [195, 56], [240, 52], [300, 63],
+    [15, 74], [60, 70], [165, 78], [225, 70], [270, 71],
+    [45, 84], [210, 86], [255, 84],
+  ] as const
+).map(([degrees, radius]) => quarry.at(round3(Math.cos((degrees * Math.PI) / 180) * radius), round3(Math.sin((degrees * Math.PI) / 180) * radius)));
+const COVER_BAND = (center: Vec2Tuple) => circle(center, 170, 24);
+
+const SCATTER_RULES: readonly ScatterRule[] = [
+  // Big-trunk oaks and forest-floor cover first, so the conifers and undergrowth grow round them.
+  { id: "forest_west_oaks", seed: seedFromId("forest_west"), props: [{ prop: "tree_oak_fungi", weight: 1 }], area: WEST_FOREST, density: 0.05, mask: { wavelength: 80, threshold: 0.32 }, edgeFade: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 12, scaleRange: [0.9, 1.1] },
+  { id: "forest_west_floor", props: [{ prop: "stump_boubin", weight: 1 }, { prop: "log_mossy", weight: 1 }], area: WEST_FOREST, density: 0.06, edgeFade: 15, maxSlopeDegrees: 25, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 15, scaleRange: [0.9, 1.1] },
+  { id: "ridge_edge_oaks", props: [{ prop: "tree_oak_fungi", weight: 1 }], area: RIDGE_WOODS, density: 0.03, edgeBand: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.9, 1.1] },
+  { id: "east_edge_oaks", props: [{ prop: "tree_oak_fungi", weight: 1 }], area: EAST_WOODS, density: 0.03, edgeBand: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.9, 1.1] },
+  { id: "valley_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: bandAlong(VALLEY, -30, 30, 1), density: 0.03, maxSlopeDegrees: 20, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.85, 1.15] },
   // Forests: dense conifers with noise clearings, fading at their edges.
   { id: "forest_west", props: TREES, area: WEST_FOREST, density: 1.5, mask: { wavelength: 80, threshold: 0.32 }, edgeFade: 25, maxSlopeDegrees: 38, excludeSurfaces: ["road"], scaleRange: [0.75, 1.3] },
   { id: "forest_west_under", props: UNDERGROWTH, area: WEST_FOREST, density: 2.2, mask: { wavelength: 60, threshold: 0.3 }, edgeFade: 15, maxSlopeDegrees: 40, excludeSurfaces: ["road"], scaleRange: [0.7, 1.3] },
@@ -387,12 +524,21 @@ export const MAP_V1_SCATTERS: readonly ScatterRule[] = [
     area: PLAYABLE,
     exclude: POI_CORES,
     density: 0.04,
-    cluster: { count: [2, 4], radius: 7 },
+    // About one cluster in ten is anchored by a big boulder or mossy log (cover_fill below closes the remaining gaps).
+    cluster: { count: [2, 4], radius: 7, anchor: { props: [{ prop: "rock_boulder_large", weight: 3 }, { prop: "log_mossy", weight: 2 }], chance: 0.1, scaleRange: [0.8, 1.3] } },
     mask: { wavelength: 160, threshold: 0.3, softness: 0.15 },
     maxSlopeDegrees: 30,
     excludeSurfaces: ["road"],
     scaleRange: [0.7, 1.2],
   },
+  // Hay stacks in the fields round the farm and town.
+  { id: "field_hay_farm", props: [{ prop: "hay_bale_stack", weight: 1 }], area: COVER_BAND(poi("farm").center), density: 0.01, maxSlopeDegrees: 12, excludeSurfaces: ["road", "rock"], exclude: POI_CORES, minDistance: 60 },
+  { id: "field_hay_town", props: [{ prop: "hay_bale_stack", weight: 1 }], area: COVER_BAND(poi("town").center), density: 0.01, maxSlopeDegrees: 12, excludeSurfaces: ["road", "rock"], exclude: POI_CORES, minDistance: 60 },
+  // Big slope rocks: boulders on hillsides, open rock faces only on steep ground with their backs into the slope.
+  { id: "slope_boulders", props: [{ prop: "rock_boulder_large", weight: 1 }], area: PLAYABLE, density: 0.1, minSlopeDegrees: 18, maxSlopeDegrees: 35, exclude: POI_CORES, minDistance: 25, scaleRange: [0.9, 1.6] },
+  { id: "slope_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: PLAYABLE, density: 0.1, minSlopeDegrees: 25, maxSlopeDegrees: 45, exclude: [...POI_CORES, circle(poi("radar").center, 100)], minDistance: 40, faceDownhill: true, scaleRange: [0.9, 1.2] },
+  { id: "radar_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: PLAYABLE, density: 1, spots: RADAR_FACE_SPOTS, minSlopeDegrees: 25, faceDownhill: true, scaleRange: [0.95, 1.15] },
+  { id: "quarry_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: PLAYABLE, density: 1, spots: QUARRY_FACE_SPOTS, minSlopeDegrees: 25, faceDownhill: true, avoidPads: false, scaleRange: [0.9, 1.2] },
   { id: "slope_rocks", props: [{ prop: "rock_small", weight: 4 }, { prop: "rock_moss_b", weight: 1 }, { prop: "rock_boulder_a", weight: 1 }, { prop: "rock_moss_a", weight: 0.5 }, { prop: "rock_boulder_b", weight: 0.5 }], area: PLAYABLE, density: 0.8, minSlopeDegrees: 17, maxSlopeDegrees: 60, scaleRange: [0.7, 1.4] },
   {
     id: "quarry_rocks",
@@ -403,10 +549,14 @@ export const MAP_V1_SCATTERS: readonly ScatterRule[] = [
     clearance: 3,
     scaleRange: [0.6, 1.3],
   },
+  // Gap filler: a big boulder wherever open ground still has no hard cover within 22 m.
+  { id: "cover_fill", props: [{ prop: "rock_boulder_large", weight: 1 }], area: PLAYABLE, density: 0.06, bareRadius: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [WEST_FOREST, RIDGE_WOODS, EAST_WOODS], scaleRange: [0.9, 1.3] },
   { id: "meadow_bushes", props: [{ prop: "bush_a", weight: 2 }, { prop: "bush_b", weight: 1 }, { prop: "bush_c", weight: 1 }], area: PLAYABLE, density: 0.1, mask: { wavelength: 70, threshold: 0.45 }, maxSlopeDegrees: 30, excludeSurfaces: ["road", "rock"], scaleRange: [0.7, 1.3] },
   // Grass clumps: expanded by the client around the viewer only.
   { id: "grass", props: [{ prop: "grass_clump_short", weight: 3 }, { prop: "grass_clump_medium", weight: 2 }, { prop: "grass_clump_tall", weight: 1 }], area: PLAYABLE, density: 30, mask: { wavelength: 28, threshold: 0.42, softness: 0.2 }, maxSlopeDegrees: 35, excludeSurfaces: ["road", "dirt", "rock"], scaleRange: [0.7, 1.3], detail: true },
 ];
+
+export const MAP_V1_SCATTERS: readonly ScatterRule[] = SCATTER_RULES.map((rule) => (rule.detail ? rule : { ...rule, exclude: [...(rule.exclude ?? []), ...OPENING_ZONES] }));
 
 // ---------------------------------------------------------------------------------------------------------------
 // Spawns: two per POI on its outskirts until the landing phase exists.
@@ -434,6 +584,9 @@ const SPAWNS: MapSpawn[] = SPAWN_SPOTS.map(({ at, face }) => ({ position: at, ya
 // ---------------------------------------------------------------------------------------------------------------
 
 const POI_FRAMES = [town, farm, military, radar, quarry, forest, countryside];
+
+/** Fence gates and wall breaches, kept clear of collidable props (validated in layout/mapV1.test.ts). */
+export const MAP_V1_OPENINGS: readonly LineOpening[] = POI_FRAMES.flatMap((frame) => frame.openings);
 
 export const MAP_V1: MapData = {
   id: "v1",

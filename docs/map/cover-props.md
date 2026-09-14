@@ -1,6 +1,8 @@
-# Cover props and big trees (placement proposal, Map v1)
+# Cover props and big trees (Map v1)
 
-User feedback: add big-trunk trees to hide behind, big rocks and realistic cover, all from real models. The models are processed into the prop library (`tools/environment`, `world/propAssets.ts`) and the gameplay catalog (`map/layout/props.ts`). **Nothing is placed yet**: the Map v1 layout checksum is unchanged (`22ab0987`). The lead runs placement after the bots team finishes navigation on the current layout.
+User feedback: add big-trunk trees to hide behind, big rocks and realistic cover, all from real models. The models are processed into the prop library (`tools/environment`, `world/propAssets.ts`) and the gameplay catalog (`map/layout/props.ts`).
+
+**Placed** on Map v1 (layout `88a2a717`, was `22ab0987`): 432 new instances. See [What was placed](#what-was-placed) at the end; the sections before it are the original proposal.
 
 **Preview:** `http://localhost:5173/props.html` (DEV only; Vite doesn't build it). It shows every new prop on flat ground in three rows (LOD0, LOD1, LOD2), with catalog colliders as static bodies (K shows them as wireframes) and 1.8 m and 1.1 m player markers (M). F toggles walk and fly, `[` and `]` select a prop, T goes to it.
 
@@ -110,3 +112,71 @@ Existing stand-ins with a real model now: `sandbags` → `sandbag_barrier` (4.5 
 - **Cover flag:** `isCover` (`world/props/PropInstances.ts`) could also honor `def.cover`. It makes no difference for these props; it would only matter for a future low cover prop.
 - **Rock faces:** the scatter needs a per-rule "yaw faces downhill" option for `rock_face_large`. Until then, place them explicitly (quarry walls, radar flank).
 - **Build:** run `node --experimental-transform-types tools/map/build.ts`, then update the checksums and the counts in `layout.md`.
+
+## What was placed
+
+432 instances (proposal: about 360): 132 explicit placements in `mapV1.ts` and 300 from scatter rules. The terrain bake is unchanged (`5e374718-c9aae53e`); nothing was flattened.
+
+**Per POI** (instances within the POI radius + 15 m, scatter included):
+
+| POI | Placed |
+|---|---|
+| Central Town | 3 `tree_oak_large` (two back gardens, off the square's SW corner); 5 `car_wreck` on the street edges, off the carriageway; checkpoint of 4 `sandbag_barrier` (one replaces `sandbags`), 2 `cable_spool`, 1 `pipe_stack`; `hay_bale` → `hay_bale_stack` |
+| Farm | 5 `tree_oak_large` (1 in the paddock); 8 `hay_bale_wall` in three broken N–S rows 16 m apart (replace the 12 round bales); 10 `hay_bale_stack` in 4 yard groups (replace `hay_stack` ×2 and `hay_bale`); 1 `car_wreck` west of the barn |
+| Military Compound | 12 `sandbag_barrier` (replace the 4 `sandbags`): gate, tower bases, container-yard lane ends, courtyard, both sides of the south breach; 4 `cable_spool`; 2 `pipe_stack` along the south and east walls. The `utility_box` moved out of the gate |
+| Radar Hill | 4 `tree_oak_fungi` below the pad; 8 `rock_boulder_large` on the crest approaches; 6 `rock_face_large` on the north flank (`radar_faces`); 4 `sandbag_barrier` on the pad edge above the switchbacks (replace `sandbags` ×2) |
+| Quarry | 14 `rock_face_large` against the three terrace walls (`quarry_faces`); 10 `rock_boulder_large` on the floor and beside the ramps; 3 `pipe_stack` + 4 `cable_spool` round the warehouse; 2 `car_wreck` at the ramp feet |
+| Forest Cabins | 10 `tree_oak_fungi` ringing the clearing; 6 `stump_boubin` + 6 `log_mossy` between and behind the cabins; `hay_bale` → `hay_bale_stack` |
+| Training Yard | none (2 gap-filler boulders outside the pad) |
+
+**Open ground:**
+
+| Rule or placement | Placed |
+|---|---|
+| `forest_west_oaks` (≥ 12 m apart, forest mask), `forest_west_floor` (≥ 15 m) | 31 oaks; 18 stumps + 23 logs |
+| `ridge_edge_oaks`, `east_edge_oaks` (within 25 m of the wood outline, ≥ 30 m apart) | 10 + 12 |
+| `valley_oaks` (≥ 30 m apart) | 12 `tree_oak_large` |
+| `field_cover` anchors (one cluster in ten) | 19 boulders, 11 logs |
+| `field_hay_farm`, `field_hay_town` (≥ 60 m apart) | 6 + 5 stacks |
+| `slope_boulders` (18–35°, ≥ 25 m) / `slope_faces` (25–45°, ≥ 40 m, not on Radar Hill) | 17 / 6 |
+| `cover_fill`: a boulder wherever there is no hard cover within 25 m (outside the dense woods) | 110 |
+| Road shoulders (`shoulder()` in `mapV1.ts`) | 6 wrecks ≥ 80 m apart (east highway, south highway, farm road, west road) |
+| South-highway roadblock | 4 `sandbag_barrier` on the shoulders + 2 angled wrecks (replace `sandbags`) |
+| Hay north of town | the 4 `hay_bale` → `hay_bale_wall` |
+
+**Totals:** `rock_boulder_large` 164, `tree_oak_fungi` 67, `log_mossy` 40, `rock_face_large` 26, `stump_boubin` 24, `sandbag_barrier` 24, `hay_bale_stack` 23, `tree_oak_large` 20, `car_wreck` 16, `hay_bale_wall` 12, `cable_spool` 10, `pipe_stack` 6. No `sandbags`, `hay_bale` or `hay_stack` stand-ins are left on Map v1.
+
+**Why more boulders than proposed.** The proposal's field anchors land where clusters already give cover. `cover_fill` places boulders only in the gaps instead. Measured on straight lines between every pair of POIs (hard cover = trunks ≥ 0.2 m radius, bulletproof boxes ≥ 0.9 m tall and wide, buildings, within 25 m):
+- longest stretch without cover: 216 m before, 58 m after (7 crossings still have a 44–58 m stretch, all along roads);
+- open ground with no hard cover within 25 m: 36.8 % before, 9.9 % after (10 m sample grid, slopes under 35°).
+
+**Scatter options added** (`ScatterRule`, all optional): `spots` (hand-picked candidates), `faceDownhill` (front down the fall line, seated half a footprint downhill so the back sinks into the slope), `minDistance`, `bareRadius` (with `isHardCover`), `edgeBand`, and `cluster.anchor`. Every collidable scatter instance also keeps 1.5 m (beyond its collider) from building entrances, and cluster members now honour `exclude`.
+
+**Clearances, validated** (`validateMapLayout`, asserted in `layout/mapV1.test.ts`):
+- `prop-at-entrance`: no collidable prop within 1.5 m of an entrance;
+- `prop-in-opening`: no collidable prop within half the gap width + 1.5 m of the 17 fence gates and wall breaches (`MAP_V1_OPENINGS`); every non-detail scatter rule also excludes the gaps widened by 3 m.
+
+**Rock faces:** all 26 sit on slopes of 27–64° facing downhill; the ground 1.7 m in front is 0–0.4 m above their base, and their backs are buried 1.9–3.1 m (hills) or 4.4–6.9 m (quarry walls). Check the look in the browser.
+
+### Budget, measured
+
+Triangle counts use the LOD table above; frustum is a 100° cone from the viewpoint.
+
+| | Proposal | Placed |
+|---|---|---|
+| Worst case, all at the last level | ≈ 140k | **169k** (boulders 66k, logs 19k, oaks 17k, faces 16k) |
+| Standing in a POI (town cross street, compound) | ≈ 190k | 70–77k (2–3 at LOD0, 7–9 at LOD1, ~100 far) |
+| Radar pad / forest clearing (long views over the map) | – | 114k / 143k |
+| Main-pass batches in view (before shadow buckets) | +60 to +90 | 40–46 in POIs, 73–76 at the radar pad and forest clearing |
+| Distinct prop × 250 m cell pairs, map-wide | – | 80 |
+
+Cover never culls, so most of the cost is the far level of the 164 boulders (400 triangles each). If `?bench=v1` shows it, the cheapest lever is a lighter last level for `rock_boulder_large` (manifest only), then a lower `cover_fill` density.
+
+### Bots
+
+- The nav grid rebuilds from the catalog colliders: checksum `34f6ddee` (was `fe5a4958`); 45 components (46 before), same 245 cleared islands.
+- Everything stays reachable from the town square: 7/7 POIs, 14/14 spawns, 66/66 entrances, 86/86 ground rooms, 31/31 upper rooms (the radar roof is fixed, see below), 1,024/1,024 loot spots.
+
+### Radar station roof
+
+The exterior stair's first tread was 0.30 m above the stair pad, but the pad ended where the tread began. Snapped floors sit 0.1 m above the ground, so stepping on from the terrain was 0.40 m, over the 0.35 m limit. The stair pad (`radarStation`, `prefabs/industrial.ts`) now runs 0.6 m past the first tread: terrain → pad 0.1 m → tread 0.3 m. The base footprint and the building height don't change, and neither does the terrain.

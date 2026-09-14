@@ -97,7 +97,9 @@ export function radarStation(): BuildingPrefab {
   const parapetTop = H + 1;
 
   b.foundation([-5, 5], [-3.5, 3.5], "concrete");
-  b.foundation([-6.1, -5], [-3.5, 0.3], "concrete"); // pad under the exterior stairs
+  // Pad under the exterior stairs, running 0.6 m past the first tread as a bottom step: snapped floors sit 0.1 m above
+  // the ground, so the 0.3 m first rise straight off the terrain would be a 0.4 m step.
+  b.foundation([-6.1, -5], [-3.5, 0.9], "concrete");
   b.shell({
     x: [-5, 5],
     z: [-3.5, 3.5],

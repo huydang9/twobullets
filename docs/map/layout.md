@@ -142,67 +142,89 @@ Crossing open ground between POIs should never be a death run or trivially safe.
 - **Field cover.** `field_cover` scatters clusters of 2–4 boulders, mossy rocks, large bushes, fallen logs or young firs, one cluster per about 50 m (density 0.04 clusters/100 m²).
   - Clusters stay outside POI cores and off roads.
   - A 160 m noise mask thins them in a few meadows, so some crossings are riskier than others.
+  - One cluster in ten is anchored by a `rock_boulder_large` or `log_mossy`.
+- **Gap filler.** `cover_fill` puts a `rock_boulder_large` wherever open ground still has no hard cover within 25 m (outside the dense woods). Straight crossings between POIs now pass within 25 m of hard cover at least every 58 m (216 m before); see `docs/map/cover-props.md`.
+- **Big trees and rocks.** Fungus oaks in the western forest and on the wood edges, big oaks in the river valley, big boulders and open rock faces on steep slopes.
 - **Groves and tree lines.**
   - Clumpy groves (north, south and east masks) break long sightlines.
   - Deciduous trees follow the river valley.
   - Tree lines run along the farm road and both highways.
 - **Countryside props.**
   - Broken wooden field fences.
-  - Hay bales north of town.
-  - Car wrecks on road shoulders.
-  - An abandoned roadblock on the south highway.
-- **Cover inside POIs.** Hay rows in the farm meadow, sandbags and barriers in the compound, rock piles in the quarry.
+  - Hay-bale walls north of town, hay stacks in the fields round the farm and town.
+  - Car wrecks on road shoulders, 80 m or more apart.
+  - An abandoned roadblock on the south highway: barriers, sandbag walls and two wrecks.
+- **Cover inside POIs.** See `docs/map/cover-props.md`:
+  - hay-bale walls in the farm meadow;
+  - sandbag walls, cable drums and pipe stacks in the compound, the town checkpoint and the quarry yard;
+  - rock faces on the quarry terraces and the radar flank;
+  - big oaks in town, round the farm and the forest clearing.
 
 ## Props and scatter
 
 **The gameplay catalog: `layout/props.ts`.**
 - **Data.** Category, footprint, collision (none, trunk cylinder, or box with `bulletproof`), acoustic surface, `alignToTerrain` and sink per prop id.
 - **Ids.** They match the environment manifest's `PropId` (`world/propAssets.ts`) wherever an asset exists, so the client draws the real GLB as soon as the pipeline marks it ready.
-- **Map-only props** without an asset yet (`fence_wood`, `wall_concrete`, `sandbags`, `hay_bale`, `hay_stack`, `rock_pile`) render as procedural stand-ins (`world/props/standInMeshes.ts`).
+- **Map-only props** without an asset yet (`fence_wood`, `wall_concrete`, `rock_pile`) render as procedural stand-ins (`world/props/standInMeshes.ts`). The `sandbags`, `hay_bale` and `hay_stack` stand-ins stay in the catalog but Map v1 now uses `sandbag_barrier`, `hay_bale_wall` and `hay_bale_stack`.
 - **Collision sizes.** They follow the manifest's measured bounds. Rock and prop hulls stay client-only in the manifest, so the shared boxes are the gameplay approximation that client and server both build.
 
 **Scatter rules: `ScatterRule extends PropScatter`, all extras optional.**
-- **Fields:** seed, noise density mask, edge fade, min/max slope, `avoidPads`, clearance, exclusion polygons, clusters, and `detail` (grass).
+- **Fields:** seed, noise density mask, edge fade, min/max slope, `avoidPads`, clearance, exclusion polygons, clusters (optionally with a large `anchor`), and `detail` (grass).
+- **Cover fields:**
+  - `spots`: hand-picked candidates instead of the lattice;
+  - `faceDownhill`: front down the fall line, seated half a footprint downhill;
+  - `minDistance` between the rule's own instances;
+  - `bareRadius`: only where no `isHardCover` prop or building is that close;
+  - `edgeBand`: only near the area outline.
 - **Candidates.** One seeded candidate per cell of a jittered lattice anchored at the world origin, so any sub-rectangle expands to exactly the same instances.
 - **Per-spot tests** (integer-hash randomness, `sinCos`-based slope thresholds):
   - polygon membership and the noise mask;
   - slope and dominant surface;
   - pads (trees and rocks), road distance and building outlines;
-  - explicit prop footprints, spawn circles and earlier accepted footprints.
+  - explicit prop footprints, spawn circles and earlier accepted footprints;
+  - collidable instances keep 1.5 m beyond their collider from building entrances, and cluster members honour `exclude`.
+- **Openings.** `PoiFrame.line` records its gaps (`MAP_V1_OPENINGS`); Map v1 adds them, widened by 3 m, to every non-detail rule's `exclude`.
 - **Snapping.** Instances snap to `sampleHeight` minus sink × scale. Rocks tilt to the terrain normal; trees stay upright.
 - **Instance format.** 7 floats: x, y, z, yaw, scale, normal x, normal z. Scales are quantized to 1/20 so collider shapes can be shared.
 
-**Counts** (layout checksum `9301da19`, 5,960 instances plus 43 buildings):
+**Counts** (layout checksum `88a2a717`, 6,244 instances plus 43 buildings; 624 explicit placements, the rest scatter):
 
 | Category | Instances | Props |
 |---|---|---|
-| Trees | 2,236 | fir_b 933, fir_a 501, broadleaf_a 484, broadleaf_b 210, fir_young 108 |
-| Bushes | 2,103 | fern 666, bush_a 635, bush_c 480, bush_b 322 |
-| Rocks | 1,081 | rock_small 486, boulder_a 214, moss_b 150, moss_a 120, boulder_b 106, rock_pile 5 |
-| Props (explicit, 500 placements) | 540 | fence_wood 305, fence_chainlink 82, log_fallen 52, wall_concrete 41, hay_bale 19, car_covered 14, road_barrier 9, sandbags 8, others 10 |
+| Trees | 2,253 | fir_b 898, fir_a 487, broadleaf_a 468, broadleaf_b 207, fir_young 106, oak_fungi 67, oak_large 20 |
+| Bushes | 2,073 | fern 661, bush_a 623, bush_c 469, bush_b 320 |
+| Rocks | 1,237 | rock_small 477, boulder_a 198, boulder_large 164, moss_b 148, moss_a 117, boulder_b 102, face_large 26, rock_pile 5 |
+| Props | 681 | fence_wood 323, fence_chainlink 83, log_fallen 46, wall_concrete 43, log_mossy 40, sandbag_barrier 24, stump_boubin 24, hay_bale_stack 23, car_wreck 16, car_covered 14, hay_bale_wall 12, cable_spool 10, road_barrier 9, pipe_stack 6, others 8 |
 | Grass (client only, near the viewer) | ≈ 600–950 visible | short / medium / tall clumps, density 30/100 m² under a patch mask |
 
-**Per rule:**
+**Per rule** (in expansion order):
 
 | Rule | Instances |
 |---|---|
-| forest_west | 929 |
-| forest_west_under | 1,208 |
-| ridge_woods | 346 |
-| east_woods | 322 |
-| east_woods_under | 345 |
-| north_groves | 234 |
-| south_groves | 95 |
-| east_groves | 77 |
-| valley_trees | 197 |
-| town_gardens | 43 |
-| farm_road_trees_l / _r | 32 / 32 |
-| highway_east_trees | 19 |
-| highway_south_trees | 26 |
-| field_cover | 747 |
-| slope_rocks | 367 |
-| quarry_rocks | 164 |
-| meadow_bushes | 540 |
+| forest_west_oaks / forest_west_floor | 31 / 41 |
+| ridge_edge_oaks / east_edge_oaks | 10 / 12 |
+| valley_oaks | 12 |
+| forest_west | 839 |
+| forest_west_under | 1,138 |
+| ridge_woods | 340 |
+| east_woods | 310 |
+| east_woods_under | 330 |
+| north_groves | 209 |
+| south_groves | 87 |
+| east_groves | 68 |
+| valley_trees | 184 |
+| town_gardens | 38 |
+| farm_road_trees_l / _r | 27 / 28 |
+| highway_east_trees | 12 |
+| highway_south_trees | 20 |
+| field_cover | 694 |
+| field_hay_farm / field_hay_town | 6 / 5 |
+| slope_boulders / slope_faces | 17 / 6 |
+| radar_faces / quarry_faces (hand-picked spots) | 6 / 14 |
+| slope_rocks | 342 |
+| quarry_rocks | 151 |
+| cover_fill | 110 |
+| meadow_bushes | 533 |
 
 The build prints the exact current values.
 
@@ -210,10 +232,10 @@ The build prints the exact current values.
 
 | z \ x | −2 | −1 | 0 | 1 |
 |---|---|---|---|---|
-| 1 | 410 | 227 | 264 | 219 |
-| 0 | 495 | 177 | 302 | 118 |
-| −1 | 1,457 (western forest) | 269 | 264 | 316 |
-| −2 | 412 | 245 | 165 | 620 (eastern woods) |
+| 1 | 427 | 244 | 269 | 245 |
+| 0 | 521 | 198 | 317 | 129 |
+| −1 | 1,482 (western forest) | 287 | 281 | 330 |
+| −2 | 425 | 273 | 173 | 643 (eastern woods) |
 
 ## Rendering
 
@@ -285,6 +307,7 @@ Real assets add one mesh per material per batch.
 - POI centers are ≥ 250 m apart.
 - Spawns are clear and walkable.
 - No collidable scatter sits on a road.
+- No collidable prop is within 1.5 m of a building entrance (`prop-at-entrance`), or in or next to a fence gate or wall breach (`prop-in-opening`, when `openings` are passed; `mapV1.test.ts` passes `MAP_V1_OPENINGS`).
 
 **Unit tests: `layout.test.ts`** cover the geometry helpers, fence segmentation, bake round-trips, scatter exclusions and determinism, region-tiling equivalence and the worker pipeline's generate fallback.
 

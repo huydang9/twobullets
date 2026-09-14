@@ -1,9 +1,10 @@
+import { getBuildingPrefab } from "../buildings/prefabs";
 import { sinCos, smoothstep, TWO_PI } from "../terrain/math";
 import { fbm, hash2 } from "../terrain/noise";
 import type { Terrain } from "../terrain/terrain";
 import { TERRAIN_SURFACES, type FlattenRegion, type MapData, type PropPlacement, type PropScatter, type Vec2Tuple } from "../types";
 import type { ResolvedBuilding } from "./buildings";
-import { distanceToRect, pointInPolygon, polygonBounds, polygonEdgeDistance, segmentDistance, SpatialHash, type OrientedRect } from "./geometry";
+import { distanceToRect, offsetPoint, pointInPolygon, polygonBounds, polygonEdgeDistance, segmentDistance, SpatialHash, type OrientedRect } from "./geometry";
 import { getMapProp, type MapPropDef, type PropCategory } from "./props";
 import { mapPaths } from "./roads";
 
@@ -28,8 +29,28 @@ export interface ScatterRule extends PropScatter {
   readonly exclude?: readonly (readonly Vec2Tuple[])[];
   /** Tilt instances to the terrain normal. Default from the prop catalog. */
   readonly alignToTerrain?: boolean;
-  /** Each accepted lattice spot seeds `count` [min, max] instances within `radius` (cover clusters); `density` then counts clusters. */
-  readonly cluster?: { readonly count: readonly [min: number, max: number]; readonly radius: number };
+  /**
+   * Each accepted lattice spot seeds `count` [min, max] instances within `radius` (cover clusters); `density` then counts clusters.
+   * `anchor`: with probability `chance` the first member is one large piece from its own palette, near the cluster center.
+   */
+  readonly cluster?: {
+    readonly count: readonly [min: number, max: number];
+    readonly radius: number;
+    readonly anchor?: { readonly props: PropScatter["props"]; readonly chance: number; readonly scaleRange?: readonly [min: number, max: number] };
+  };
+  /** Candidate spots instead of the jittered lattice (hand-picked spots that still need terrain-aware yaw or tests); `density` and `mask` are ignored. */
+  readonly spots?: readonly Vec2Tuple[];
+  /** Only this far inside the area outline, m (wood edges). */
+  readonly edgeBand?: number;
+  /** Minimum distance between this rule's own instances, m. Not tiling-safe, so not for detail rules. */
+  readonly minDistance?: number;
+  /** Skips spots with hard cover (see `isHardCover`, buildings included) within this distance: fills cover gaps only. */
+  readonly bareRadius?: number;
+  /**
+   * Turns each instance's front (local +Z) downhill and seats it on the terrain half a footprint downhill, so the back
+   * sinks into the slope (open scanned rock faces).
+   */
+  readonly faceDownhill?: boolean;
   /**
    * Visual-only detail (grass): skipped by `buildMapLayout` and expanded on the client around the viewer with
    * `ScatterContext.expandRegion`. Never collides.
@@ -58,6 +79,31 @@ interface Circle {
   readonly radius: number;
 }
 
+/** Clearance kept between collidable scatter and building entrances, m (beyond the collider). */
+export const ENTRANCE_CLEARANCE = 1.5;
+
+/** Blocks movement and bullets and hides at least a crouched player side-on: trunks from 0.2 m radius, boxes from 0.9 m tall and wide. */
+export function isHardCover(def: MapPropDef, scale = 1): boolean {
+  const c = def.collision;
+  if (c.kind === "cylinder") return c.radius * scale >= 0.2;
+  return c.kind === "box" && c.bulletproof && c.size[1] * scale >= 0.9 && Math.max(c.size[0], c.size[2]) * scale >= 0.9;
+}
+
+/** Horizontal reach of a prop's collider from its origin, m at `scale`. */
+export function colliderReach(def: MapPropDef, scale = 1): number {
+  const c = def.collision;
+  if (c.kind === "none") return 0;
+  if (c.kind === "cylinder") return c.radius * scale;
+  return (Math.sqrt(c.size[0] * c.size[0] + c.size[2] * c.size[2]) / 2) * scale;
+}
+
+interface Palette {
+  readonly props: PropScatter["props"];
+  readonly defs: readonly MapPropDef[];
+  readonly totalWeight: number;
+  readonly scaleRange: readonly [number, number];
+}
+
 type AreaRegion = Extract<FlattenRegion, { shape: "circle" | "rect" }>;
 
 const CELL = 24;
@@ -72,6 +118,8 @@ export class ScatterContext {
   private readonly buildings = new SpatialHash<OrientedRect>(CELL);
   private readonly blockers = new SpatialHash<OrientedRect>(CELL);
   private readonly occupied = new SpatialHash<Circle>(CELL);
+  private readonly cover = new SpatialHash<Circle>(CELL);
+  private readonly entrances = new SpatialHash<Circle>(CELL);
   private readonly pads: readonly AreaRegion[];
   private readonly weights = [0, 0, 0, 0];
   private readonly normal = { x: 0, y: 1, z: 0 };
@@ -94,7 +142,15 @@ export class ScatterContext {
     }
     for (const building of buildings) {
       const [hx, hz] = building.bounds.halfExtents;
-      this.buildings.insert(building.bounds, building.bounds.center[0], building.bounds.center[1], Math.sqrt(hx * hx + hz * hz));
+      const reach = Math.sqrt(hx * hx + hz * hz);
+      this.buildings.insert(building.bounds, building.bounds.center[0], building.bounds.center[1], reach);
+      this.cover.insert({ x: building.bounds.center[0], z: building.bounds.center[1], radius: reach }, building.bounds.center[0], building.bounds.center[1], reach);
+      if (!building.stackOn) {
+        for (const [lx, , lz] of getBuildingPrefab(building.prefab).entrances) {
+          const [ex, ez] = offsetPoint([building.position[0], building.position[2]], building.yaw, lx, lz);
+          this.entrances.insert({ x: ex, z: ez, radius: 0 }, ex, ez, 0);
+        }
+      }
     }
     this.pads = map.flatten.filter((region): region is AreaRegion => region.shape !== "polyline");
     // Spawns stay clear so nobody starts inside a trunk.
@@ -113,6 +169,7 @@ export class ScatterContext {
     } else {
       this.reserve(x, z, def.footprint * scale);
     }
+    if (isHardCover(def, scale)) this.cover.insert({ x, z, radius: 0 }, x, z, 0);
   }
 
   private reserve(x: number, z: number, radius: number): void {
@@ -121,8 +178,19 @@ export class ScatterContext {
 
   /** Expands a rule over its whole area, appending instances per prop to `out`. Returns the instance count. */
   expand(rule: ScatterRule, out: Map<string, number[]>): number {
+    if (rule.spots) return this.expandSpots(rule, out);
     const bounds = polygonBounds(rule.area);
     return this.expandRegion(rule, bounds.minX, bounds.minZ, bounds.maxX, bounds.maxZ, out, !rule.detail);
+  }
+
+  private expandSpots(rule: ScatterRule, out: Map<string, number[]>): number {
+    const compiled = compileRule(rule);
+    const spacing = rule.minDistance ? new SpatialHash<Circle>(CELL) : null;
+    let count = 0;
+    rule.spots!.forEach(([x, z], index) => {
+      if (this.place(compiled, compiled.palette, x, z, hash2(index, 0x5b07, compiled.seed), out, true, spacing)) count++;
+    });
+    return count;
   }
 
   /**
@@ -133,6 +201,7 @@ export class ScatterContext {
     if (rule.props.length === 0 || rule.density <= 0) return 0;
     const compiled = compileRule(rule);
     const { seed, spacing } = compiled;
+    const own = rule.minDistance ? new SpatialHash<Circle>(CELL) : null;
     const area = polygonBounds(rule.area);
     const x0 = Math.max(minX, area.minX);
     const z0 = Math.max(minZ, area.minZ);
@@ -156,27 +225,32 @@ export class ScatterContext {
           chance *= smoothstep(rule.mask.threshold - soft, rule.mask.threshold + soft, noise);
         }
         if (rule.edgeFade) chance *= smoothstep(0, rule.edgeFade, polygonEdgeDistance(rule.area, x, z));
+        if (rule.edgeBand !== undefined && polygonEdgeDistance(rule.area, x, z) > rule.edgeBand) continue;
         if (unit(h, 3, seed) >= chance) continue;
 
         if (!rule.cluster) {
-          if (this.place(compiled, x, z, h, out, reserve)) count++;
+          if (this.place(compiled, compiled.palette, x, z, h, out, reserve, own)) count++;
           continue;
         }
         const [least, most] = rule.cluster.count;
         const members = least + Math.floor(unit(h, 7, seed) * (most - least + 1));
+        const anchored = compiled.anchor !== null && unit(h, 8, seed) < rule.cluster.anchor!.chance;
         for (let m = 0; m < members; m++) {
           const hm = hash2(h | 0, 100 + m, seed);
           const { sin, cos } = sinCos(unit(hm, 1, seed) * TWO_PI);
-          const r = rule.cluster.radius * Math.sqrt(unit(hm, 2, seed));
-          if (this.place(compiled, x + cos * r, z + sin * r, hm, out, reserve)) count++;
+          const anchor = anchored && m === 0;
+          const r = rule.cluster.radius * (anchor ? 0.3 : 1) * Math.sqrt(unit(hm, 2, seed));
+          // Members spill up to `radius` from the center, so they need the exclusion test too.
+          if (rule.exclude?.some((polygon) => pointInPolygon(polygon, x + cos * r, z + sin * r))) continue;
+          if (this.place(compiled, anchor ? compiled.anchor! : compiled.palette, x + cos * r, z + sin * r, hm, out, reserve, own)) count++;
         }
       }
     }
     return count;
   }
 
-  /** Per-spot tests and placement for one candidate; `h` seeds its prop, scale and yaw. */
-  private place(rule: CompiledRule, x: number, z: number, h: number, out: Map<string, number[]>, reserve: boolean): boolean {
+  /** Per-spot tests and placement for one candidate; `h` seeds its prop, scale and yaw. `own` holds the rule's instances for `minDistance`. */
+  private place(rule: CompiledRule, palette: Palette, x: number, z: number, h: number, out: Map<string, number[]>, reserve: boolean, own: SpatialHash<Circle> | null = null): boolean {
     const { source, seed } = rule;
     const half = this.map.terrain.size / 2 - 2;
     if (x < -half || x > half || z < -half || z > half) return false;
@@ -184,8 +258,8 @@ export class ScatterContext {
     if (slope > rule.maxTan || slope < rule.minTan) return false;
     if (rule.excluded.size > 0 && rule.excluded.has(this.dominantSurface(x, z))) return false;
 
-    const def = rule.defs[pickWeighted(source.props, unit(h, 4, seed) * rule.totalWeight)]!;
-    const [scaleMin, scaleMax] = source.scaleRange ?? [1, 1];
+    const def = palette.defs[pickWeighted(palette.props, unit(h, 4, seed) * palette.totalWeight)]!;
+    const [scaleMin, scaleMax] = palette.scaleRange;
     const scale = quantizeScale(scaleMin + (scaleMax - scaleMin) * unit(h, 5, seed));
     const radius = def.footprint * scale;
     const clearance = source.clearance ?? DEFAULT_CLEARANCE[def.category];
@@ -196,9 +270,28 @@ export class ScatterContext {
     if (this.nearBuilding(x, z, radius + clearance)) return false;
     if (this.nearBlocker(x, z, radius + 0.3)) return false;
     if (def.category !== "grass" && this.nearOccupied(x, z, radius)) return false;
+    if (def.collision.kind !== "none" && this.nearEntrance(x, z, colliderReach(def, scale) + ENTRANCE_CLEARANCE)) return false;
+    if (own && source.minDistance && nearPoint(own, x, z, source.minDistance)) return false;
+    if (source.bareRadius && nearPoint(this.cover, x, z, source.bareRadius)) return false;
 
-    this.push(out, def, x, z, unit(h, 6, seed) * TWO_PI, scale, source.alignToTerrain ?? def.alignToTerrain ?? false);
+    let yaw = unit(h, 6, seed) * TWO_PI;
+    let fixedY: number | undefined;
+    if (source.faceDownhill) {
+      this.terrain.sampleNormal(x, z, this.normal);
+      const horizontal = Math.sqrt(this.normal.x * this.normal.x + this.normal.z * this.normal.z);
+      if (horizontal > 1e-6) {
+        // Front (local +Z) is (sin yaw, cos yaw) in world XZ; the normal's horizontal part points downhill.
+        // Rounded so an engine's last-ulp atan2 difference can't change the layout checksum.
+        yaw = Math.round(Math.atan2(this.normal.x, this.normal.z) * 1e4) / 1e4;
+        const ahead = radius / 2 / horizontal;
+        fixedY = this.terrain.sampleHeight(x + this.normal.x * ahead, z + this.normal.z * ahead) - (def.sink ?? 0) * scale;
+      }
+    }
+
+    this.push(out, def, x, z, yaw, scale, source.alignToTerrain ?? def.alignToTerrain ?? false, fixedY);
     if (reserve && def.category !== "grass") this.reserve(x, z, radius);
+    if (reserve && isHardCover(def, scale)) this.cover.insert({ x, z, radius: 0 }, x, z, 0);
+    own?.insert({ x, z, radius: 0 }, x, z, 0);
     return true;
   }
 
@@ -257,17 +350,25 @@ export class ScatterContext {
     return this.blockers.query(x, z, margin, (rect) => distanceToRect(rect, x, z) < margin);
   }
 
+  private nearEntrance(x: number, z: number, margin: number): boolean {
+    return nearPoint(this.entrances, x, z, margin);
+  }
+
   private nearOccupied(x: number, z: number, radius: number): boolean {
     return this.occupied.query(x, z, radius, (c) => (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z) < (c.radius + radius) * (c.radius + radius));
   }
+}
+
+function nearPoint(hash: SpatialHash<Circle>, x: number, z: number, distance: number): boolean {
+  return hash.query(x, z, distance, (c) => (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z) < (distance + c.radius) * (distance + c.radius));
 }
 
 interface CompiledRule {
   readonly source: ScatterRule;
   readonly seed: number;
   readonly spacing: number;
-  readonly defs: readonly MapPropDef[];
-  readonly totalWeight: number;
+  readonly palette: Palette;
+  readonly anchor: Palette | null;
   readonly maxTan: number;
   readonly minTan: number;
   readonly excluded: ReadonlySet<number>;
@@ -278,12 +379,16 @@ function compileRule(rule: ScatterRule): CompiledRule {
     source: rule,
     seed: rule.seed ?? seedFromId(rule.id),
     spacing: 10 / Math.sqrt(rule.density),
-    defs: rule.props.map((p) => getMapProp(p.prop)),
-    totalWeight: rule.props.reduce((sum, p) => sum + p.weight, 0),
+    palette: compilePalette(rule.props, rule.scaleRange),
+    anchor: rule.cluster?.anchor ? compilePalette(rule.cluster.anchor.props, rule.cluster.anchor.scaleRange ?? rule.scaleRange) : null,
     maxTan: rule.maxSlopeDegrees === undefined ? Infinity : tanDegrees(rule.maxSlopeDegrees),
     minTan: rule.minSlopeDegrees === undefined ? -1 : tanDegrees(rule.minSlopeDegrees),
     excluded: new Set((rule.excludeSurfaces ?? []).map((s) => TERRAIN_SURFACES.indexOf(s))),
   };
+}
+
+function compilePalette(props: PropScatter["props"], scaleRange: readonly [number, number] | undefined): Palette {
+  return { props, defs: props.map((p) => getMapProp(p.prop)), totalWeight: props.reduce((sum, p) => sum + p.weight, 0), scaleRange: scaleRange ?? [1, 1] };
 }
 
 function unit(h: number, k: number, seed: number): number {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAP_V1, MAP_V1_TRAINING_YARD } from "../mapV1";
+import { MAP_V1, MAP_V1_OPENINGS, MAP_V1_TRAINING_YARD } from "../mapV1";
 import { terrainInputsHash } from "../terrain/bake";
 import { buildTerrain } from "../terrain/terrain";
 import { distance, distanceToRect, polylineDistance } from "./geometry";
@@ -13,7 +13,7 @@ import { validateMapLayout, type MapIssueKind } from "./validate";
 describe("Map v1 layout", () => {
   const terrain = buildTerrain(MAP_V1.terrain, MAP_V1.flatten);
   const layout = buildMapLayout(MAP_V1, terrain);
-  const issues = validateMapLayout(MAP_V1, terrain, layout);
+  const issues = validateMapLayout(MAP_V1, terrain, layout, { openings: MAP_V1_OPENINGS });
   const of = (kind: MapIssueKind) => issues.filter((i) => i.kind === kind).map((i) => i.message);
 
   it("has no overlapping buildings, and none on roads", () => {
@@ -37,6 +37,12 @@ describe("Map v1 layout", () => {
     expect(of("spawn")).toEqual([]);
     expect(of("prop-on-road")).toEqual([]);
     expect(issues).toEqual([]);
+  });
+
+  it("keeps collidable props clear of building entrances, fence gates and wall breaches", () => {
+    expect(MAP_V1_OPENINGS.length).toBeGreaterThanOrEqual(15);
+    expect(of("prop-at-entrance")).toEqual([]);
+    expect(of("prop-in-opening")).toEqual([]);
   });
 
   it("gives each POI its buildings and a road, on one connected network", () => {
