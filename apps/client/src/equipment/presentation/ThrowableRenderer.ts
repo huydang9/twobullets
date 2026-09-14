@@ -1,9 +1,9 @@
 import { Color3, Matrix, Quaternion, Vector3, type Mesh } from "@babylonjs/core";
-import { THROWABLE_KINDS, type ThrowableSnapshot, type Vec3 } from "@twobullets/shared";
+import { ITEMS, THROWABLE_KINDS, type ThrowableSnapshot, type Vec3 } from "@twobullets/shared";
 import type { Environment } from "../../world/environment";
 import { EqCell, FLAME_FRAMES } from "./equipmentAtlas";
 import { randomCone, type EquipmentFx } from "./fxPools";
-import { THROWABLE_SHAPE, type ItemMeshLibrary } from "./itemMeshes";
+import type { ItemMeshLibrary, ThrowableShape } from "./itemMeshes";
 import { TICK_SECONDS } from "./support";
 
 /** Matches EquipmentWorld's default capacity. */
@@ -12,6 +12,10 @@ const MAX_SLOTS = 64;
 const INSTANCES_PER_KIND = 24;
 const SQUASH_SECONDS = 0.09;
 const SETTLE_SECONDS = 0.18;
+/** Levers flying off freshly thrown grenades (real models with a separate spoon only). */
+const MAX_SPOONS = 12;
+const SPOON_SECONDS = 0.8;
+const SPOON_GRAVITY = 9.81;
 
 const DUST = Color3.FromHexString("#b9ab92");
 const SCUFF = new Color3(1, 1, 1);
@@ -41,17 +45,34 @@ class Slot {
   emberTimer = 0;
 }
 
+class SpoonFlight {
+  active = false;
+  kindIndex = 0;
+  age = 0;
+  spinRate = 0;
+  readonly position = new Vector3();
+  readonly velocity = new Vector3();
+  readonly spinAxis = new Vector3(1, 0, 0);
+  readonly rotation = new Quaternion();
+}
+
 /**
  * Thrown grenades in flight and on the ground, interpolated between the last two tick states (like the camera) for
  * smooth high-refresh motion. Meshes are thin instances per kind (sun shadows included), tumbling by throw speed,
  * rolling by ground speed, and settling on their side at rest. Bounces squash the mesh briefly and leave a scuff and
- * dust; molotov rags burn in flight.
+ * dust; molotov rags burn in flight. With the real frag and flashbang models, the spoon pops off an uncooked grenade at
+ * launch and tumbles away (a cooked grenade already lost it in the hand).
  */
 export class ThrowableRenderer {
   private readonly slots = Array.from({ length: MAX_SLOTS }, () => new Slot());
   private readonly meshes: Mesh[];
   private readonly matrices: Float32Array[];
   private readonly counts = new Int32Array(THROWABLE_KINDS.length);
+  private readonly shapes: ThrowableShape[];
+  private readonly spoons = Array.from({ length: MAX_SPOONS }, () => new SpoonFlight());
+  private readonly spoonMeshes: (Mesh | null)[];
+  private readonly spoonMatrices: (Float32Array | null)[];
+  private readonly spoonCounts = new Int32Array(THROWABLE_KINDS.length);
   private tick = 0;
   private time = 0;
 
@@ -83,6 +104,24 @@ export class ThrowableRenderer {
     });
     this.matrices = this.meshes.map((mesh) => {
       const buffer = new Float32Array(INSTANCES_PER_KIND * 16);
+      mesh.thinInstanceSetBuffer("matrix", buffer, 16, false);
+      mesh.thinInstanceCount = 0;
+      mesh.isVisible = false;
+      return buffer;
+    });
+    this.shapes = THROWABLE_KINDS.map((kind) => library.shape(kind));
+    this.spoonMeshes = THROWABLE_KINDS.map((kind) => {
+      const mesh = library.createSpoonTemplate(kind);
+      if (!mesh) return null;
+      mesh.isPickable = false;
+      mesh.doNotSyncBoundingInfo = true;
+      mesh.alwaysSelectAsActiveMesh = true;
+      environment.skyFill.excludedMeshes.push(mesh);
+      return mesh;
+    });
+    this.spoonMatrices = this.spoonMeshes.map((mesh) => {
+      if (!mesh) return null;
+      const buffer = new Float32Array(MAX_SPOONS * 16);
       mesh.thinInstanceSetBuffer("matrix", buffer, 16, false);
       mesh.thinInstanceCount = 0;
       mesh.isVisible = false;
@@ -121,8 +160,10 @@ export class ThrowableRenderer {
       } else {
         slot.previous.copyFrom(slot.current);
       }
+      const first = slot.seenTick === 0;
       slot.current.set(position.x, position.y, position.z);
       slot.velocity.set(velocity.x, velocity.y, velocity.z);
+      if (first && snapshot.fuse >= ITEMS[snapshot.kind].fuseSeconds - 3 * TICK_SECONDS) this.launchSpoon(slot);
       slot.rolling = snapshot.rolling;
       slot.resting = snapshot.resting;
       slot.seenTick = this.tick;
@@ -190,6 +231,7 @@ export class ThrowableRenderer {
       this.min.minimizeInPlace(slot.render);
       this.max.maximizeInPlace(slot.render);
     }
+    this.renderSpoons(dt);
     for (let k = 0; k < this.meshes.length; k++) {
       const mesh = this.meshes[k]!;
       const count = this.counts[k]!;
@@ -206,10 +248,73 @@ export class ThrowableRenderer {
 
   clear(): void {
     for (const slot of this.slots) slot.active = false;
+    for (const spoon of this.spoons) spoon.active = false;
   }
 
   dispose(): void {
     for (const mesh of this.meshes) mesh.dispose();
+    for (const mesh of this.spoonMeshes) mesh?.dispose();
+  }
+
+  /** The lever springs off to the thrower's side and up, tumbling fast, from the grenade's launch pose. */
+  private launchSpoon(slot: Slot): void {
+    if (!this.spoonMeshes[slot.kindIndex]) return;
+    let spoon: SpoonFlight | null = null;
+    for (const candidate of this.spoons) {
+      if (candidate.active) continue;
+      spoon = candidate;
+      break;
+    }
+    if (!spoon) return;
+    spoon.active = true;
+    spoon.kindIndex = slot.kindIndex;
+    spoon.age = 0;
+    spoon.position.copyFrom(slot.previous);
+    const v = slot.velocity;
+    // Side = across the throw direction (to the right of it), plus a pop upward.
+    this.tmp3.set(v.z, 0, -v.x);
+    if (this.tmp3.lengthSquared() < 1e-6) this.tmp3.set(1, 0, 0);
+    this.tmp3.normalize();
+    randomCone(this.tmp3, 0.6, this.tmp3, this.tangent, this.bitangent);
+    spoon.velocity.set(v.x * 0.55 + this.tmp3.x * 1.6, v.y * 0.55 + 1.4, v.z * 0.55 + this.tmp3.z * 1.6);
+    randomCone(slot.spinAxis, 1.2, spoon.spinAxis, this.tangent, this.bitangent);
+    spoon.spinRate = 22 + Math.random() * 12;
+    spoon.rotation.copyFrom(slot.tumble);
+  }
+
+  private renderSpoons(dt: number): void {
+    this.spoonCounts.fill(0);
+    for (let i = 0; i < this.spoons.length; i++) {
+      const spoon = this.spoons[i]!;
+      if (!spoon.active) continue;
+      spoon.age += dt;
+      if (spoon.age >= SPOON_SECONDS) {
+        spoon.active = false;
+        continue;
+      }
+      spoon.velocity.y -= SPOON_GRAVITY * dt;
+      spoon.velocity.scaleInPlace(Math.exp(-0.8 * dt));
+      spoon.position.x += spoon.velocity.x * dt;
+      spoon.position.y += spoon.velocity.y * dt;
+      spoon.position.z += spoon.velocity.z * dt;
+      Quaternion.RotationAxisToRef(spoon.spinAxis, spoon.spinRate * dt, this.spin);
+      this.spin.multiplyToRef(spoon.rotation, spoon.rotation);
+      const buffer = this.spoonMatrices[spoon.kindIndex];
+      const count = this.spoonCounts[spoon.kindIndex]!;
+      if (!buffer || count >= MAX_SPOONS) continue;
+      Matrix.ComposeToRef(Vector3.OneReadOnly, spoon.rotation, spoon.position, this.matrix);
+      this.matrix.copyToArray(buffer, count * 16);
+      this.spoonCounts[spoon.kindIndex] = count + 1;
+    }
+    for (let k = 0; k < this.spoonMeshes.length; k++) {
+      const mesh = this.spoonMeshes[k];
+      if (!mesh) continue;
+      const count = this.spoonCounts[k]!;
+      if (count === 0 && mesh.thinInstanceCount === 0) continue;
+      mesh.thinInstanceCount = count;
+      mesh.isVisible = count > 0;
+      if (count > 0) mesh.thinInstanceBufferUpdated("matrix");
+    }
   }
 
   private find(id: number): Slot | null {
@@ -249,8 +354,7 @@ export class ThrowableRenderer {
   }
 
   private orient(slot: Slot, dt: number): void {
-    const kind = THROWABLE_KINDS[slot.kindIndex]!;
-    const shape = THROWABLE_SHAPE[kind];
+    const shape = this.shapes[slot.kindIndex]!;
     const v = slot.velocity;
     const groundSpeed = Math.hypot(v.x, v.z);
     const onGround = slot.rolling || slot.resting;
@@ -321,7 +425,7 @@ export class ThrowableRenderer {
   }
 
   private burnRag(slot: Slot, dt: number): void {
-    const tip = THROWABLE_SHAPE.molotov.flameTip as Vector3;
+    const tip = this.shapes[THROWABLE_KINDS.indexOf("molotov")]!.flameTip as Vector3;
     this.orientation.toRotationMatrix(this.matrix);
     Vector3.TransformCoordinatesToRef(tip, this.matrix, this.tmp);
     this.tmp.addInPlace(slot.render);

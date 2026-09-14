@@ -6,6 +6,8 @@
  *  3. Runtime level (Babylon NullEngine): loads every GLB through the real client AssetLibrary (headless) and runs
  *     the same `runAssetSelfCheck` used in the browser (instancing, clip playback, anchors, skinned bounds, bones,
  *     root motion).
+ * Equipment models (`equipment/`, optional) get the same three layers: tools/assets/equipment/verify.ts at file level,
+ * their textures in the decode pass, and devCheck's equipment section at runtime.
  */
 import { readFile } from "node:fs/promises";
 import { createRequire, register } from "node:module";
@@ -15,6 +17,7 @@ import { runInThisContext } from "node:vm";
 import type { Document } from "@gltf-transform/core";
 import type { AssetManifest } from "../../apps/client/src/assets/manifest.ts";
 import { CHARACTER, OUT_DIR } from "./config.ts";
+import { verifyEquipmentFiles } from "./equipment/verify.ts";
 import { hashBytes } from "./lib/cache.ts";
 import { createIO } from "./lib/gltf.ts";
 import { lastKeyTime, poseAt, poseBounds, toBabylonBounds, worldMatrices } from "./lib/pose.ts";
@@ -114,6 +117,7 @@ for (const [id, character] of Object.entries(manifest.characters)) {
   check(Math.abs(bounds.max[1] - bounds.min[1] - character.height) < 0.002, `${id}: height after compression ${bounds.max[1] - bounds.min[1]}`);
   check(character.height > 1.6 && character.height < 2, `${id}: height ${character.height}`);
 }
+decoded.push(...(await verifyEquipmentFiles(io, check)));
 console.log(errors.length === 0 ? "file checks passed" : `file checks: ${errors.length} error(s)\n  ${errors.join("\n  ")}`);
 
 await verifyTextureDecoding(decoded);

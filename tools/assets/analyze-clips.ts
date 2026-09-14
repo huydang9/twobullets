@@ -10,10 +10,14 @@
  * Segments are labeled by hand in config.ts using the per-part motion summary printed here; the script then
  * checks that every configured clip edge lands on a detected boundary. Validated against the author's
  * published pistol and sniper tables.
+ *
+ * `throw_arms` (equipment/config.ts) runs through the same analysis with the right wrist as the "body": its 21-frame
+ * clip has no rest holds, so its edges are the wind-up peak, the release jump and the follow-through freeze.
  */
 import { join } from "node:path";
 import type { AnimationChannel } from "@gltf-transform/core";
 import { SRC_DIR, WEAPONS } from "./config.ts";
+import { THROW_ARMS } from "./equipment/config.ts";
 import { createIO } from "./lib/gltf.ts";
 import { lastKeyTime, sampleAt } from "./lib/pose.ts";
 
@@ -45,13 +49,24 @@ const io = await createIO();
 const filter = process.argv[2];
 let failures = 0;
 
-for (const spec of WEAPONS.filter((w) => !filter || w.id === filter)) {
+interface ClipSpec {
+  readonly id: string;
+  readonly source: string;
+  readonly fps: number;
+  readonly clips: Readonly<Partial<Record<string, readonly [number, number]>>>;
+  readonly nodes: { readonly body: string };
+  /** IK helper nodes left out of the pose distance. */
+  readonly helpers: RegExp;
+}
+const SPECS: readonly ClipSpec[] = [...WEAPONS.map((w) => ({ ...w, helpers: /_Pole$/ })), { ...THROW_ARMS, helpers: /_(Pole|Goal)$/ }];
+
+for (const spec of SPECS.filter((w) => !filter || w.id === filter)) {
   const doc = await io.read(join(SRC_DIR, spec.source));
   const animation = doc.getRoot().listAnimations()[0]!;
   const last = Math.round(lastKeyTime(animation) * spec.fps);
   const tracks: Track[] = animation
     .listChannels()
-    .filter((c: AnimationChannel) => !/_Pole$/.test(c.getTargetNode()!.getName()) && c.getTargetPath() !== "scale")
+    .filter((c: AnimationChannel) => !spec.helpers.test(c.getTargetNode()!.getName()) && c.getTargetPath() !== "scale")
     .map((c) => ({
       node: c.getTargetNode()!.getName(),
       path: c.getTargetPath()!,
@@ -102,7 +117,7 @@ for (const spec of WEAPONS.filter((w) => !filter || w.id === filter)) {
   });
 
   const near = (set: Set<number>, f: number) => set.has(f) || set.has(f - 1) || set.has(f + 1);
-  for (const [name, [start, end]] of Object.entries(spec.clips)) {
+  for (const [name, [start, end]] of Object.entries(spec.clips) as [string, readonly [number, number]][]) {
     const startOk = near(starts, start) || near(freezes, start) || near(peaks, start) || near(jumps, start);
     const endOk = end === last || near(starts, end + 1) || near(freezes, end + 1) || near(peaks, end) || near(jumps, end + 1);
     if (!startOk || !endOk) failures++;

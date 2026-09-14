@@ -1,5 +1,7 @@
 import type { AbstractMesh, AnimationGroup, Node, TransformNode } from "@babylonjs/core";
 import type { AssetLibrary } from "./AssetLibrary";
+import { bakeStaticMesh, computeWorldMatrices } from "./EquipmentInstance";
+import { EQUIPMENT_MODEL_IDS } from "./equipmentManifest";
 import { CHARACTER_IDS, type Vec3, WEAPON_IDS } from "./manifest";
 
 export interface AssetCheckReport {
@@ -95,7 +97,63 @@ export function runAssetSelfCheck(library: AssetLibrary): AssetCheckReport {
     }
   }
 
+  checkEquipment(library, expect, errors, summary);
   return { ok: errors.length === 0, errors, summary };
+}
+
+/** Equipment models (optional): parts, rest bounds, a static bake, and the throw arms' clip and grip anchor. */
+function checkEquipment(library: AssetLibrary, expect: (condition: boolean, message: string) => void, errors: string[], summary: string[]): void {
+  const equipment = library.equipment;
+  if (!equipment) {
+    summary.push("equipment: not built (procedural stand-ins)");
+    return;
+  }
+  const loaded: string[] = [];
+  for (const id of EQUIPMENT_MODEL_IDS) {
+    if (!equipment.items[id]) continue;
+    if (!library.hasEquipment(id)) {
+      errors.push(`equipment/${id}: in the manifest but not loaded`);
+      continue;
+    }
+    try {
+      const instance = library.instantiateEquipment(id)!;
+      const asset = instance.asset;
+      for (const role of ["body", "spoon", "ring"] as const) {
+        expect(!asset.nodes[role] || instance.partMeshes(role).length > 0, `equipment/${id}: part ${role} has no meshes`);
+      }
+      const bounds = skinnedBounds(instance.root);
+      expect(near(bounds.min, asset.bounds.min, 0.005) && near(bounds.max, asset.bounds.max, 0.005), `equipment/${id}: bounds ${fmt(bounds.min)}..${fmt(bounds.max)}, manifest ${fmt(asset.bounds.min)}..${fmt(asset.bounds.max)}`);
+      computeWorldMatrices(instance.root);
+      const baked = bakeStaticMesh(instance.partMeshes("body"), `check_${id}`, library.scene);
+      expect(baked !== null && baked.getTotalVertices() > 0, `equipment/${id}: static bake failed`);
+      baked?.dispose();
+      instance.dispose();
+      loaded.push(id);
+    } catch (error) {
+      errors.push(`equipment/${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  let arms = "throw arms missing";
+  if (equipment.arms) {
+    try {
+      const instance = library.instantiateThrowArms();
+      if (!instance) throw new Error("not loaded");
+      const asset = instance.asset;
+      expect(instance.skeleton !== null && (instance.nodes.arms as AbstractMesh).skeleton === instance.skeleton, "throw_arms: nodes.arms is not the skinned mesh");
+      instance.pose(asset.clips.ready[0]);
+      const grip = worldPosition(instance.nodes.grip);
+      expect(near(grip, asset.anchors.grip, 0.003), `throw_arms: grip at ${fmt(grip)}, manifest ${fmt(asset.anchors.grip)}`);
+      instance.pose(asset.clips.windup[1]);
+      const cocked = worldPosition(instance.nodes.rightHand);
+      expect(cocked[1] - asset.anchors.rightHand[1] > 0.2, `throw_arms: the wind-up should raise the right hand (${fmt(cocked)})`);
+      instance.pose(asset.clips.recover[1]);
+      arms = `throw arms ${instance.meshes.length} meshes, ${instance.skeleton?.bones.length ?? 0} bones, grip ${fmt(grip)}`;
+      instance.dispose();
+    } catch (error) {
+      errors.push(`throw_arms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  summary.push(`equipment: ${loaded.length} models (${loaded.join(" ")}), ${arms}`);
 }
 
 /** DEV helper: exposes `window.__assets` and logs the self-check. */

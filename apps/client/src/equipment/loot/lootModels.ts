@@ -1,12 +1,13 @@
-import { Matrix, Mesh, MeshBuilder, VertexBuffer, VertexData, type Scene, type TransformNode } from "@babylonjs/core";
+import { Color3, Matrix, Mesh, MeshBuilder, MultiMaterial, PBRMaterial, VertexBuffer, VertexData, type Material, type Scene, type TransformNode } from "@babylonjs/core";
 import { ITEMS, type AmmoItemId, type ArmorLevel, type ConsumableItemId, type ItemId, type ThrowableKind, type WeaponId } from "@twobullets/shared";
-import type { AssetLibrary } from "../../assets";
+import type { AssetLibrary, EquipmentModelId } from "../../assets";
 
 /**
  * Ground-loot meshes, one template per item id: lying at rest, meters, origin on the floor contact point (+Y up).
  * Weapons reuse the gun body of the first-person GLBs; throwables and consumables come from the presentation layer's
- * {@link LootModelFactory} when it provides them; everything else (and any missing model) is a small procedural,
- * vertex-coloured stand-in sharing one material.
+ * {@link LootModelFactory} when it provides them; helmets, vests, backpacks and ammo use the equipment models
+ * (`equipment/*.glb`) when they loaded. Everything else (and any missing model) is a small procedural, vertex-coloured
+ * stand-in sharing one material.
  */
 
 /** Throwable/consumable models built by the equipment presentation (grenades in hand, heal props). */
@@ -60,16 +61,16 @@ export function createLootTemplate(itemId: ItemId, scene: Scene, sources: { read
       mesh = normalizeExternal(sources.models?.createLootModel(def.id, scene) ?? null) ?? PLACEHOLDERS[def.id](scene);
       break;
     case "ammo":
-      mesh = ammoBox(scene, def.id);
+      mesh = gear(sources.assets, "ammo_can", itemId, AMMO_TINT[def.id]) ?? ammoBox(scene, def.id);
       break;
     case "helmet":
-      mesh = helmet(scene, def.level);
+      mesh = gear(sources.assets, "helmet", itemId, LEVEL_TINT[def.level]) ?? helmet(scene, def.level);
       break;
     case "vest":
-      mesh = vest(scene, def.level);
+      mesh = gear(sources.assets, "vest", itemId, LEVEL_TINT[def.level]) ?? vest(scene, def.level);
       break;
     case "backpack":
-      mesh = backpack(scene, def.level);
+      mesh = gear(sources.assets, "backpack", itemId, LEVEL_TINT[def.level]) ?? backpack(scene, def.level);
       break;
   }
   mesh.name = `loot_${itemId}`;
@@ -138,6 +139,75 @@ function layOnSide(mesh: Mesh): void {
   const min = mesh.getBoundingInfo().boundingBox.minimum;
   mesh.bakeTransformIntoVertices(Matrix.Translation(0, -min.y, 0));
   mesh.refreshBoundingInfo();
+}
+
+// ---- Gear models ---------------------------------------------------------------------------------------------------
+
+/**
+ * Resting pose on the floor: XYZ rotation (radians, item space) and a vertical squash. The helmet sits on its rim and
+ * the ammo can stands; the vest lies on its back and the pack on its harness, flattened because the models keep the
+ * worn, filled shape (a real carrier or empty pack slumps).
+ */
+const GEAR_REST: Readonly<Record<"helmet" | "vest" | "backpack" | "ammo_can", { readonly rotation: readonly [number, number, number]; readonly squash: number }>> = {
+  helmet: { rotation: [0, 0, 0], squash: 1 },
+  vest: { rotation: [Math.PI / 2, 0, 0], squash: 0.4 },
+  backpack: { rotation: [-Math.PI / 2, 0, 0], squash: 0.55 },
+  ammo_can: { rotation: [0, 0, 0], squash: 1 },
+};
+
+/**
+ * One model serves every level, so levels read by tint (albedo multiplier on a material copy): level 1 worn tan, level 2
+ * olive, level 3 the model's own colours. Values above 1 brighten the dark source textures.
+ */
+const LEVEL_TINT: Readonly<Record<ArmorLevel, Rgb | null>> = { 1: [1.7, 1.45, 1.05], 2: [1.05, 1.2, 0.8], 3: null };
+
+/** Ammo cans tinted per calibre so piles stay readable. */
+const AMMO_TINT: Readonly<Record<AmmoItemId, Rgb | null>> = {
+  ammo_556: null,
+  ammo_762: [1.25, 0.9, 0.75],
+  ammo_9mm: [1.3, 1.2, 0.8],
+  ammo_12g: [1.35, 0.7, 0.6],
+};
+
+const tintedMaterials = new Map<string, Material>();
+
+function gear(assets: AssetLibrary | null | undefined, model: keyof typeof GEAR_REST, itemId: ItemId, tint: Rgb | null): Mesh | null {
+  if (!assets?.hasEquipment(model as EquipmentModelId)) return null;
+  try {
+    const mesh = assets.createEquipmentMesh(model as EquipmentModelId, `loot_${itemId}`);
+    if (!mesh) return null;
+    const { rotation, squash } = GEAR_REST[model];
+    mesh.bakeTransformIntoVertices(Matrix.RotationYawPitchRoll(rotation[1], rotation[0], rotation[2]).multiply(Matrix.Scaling(1, squash, 1)));
+    mesh.refreshBoundingInfo();
+    const box = mesh.getBoundingInfo().boundingBox;
+    mesh.bakeTransformIntoVertices(Matrix.Translation(-box.center.x, -box.minimum.y, -box.center.z));
+    mesh.refreshBoundingInfo();
+    if (tint && mesh.material) mesh.material = tinted(mesh.material, tint);
+    return mesh;
+  } catch (error) {
+    console.warn(`[loot] ${model} model failed; using a placeholder`, error);
+    return null;
+  }
+}
+
+/** A cached copy of `material` (or of each sub-material) with its albedo multiplied by `tint`. */
+function tinted(material: Material, tint: Rgb): Material {
+  const key = `${material.uniqueId}:${tint.join(",")}`;
+  let copy = tintedMaterials.get(key);
+  if (copy) return copy;
+  if (material instanceof MultiMaterial) {
+    const multi = new MultiMaterial(`${material.name}_tint`, material.getScene());
+    multi.subMaterials = material.subMaterials.map((sub) => (sub ? tinted(sub, tint) : sub));
+    copy = multi;
+  } else if (material instanceof PBRMaterial) {
+    const pbr = material.clone(`${material.name}_tint`);
+    pbr.albedoColor = new Color3(pbr.albedoColor.r * tint[0], pbr.albedoColor.g * tint[1], pbr.albedoColor.b * tint[2]);
+    copy = pbr;
+  } else {
+    copy = material;
+  }
+  tintedMaterials.set(key, copy);
+  return copy;
 }
 
 function normalizeExternal(mesh: Mesh | null): Mesh | null {

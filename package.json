@@ -15,7 +15,8 @@
     "assets": "node tools/assets/build.ts",
     "assets:analyze": "node tools/assets/analyze-clips.ts",
     "assets:verify": "node tools/assets/verify.ts",
-    "assets:typecheck": "tsc -p tools/assets/tsconfig.json"
+    "assets:typecheck": "tsc -p tools/assets/tsconfig.json",
+    "assets:equipment": "node tools/assets/equipment.ts"
   },
   "devDependencies": {
     "@babylonjs/ktx2decoder": "9.26.0",

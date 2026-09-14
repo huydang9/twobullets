@@ -1,0 +1,517 @@
+{
+  "version": 1,
+  "arms": {
+    "url": "equipment/throw_arms.glb",
+    "hash": "51744fc918442ab8",
+    "bytes": 1544940,
+    "fps": 30,
+    "animation": "all",
+    "lastFrame": 20,
+    "clips": {
+      "ready": [0, 0],
+      "windup": [0, 3],
+      "throw": [3, 5],
+      "follow": [5, 13],
+      "recover": [13, 20]
+    },
+    "releaseFrame": 4.5,
+    "nodes": {
+      "arms": "arms",
+      "rightShoulder": "R_arm_023",
+      "rightHand": "R_wrist_025",
+      "leftShoulder": "L_arm_01",
+      "leftHand": "L_wrist_03",
+      "grip": "grip"
+    },
+    "anchors": {
+      "grip": [0.2037, -0.0991, -0.0094],
+      "leftHand": [-0.2304, -0.1826, -0.1247],
+      "rightHand": [0.2078, -0.1346, -0.1344]
+    },
+    "bounds": {
+      "min": [-0.3764, -0.2541, -0.6187],
+      "max": [0.3537, 0.0756, 0.0787]
+    },
+    "stats": {
+      "vertices": 5634,
+      "triangles": 9816,
+      "textures": 3,
+      "textureFormat": "ktx2"
+    },
+    "credit": "djmaesen-arms-throwing"
+  },
+  "items": {
+    "frag": {
+      "url": "equipment/frag.glb",
+      "hash": "d0b1c0d37edc2cba",
+      "bytes": 1448028,
+      "nodes": {
+        "root": "frag",
+        "body": "body",
+        "spoon": "spoon",
+        "ring": "ring"
+      },
+      "bounds": {
+        "min": [-0.0293, -0.0441, -0.0332],
+        "max": [0.0293, 0.0449, 0.0293]
+      },
+      "bodyBounds": {
+        "min": [-0.0293, -0.0441, -0.0293],
+        "max": [0.0293, 0.0441, 0.0293]
+      },
+      "stats": {
+        "vertices": 3817,
+        "triangles": 4862,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "firewarden3d-m67"
+    },
+    "smoke": {
+      "url": "equipment/smoke.glb",
+      "hash": "7537a62fa3df05ba",
+      "bytes": 1678784,
+      "nodes": {
+        "root": "smoke",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.0324, -0.0725, -0.0313],
+        "max": [0.0324, 0.0725, 0.0313]
+      },
+      "bodyBounds": {
+        "min": [-0.0324, -0.0725, -0.0313],
+        "max": [0.0324, 0.0725, 0.0313]
+      },
+      "stats": {
+        "vertices": 1430,
+        "triangles": 1704,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "vanillatography-m18"
+    },
+    "flash": {
+      "url": "equipment/flash.glb",
+      "hash": "0c20e12c302fd0fc",
+      "bytes": 1591628,
+      "nodes": {
+        "root": "flash",
+        "body": "body",
+        "spoon": "spoon",
+        "ring": "ring"
+      },
+      "bounds": {
+        "min": [-0.0275, -0.075, -0.0341],
+        "max": [0.0214, 0.075, 0.0247]
+      },
+      "bodyBounds": {
+        "min": [-0.0214, -0.075, -0.0247],
+        "max": [0.0214, 0.075, 0.0247]
+      },
+      "stats": {
+        "vertices": 3268,
+        "triangles": 3808,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "vanillatography-m84"
+    },
+    "molotov": {
+      "url": "equipment/molotov.glb",
+      "hash": "8cd60c757de2e88c",
+      "bytes": 824856,
+      "nodes": {
+        "root": "molotov",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.0509, -0.145, -0.0366],
+        "max": [0.0509, 0.145, 0.0366]
+      },
+      "bodyBounds": {
+        "min": [-0.0509, -0.145, -0.0366],
+        "max": [0.0509, 0.145, 0.0366]
+      },
+      "stats": {
+        "vertices": 2471,
+        "triangles": 4522,
+        "textures": 4,
+        "textureFormat": "ktx2"
+      },
+      "credit": "godlike-molotov"
+    },
+    "bandage": {
+      "url": "equipment/bandage.glb",
+      "hash": "cbdd43795f9d74c1",
+      "bytes": 812820,
+      "nodes": {
+        "root": "bandage",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.07, -0.0361, -0.007],
+        "max": [0.07, 0.0361, 0.007]
+      },
+      "bodyBounds": {
+        "min": [-0.07, -0.0361, -0.007],
+        "max": [0.07, 0.0361, 0.007]
+      },
+      "stats": {
+        "vertices": 1926,
+        "triangles": 2588,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "dwalsh-bandage"
+    },
+    "first_aid": {
+      "url": "equipment/first_aid.glb",
+      "hash": "5a634b55c4cd3cc0",
+      "bytes": 1442324,
+      "nodes": {
+        "root": "first_aid",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.0684, -0.095, -0.0619],
+        "max": [0.0684, 0.095, 0.0619]
+      },
+      "bodyBounds": {
+        "min": [-0.0684, -0.095, -0.0619],
+        "max": [0.0684, 0.095, 0.0619]
+      },
+      "stats": {
+        "vertices": 3029,
+        "triangles": 3632,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "ruskoschey-first-aid-kit"
+    },
+    "medkit": {
+      "url": "equipment/medkit.glb",
+      "hash": "e5f5c38cae01378e",
+      "bytes": 968056,
+      "nodes": {
+        "root": "medkit",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.2, -0.0371, -0.1333],
+        "max": [0.2, 0.0371, 0.1333]
+      },
+      "bodyBounds": {
+        "min": [-0.2, -0.0371, -0.1333],
+        "max": [0.2, 0.0371, 0.1333]
+      },
+      "stats": {
+        "vertices": 3302,
+        "triangles": 3718,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "polyhaven-medical-box"
+    },
+    "energy_drink": {
+      "url": "equipment/energy_drink.glb",
+      "hash": "38c0a77664a93a98",
+      "bytes": 537912,
+      "nodes": {
+        "root": "energy_drink",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.0363, -0.084, -0.0363],
+        "max": [0.0363, 0.084, 0.0363]
+      },
+      "bodyBounds": {
+        "min": [-0.0363, -0.084, -0.0363],
+        "max": [0.0363, 0.084, 0.0363]
+      },
+      "stats": {
+        "vertices": 1513,
+        "triangles": 1940,
+        "textures": 5,
+        "textureFormat": "ktx2"
+      },
+      "credit": "dwalsh-energy-drink"
+    },
+    "painkiller": {
+      "url": "equipment/painkiller.glb",
+      "hash": "4ae0943353ce9f99",
+      "bytes": 617768,
+      "nodes": {
+        "root": "painkiller",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.0233, -0.0425, -0.0233],
+        "max": [0.0233, 0.0425, 0.0233]
+      },
+      "bodyBounds": {
+        "min": [-0.0233, -0.0425, -0.0233],
+        "max": [0.0233, 0.0425, 0.0233]
+      },
+      "stats": {
+        "vertices": 691,
+        "triangles": 732,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "blender3d-pain-pills"
+    },
+    "helmet": {
+      "url": "equipment/helmet.glb",
+      "hash": "f0cb67772b8a577f",
+      "bytes": 512944,
+      "nodes": {
+        "root": "helmet",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.1116, -0.1076, -0.145],
+        "max": [0.1116, 0.1076, 0.145]
+      },
+      "bodyBounds": {
+        "min": [-0.1116, -0.1076, -0.145],
+        "max": [0.1116, 0.1076, 0.145]
+      },
+      "stats": {
+        "vertices": 4122,
+        "triangles": 4242,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "shamanoff-helmet"
+    },
+    "vest": {
+      "url": "equipment/vest.glb",
+      "hash": "676a86eda713d18b",
+      "bytes": 281672,
+      "nodes": {
+        "root": "vest",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.2236, -0.25, -0.2011],
+        "max": [0.2236, 0.25, 0.2011]
+      },
+      "bodyBounds": {
+        "min": [-0.2236, -0.25, -0.2011],
+        "max": [0.2236, 0.25, 0.2011]
+      },
+      "stats": {
+        "vertices": 4049,
+        "triangles": 2960,
+        "textures": 1,
+        "textureFormat": "ktx2"
+      },
+      "credit": "exactly-vest"
+    },
+    "backpack": {
+      "url": "equipment/backpack.glb",
+      "hash": "f19c2d10f3f748c0",
+      "bytes": 702032,
+      "nodes": {
+        "root": "backpack",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.2397, -0.275, -0.2843],
+        "max": [0.2397, 0.275, 0.2843]
+      },
+      "bodyBounds": {
+        "min": [-0.2397, -0.275, -0.2843],
+        "max": [0.2397, 0.275, 0.2843]
+      },
+      "stats": {
+        "vertices": 1873,
+        "triangles": 2730,
+        "textures": 6,
+        "textureFormat": "ktx2"
+      },
+      "credit": "danlyvostok-backpack"
+    },
+    "ammo_can": {
+      "url": "equipment/ammo_can.glb",
+      "hash": "f0cafb9d5c5c1379",
+      "bytes": 395984,
+      "nodes": {
+        "root": "ammo_can",
+        "body": "body"
+      },
+      "bounds": {
+        "min": [-0.15, -0.1026, -0.0803],
+        "max": [0.15, 0.1026, 0.0803]
+      },
+      "bodyBounds": {
+        "min": [-0.15, -0.1026, -0.0803],
+        "max": [0.15, 0.1026, 0.0803]
+      },
+      "stats": {
+        "vertices": 3437,
+        "triangles": 1998,
+        "textures": 3,
+        "textureFormat": "ktx2"
+      },
+      "credit": "dt7-ammo-cans"
+    }
+  },
+  "credits": [
+    {
+      "id": "djmaesen-arms-throwing",
+      "title": "Arms throwing",
+      "author": "DJMaesen",
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "url": "https://sketchfab.com/3d-models/arms-throwing-1f9a5c717aae4d0f9b77232b7da4b875",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, compressed and split into throw phases for twobullets."
+    },
+    {
+      "id": "firewarden3d-m67",
+      "title": "M67",
+      "author": "Firewarden3D",
+      "authorUrl": "https://sketchfab.com/Firewarden",
+      "url": "https://sketchfab.com/3d-models/m67-52dc34ff97984927b0322326e3171467",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets. Simplified slightly."
+    },
+    {
+      "id": "vanillatography-m18",
+      "title": "M18 Smoke Grenade",
+      "author": "Vanillatography",
+      "authorUrl": "https://sketchfab.com/vanillatography",
+      "url": "https://sketchfab.com/3d-models/m18-smoke-grenade-46343925ad0e47cf927e66da7953c372",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets. Normal map converted to OpenGL orientation."
+    },
+    {
+      "id": "vanillatography-m84",
+      "title": "M84 Stun Grenade \"Flashbang\"",
+      "author": "Vanillatography",
+      "authorUrl": "https://sketchfab.com/vanillatography",
+      "url": "https://sketchfab.com/3d-models/m84-stun-grenade-flashbang-3dbda8fe68ff4efdbf59f7d414c5619c",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "godlike-molotov",
+      "title": "Molotov Cocktail",
+      "author": "godlike",
+      "authorUrl": "https://sketchfab.com/thisisruslan",
+      "url": "https://sketchfab.com/3d-models/molotov-cocktail-d78c0bfaf7e2448cbd98a485ab079ad2",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "dwalsh-bandage",
+      "title": "Bandage Game Ready",
+      "author": "dwalsh",
+      "authorUrl": "https://sketchfab.com/dwalsh",
+      "url": "https://sketchfab.com/3d-models/bandage-game-ready-1ef457cb19484eb7bf826dd0bb973ede",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets. Printed product label painted out."
+    },
+    {
+      "id": "ruskoschey-first-aid-kit",
+      "title": "Tactical FIRST AID KIT",
+      "author": "Ruslan Koschey",
+      "authorUrl": "https://sketchfab.com/ruskoschey",
+      "url": "https://sketchfab.com/3d-models/tactical-first-aid-kit-011c33c121284bc88bb765a85511dae1",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "polyhaven-medical-box",
+      "title": "Medical Box",
+      "author": "Ulan Cabanilla (Poly Haven)",
+      "authorUrl": "https://polyhaven.com",
+      "url": "https://polyhaven.com/a/medical_box",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "attributionRequired": false,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "dwalsh-energy-drink",
+      "title": "Energy Drink Game Ready Model",
+      "author": "dwalsh",
+      "authorUrl": "https://sketchfab.com/dwalsh",
+      "url": "https://sketchfab.com/3d-models/energy-drink-game-ready-model-83676feb8b0a4589952cf3676299311b",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "blender3d-pain-pills",
+      "title": "Simple Pain Pills",
+      "author": "Blender3D",
+      "authorUrl": "https://sketchfab.com/Blender3D",
+      "url": "https://sketchfab.com/3d-models/simple-pain-pills-e8ff733b5a184335aac1e59d4c0820e0",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "shamanoff-helmet",
+      "title": "Combat helmet K6-3",
+      "author": "shamanoff",
+      "authorUrl": "https://sketchfab.com/shamanoff",
+      "url": "https://sketchfab.com/3d-models/combat-helmet-k6-3-94701874d8b949718708b018c8d4f61d",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "exactly-vest",
+      "title": "Tactical Plate Carrier Vest - Game Ready",
+      "author": "Exactly",
+      "authorUrl": "https://sketchfab.com/txyrm70",
+      "url": "https://sketchfab.com/3d-models/tactical-plate-carrier-vest-game-ready-3b51e6329dbb4b0aa14e43f12eb6c42a",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets."
+    },
+    {
+      "id": "danlyvostok-backpack",
+      "title": "Low Poly Game Ready Military Tactical Backpack",
+      "author": "DanlyVostok",
+      "authorUrl": "https://sketchfab.com/1799danly",
+      "url": "https://sketchfab.com/3d-models/low-poly-game-ready-military-tactical-backpack-95a4fc7300584384b56ce3add58dbc9f",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets. Retopology of the \"Military Tactical Backpack\" scan by Liam3D (CC BY 4.0): https://sketchfab.com/3d-models/military-tactical-backpack-9fa2da2c42234b58896e8d23393cac24"
+    },
+    {
+      "id": "dt7-ammo-cans",
+      "title": "AmmoCans_GameReady_Animated_PBR_FREE!",
+      "author": "Alexandr Chub",
+      "authorUrl": "https://sketchfab.com/DT7",
+      "url": "https://sketchfab.com/3d-models/ammocans-gameready-animated-pbr-free-4d14272e44bd4bb6898d91b223296606",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, resized and compressed for twobullets. Original: https://sketchfab.com/3d-models/ammocans-gameready-animated-pbr-free-4d14272e44bd4bb6898d91b223296606"
+    }
+  ]
+}

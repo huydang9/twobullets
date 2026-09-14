@@ -8,15 +8,20 @@ export interface ItemMeshSource {
   createWorldTemplate(kind: ThrowableKind): Mesh;
   /** Held model; consumables are a single body mesh under `root`. */
   createHeld(kind: ThrowableKind | ConsumableItemId): { readonly root: TransformNode; readonly meshes: readonly Mesh[] };
+  /** A ready ground model from the real (downloaded) model, or null when only the procedural one exists. */
+  createLootModel?(itemId: ThrowableKind | ConsumableItemId): Mesh | null;
 }
 
 /**
- * Ground models from the presentation's throwable and consumable meshes: a private copy (own geometry, shared materials)
- * laid down on the floor on its flattest side (grenades and bottles on their side, kits flat).
+ * Ground models from the presentation's throwable and consumable meshes: the real models' own resting pose when they
+ * loaded, else a private copy of the procedural mesh (own geometry, shared materials) laid down on the floor on its
+ * flattest side (grenades and bottles on their side, kits flat).
  */
 export function presentationLootModels(source: ItemMeshSource): LootModelFactory {
   return {
     createLootModel(itemId) {
+      const real = source.createLootModel?.(itemId) ?? null;
+      if (real) return real;
       let body: Mesh | null;
       let owner: { dispose(): void } | null;
       if (ITEMS[itemId].category === "throwable") {

@@ -1,0 +1,217 @@
+{
+  "note": "Equipment models (first-person throw arms, throwables, consumables, gear). CC BY 4.0 models require attribution; the Poly Haven model is CC0.",
+  "generated": "2026-09-15",
+  "pipeline": "tools/assets/equipment.ts (baked to item space, metal/rough, meshopt, KTX2)",
+  "sources": [
+    {
+      "id": "djmaesen-arms-throwing",
+      "title": "Arms throwing",
+      "authors": [
+        "DJMaesen"
+      ],
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/arms-throwing-1f9a5c717aae4d0f9b77232b7da4b875",
+      "notes": "Converted, compressed and split into throw phases for twobullets.",
+      "files": [
+        "equipment/throw_arms.glb ← equipment/arms-throwing/arms_throwing.glb"
+      ]
+    },
+    {
+      "id": "firewarden3d-m67",
+      "title": "M67",
+      "authors": [
+        "Firewarden3D"
+      ],
+      "authorUrl": "https://sketchfab.com/Firewarden",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/m67-52dc34ff97984927b0322326e3171467",
+      "notes": "Converted, resized and compressed for twobullets. Simplified slightly.",
+      "files": [
+        "equipment/frag.glb ← equipment/m67/m67.glb"
+      ]
+    },
+    {
+      "id": "vanillatography-m18",
+      "title": "M18 Smoke Grenade",
+      "authors": [
+        "Vanillatography"
+      ],
+      "authorUrl": "https://sketchfab.com/vanillatography",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/m18-smoke-grenade-46343925ad0e47cf927e66da7953c372",
+      "notes": "Converted, resized and compressed for twobullets. Normal map converted to OpenGL orientation.",
+      "files": [
+        "equipment/smoke.glb ← equipment/m18-smoke/m18_smoke_grenade.glb"
+      ]
+    },
+    {
+      "id": "vanillatography-m84",
+      "title": "M84 Stun Grenade \"Flashbang\"",
+      "authors": [
+        "Vanillatography"
+      ],
+      "authorUrl": "https://sketchfab.com/vanillatography",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/m84-stun-grenade-flashbang-3dbda8fe68ff4efdbf59f7d414c5619c",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/flash.glb ← equipment/m84-flashbang/m84_stun_grenade_flashbang.glb"
+      ]
+    },
+    {
+      "id": "godlike-molotov",
+      "title": "Molotov Cocktail",
+      "authors": [
+        "godlike"
+      ],
+      "authorUrl": "https://sketchfab.com/thisisruslan",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/molotov-cocktail-d78c0bfaf7e2448cbd98a485ab079ad2",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/molotov.glb ← equipment/molotov/molotov_cocktail.glb"
+      ]
+    },
+    {
+      "id": "dwalsh-bandage",
+      "title": "Bandage Game Ready",
+      "authors": [
+        "dwalsh"
+      ],
+      "authorUrl": "https://sketchfab.com/dwalsh",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/bandage-game-ready-1ef457cb19484eb7bf826dd0bb973ede",
+      "notes": "Converted, resized and compressed for twobullets. Printed product label painted out.",
+      "files": [
+        "equipment/bandage.glb ← equipment/bandage/bandage_game_ready.glb"
+      ]
+    },
+    {
+      "id": "ruskoschey-first-aid-kit",
+      "title": "Tactical FIRST AID KIT",
+      "authors": [
+        "Ruslan Koschey"
+      ],
+      "authorUrl": "https://sketchfab.com/ruskoschey",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/tactical-first-aid-kit-011c33c121284bc88bb765a85511dae1",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/first_aid.glb ← equipment/first-aid-kit/tactical_first_aid_kit.glb"
+      ]
+    },
+    {
+      "id": "polyhaven-medical-box",
+      "title": "Medical Box",
+      "authors": [
+        "Ulan Cabanilla (Poly Haven)"
+      ],
+      "authorUrl": "https://polyhaven.com",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "url": "https://polyhaven.com/a/medical_box",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/medkit.glb ← environment/models/medical_box/medical_box_2k.gltf"
+      ]
+    },
+    {
+      "id": "dwalsh-energy-drink",
+      "title": "Energy Drink Game Ready Model",
+      "authors": [
+        "dwalsh"
+      ],
+      "authorUrl": "https://sketchfab.com/dwalsh",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/energy-drink-game-ready-model-83676feb8b0a4589952cf3676299311b",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/energy_drink.glb ← equipment/energy-drink/energy_drink_game_ready_model.glb"
+      ]
+    },
+    {
+      "id": "blender3d-pain-pills",
+      "title": "Simple Pain Pills",
+      "authors": [
+        "Blender3D"
+      ],
+      "authorUrl": "https://sketchfab.com/Blender3D",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/simple-pain-pills-e8ff733b5a184335aac1e59d4c0820e0",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/painkiller.glb ← equipment/pain-pills/simple_pain_pills.glb"
+      ]
+    },
+    {
+      "id": "shamanoff-helmet",
+      "title": "Combat helmet K6-3",
+      "authors": [
+        "shamanoff"
+      ],
+      "authorUrl": "https://sketchfab.com/shamanoff",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/combat-helmet-k6-3-94701874d8b949718708b018c8d4f61d",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/helmet.glb ← equipment/helmet-k6-3/combat_helmet_k6-3.glb"
+      ]
+    },
+    {
+      "id": "exactly-vest",
+      "title": "Tactical Plate Carrier Vest - Game Ready",
+      "authors": [
+        "Exactly"
+      ],
+      "authorUrl": "https://sketchfab.com/txyrm70",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/tactical-plate-carrier-vest-game-ready-3b51e6329dbb4b0aa14e43f12eb6c42a",
+      "notes": "Converted, resized and compressed for twobullets.",
+      "files": [
+        "equipment/vest.glb ← equipment/plate-carrier-vest/tactical_plate_carrier_vest_-_game_ready.glb"
+      ]
+    },
+    {
+      "id": "danlyvostok-backpack",
+      "title": "Low Poly Game Ready Military Tactical Backpack",
+      "authors": [
+        "DanlyVostok"
+      ],
+      "authorUrl": "https://sketchfab.com/1799danly",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/low-poly-game-ready-military-tactical-backpack-95a4fc7300584384b56ce3add58dbc9f",
+      "notes": "Converted, resized and compressed for twobullets. Retopology of the \"Military Tactical Backpack\" scan by Liam3D (CC BY 4.0): https://sketchfab.com/3d-models/military-tactical-backpack-9fa2da2c42234b58896e8d23393cac24",
+      "files": [
+        "equipment/backpack.glb ← equipment/tactical-backpack/low_poly_game_ready_military_tactical_backpack.glb"
+      ]
+    },
+    {
+      "id": "dt7-ammo-cans",
+      "title": "AmmoCans_GameReady_Animated_PBR_FREE!",
+      "authors": [
+        "Alexandr Chub"
+      ],
+      "authorUrl": "https://sketchfab.com/DT7",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://sketchfab.com/3d-models/ammocans-gameready-animated-pbr-free-4d14272e44bd4bb6898d91b223296606",
+      "notes": "Converted, resized and compressed for twobullets. Original: https://sketchfab.com/3d-models/ammocans-gameready-animated-pbr-free-4d14272e44bd4bb6898d91b223296606",
+      "files": [
+        "equipment/ammo_can.glb ← equipment/ammo-can/ammocans_gameready_animated_pbr_free.glb"
+      ]
+    }
+  ]
+}

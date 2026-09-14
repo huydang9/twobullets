@@ -1,5 +1,6 @@
-import { Color3, CreateBox, CreateCylinder, CreateSphere, CreateTorus, Mesh, PBRMaterial, TransformNode, Vector3, type Scene } from "@babylonjs/core";
+import { Color3, CreateBox, CreateCylinder, CreateSphere, CreateTorus, Matrix, Mesh, PBRMaterial, TransformNode, Vector3, type Scene } from "@babylonjs/core";
 import type { ConsumableItemId, ThrowableKind } from "@twobullets/shared";
+import { AssetLibrary, type EquipmentModelInstance, type EquipmentPartRole } from "../../assets";
 
 /** Anything the hands can hold: a throwable or a consumable. */
 export type HeldItemKind = ThrowableKind | ConsumableItemId;
@@ -13,22 +14,49 @@ export interface HeldItem {
   readonly root: TransformNode;
   readonly meshes: readonly Mesh[];
   /** Grenade lever; flies off on cook or release. */
-  readonly spoon: Mesh | null;
+  readonly spoon: TransformNode | null;
   /** Pin and ring; pulled off by the left hand. */
-  readonly ring: Mesh | null;
-  /** Rest transforms of the animated parts. */
+  readonly ring: TransformNode | null;
+  /** Rest transforms of the animated parts (in their parent's space). */
   readonly spoonRest: Vector3;
   readonly ringRest: Vector3;
   /** Molotov rag tip, local space (flame emitter), else null. */
   readonly flameTip: Vector3 | null;
+  /** True for the downloaded model, false for the procedural stand-in. */
+  readonly real: boolean;
 }
 
-/** Radius used for rolling spin (m) and the rag tip of a thrown molotov (local space). */
-export const THROWABLE_SHAPE: Readonly<Record<ThrowableKind, { readonly rollRadius: number; readonly cylinder: boolean; readonly flameTip: Vector3 | null }>> = {
+export interface ThrowableShape {
+  /** Radius used for rolling spin, m. */
+  readonly rollRadius: number;
+  /** Lies on its side at rest (a can or bottle) rather than rolling like a ball. */
+  readonly cylinder: boolean;
+  /** Rag tip of a thrown molotov, local space. */
+  readonly flameTip: Vector3 | null;
+}
+
+/** Procedural shapes (the fallback); `ItemMeshLibrary.shape` measures the real models instead. */
+export const THROWABLE_SHAPE: Readonly<Record<ThrowableKind, ThrowableShape>> = {
   frag: { rollRadius: 0.032, cylinder: false, flameTip: null },
   smoke: { rollRadius: 0.031, cylinder: true, flameTip: null },
   flash: { rollRadius: 0.022, cylinder: true, flameTip: null },
   molotov: { rollRadius: 0.035, cylinder: true, flameTip: new Vector3(0, 0.16, 0) },
+};
+
+/**
+ * How a real model rests as ground loot: XYZ rotation (radians) applied in item space before it is dropped onto the
+ * floor. Grenades, cans and bottles lie on their side; flat packs lie on their face.
+ */
+const LOOT_REST: Readonly<Record<HeldItemKind, readonly [number, number, number]>> = {
+  frag: [0, 0, Math.PI / 2],
+  smoke: [0, 0, Math.PI / 2],
+  flash: [0, 0, Math.PI / 2],
+  molotov: [0, 0, Math.PI / 2],
+  bandage: [Math.PI / 2, 0, 0],
+  first_aid: [Math.PI / 2, 0, 0],
+  medkit: [0, 0, 0],
+  energy_drink: [0, 0, Math.PI / 2],
+  painkiller: [0, 0, Math.PI / 2],
 };
 
 type MaterialKey =
@@ -79,26 +107,64 @@ interface Part {
 }
 
 /**
- * Procedural, PBR-shaded models for the throwables (frag, smoke, flashbang, molotov with its rag) and consumables.
- * Throwables have a merged world template (drawn thin-instanced in flight) and held variants with a separate spoon
- * and pin ring; every copy shares geometry-free materials from one cache.
+ * Throwable (frag, smoke, flashbang, molotov) and consumable models: the downloaded, pipeline-built GLBs from the
+ * AssetLibrary when they loaded (`equipment/*.glb`), else procedural PBR stand-ins. Throwables have a merged world
+ * template (drawn thin-instanced in flight, without pin and ring; the spoon has its own template) and held variants with
+ * a separate spoon and pin ring. Real models share the library's template materials; procedural ones share one cache.
  */
 export class ItemMeshLibrary {
   private readonly materials = new Map<MaterialKey, PBRMaterial>();
   private readonly owned: (Mesh | TransformNode)[] = [];
+  private readonly instances: EquipmentModelInstance[] = [];
+  private readonly shapes = new Map<ThrowableKind, ThrowableShape>();
 
-  constructor(private readonly scene: Scene) {}
+  constructor(
+    private readonly scene: Scene,
+    private readonly assets: AssetLibrary | null = AssetLibrary.forScene(scene),
+  ) {}
+
+  /** True when `kind` is drawn with its downloaded model. */
+  hasModel(kind: HeldItemKind): boolean {
+    return this.assets?.hasEquipment(kind) ?? false;
+  }
+
+  /** Rolling radius, resting style and rag tip of a thrown `kind`, measured from the model in use. */
+  shape(kind: ThrowableKind): ThrowableShape {
+    let shape = this.shapes.get(kind);
+    if (shape) return shape;
+    const asset = this.hasModel(kind) ? this.assets!.equipment!.items[kind]! : null;
+    if (!asset) {
+      shape = THROWABLE_SHAPE[kind];
+    } else {
+      const { min, max } = asset.bodyBounds;
+      const radius = Math.max(max[0] - min[0], max[2] - min[2]) / 2;
+      shape = {
+        rollRadius: radius,
+        cylinder: THROWABLE_SHAPE[kind].cylinder,
+        // The rag hangs from the bottle's neck: burn just below the top of the whole model.
+        flameTip: kind === "molotov" ? new Vector3(0, asset.bounds.max[1] - 0.02, 0) : null,
+      };
+    }
+    this.shapes.set(kind, shape);
+    return shape;
+  }
 
   /** A merged, invisible-until-instanced template of a thrown `kind` (no pin or spoon: they stay behind). */
   createWorldTemplate(kind: ThrowableKind): Mesh {
-    const parts = this.buildParts(kind);
-    const body: Mesh[] = [];
-    for (const part of parts) {
-      if (part.group === "body") body.push(part.mesh);
-      else part.mesh.dispose();
-    }
-    const mesh = this.merge(`eq_world_${kind}`, body);
+    const real = this.assets?.hasEquipment(kind) ? this.assets.createEquipmentMesh(kind, `eq_world_${kind}`, ["body"]) : null;
+    const mesh = real ?? this.proceduralWorldTemplate(kind);
     // Nothing draws until the caller instances or clones it.
+    mesh.isVisible = false;
+    mesh.isPickable = false;
+    this.owned.push(mesh);
+    return mesh;
+  }
+
+  /** The spoon alone (item-space rest transform baked), for the lever that flies off a thrown grenade; null if none. */
+  createSpoonTemplate(kind: ThrowableKind): Mesh | null {
+    if (!this.assets?.hasEquipment(kind) || !this.assets.equipment?.items[kind]?.nodes.spoon) return null;
+    const mesh = this.assets.createEquipmentMesh(kind, `eq_spoon_${kind}`, ["spoon"]);
+    if (!mesh) return null;
     mesh.isVisible = false;
     this.owned.push(mesh);
     return mesh;
@@ -106,6 +172,76 @@ export class ItemMeshLibrary {
 
   /** A held copy of `kind` under its own root node, disabled until the caller parents and enables it. */
   createHeld(kind: HeldItemKind): HeldItem {
+    const instance = this.assets?.hasEquipment(kind) ? this.instantiate(kind) : null;
+    return instance ? this.heldFromInstance(kind, instance) : this.proceduralHeld(kind);
+  }
+
+  /**
+   * A ground-loot template for a throwable or consumable with its real model (every part, resting on its side or face,
+   * origin on the floor contact, +Y up), or null to let the loot code use the procedural path. The caller owns it.
+   */
+  createLootModel(itemId: HeldItemKind): Mesh | null {
+    if (!this.assets?.hasEquipment(itemId)) return null;
+    const mesh = this.assets.createEquipmentMesh(itemId, `loot_${itemId}_model`);
+    if (!mesh) return null;
+    const [x, y, z] = LOOT_REST[itemId];
+    restOnFloor(mesh, Matrix.RotationYawPitchRoll(y, x, z));
+    return mesh;
+  }
+
+  dispose(): void {
+    for (const instance of this.instances) instance.dispose();
+    for (const node of this.owned) node.dispose();
+    for (const material of this.materials.values()) material.dispose();
+    this.instances.length = 0;
+    this.owned.length = 0;
+    this.materials.clear();
+  }
+
+  private instantiate(kind: HeldItemKind): EquipmentModelInstance | null {
+    try {
+      return this.assets?.instantiateEquipment(kind) ?? null;
+    } catch (error) {
+      console.warn(`[equipment] ${kind}: model instance failed; using the procedural stand-in`, error);
+      return null;
+    }
+  }
+
+  private heldFromInstance(kind: HeldItemKind, instance: EquipmentModelInstance): HeldItem {
+    const root = new TransformNode(`eq_held_${kind}`, this.scene);
+    root.setEnabled(false);
+    instance.root.parent = root;
+    this.instances.push(instance);
+    this.owned.push(root);
+    const meshes = instance.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh);
+    for (const mesh of meshes) mesh.isPickable = false;
+    const part = (role: EquipmentPartRole) => instance.parts[role] ?? null;
+    const spoon = part("spoon");
+    const ring = part("ring");
+    return {
+      kind,
+      root,
+      meshes,
+      spoon,
+      ring,
+      spoonRest: spoon ? spoon.position.clone() : Vector3.Zero(),
+      ringRest: ring ? ring.position.clone() : Vector3.Zero(),
+      flameTip: kind === "molotov" ? this.shape("molotov").flameTip : null,
+      real: true,
+    };
+  }
+
+  private proceduralWorldTemplate(kind: ThrowableKind): Mesh {
+    const parts = this.buildParts(kind);
+    const body: Mesh[] = [];
+    for (const part of parts) {
+      if (part.group === "body") body.push(part.mesh);
+      else part.mesh.dispose();
+    }
+    return this.merge(`eq_world_${kind}`, body);
+  }
+
+  private proceduralHeld(kind: HeldItemKind): HeldItem {
     const parts = this.buildParts(kind);
     const root = new TransformNode(`eq_held_${kind}`, this.scene);
     root.setEnabled(false);
@@ -132,14 +268,8 @@ export class ItemMeshLibrary {
       spoonRest: spoon ? spoon.position.clone() : Vector3.Zero(),
       ringRest: ring ? ring.position.clone() : Vector3.Zero(),
       flameTip: shape?.flameTip ?? null,
+      real: false,
     };
-  }
-
-  dispose(): void {
-    for (const node of this.owned) node.dispose();
-    for (const material of this.materials.values()) material.dispose();
-    this.owned.length = 0;
-    this.materials.clear();
   }
 
   private material(key: MaterialKey): PBRMaterial {
@@ -277,4 +407,13 @@ export class ItemMeshLibrary {
     }
     return parts;
   }
+}
+
+/** Bakes `rotation` into the vertices, then centres the mesh on the origin horizontally with its lowest point at y = 0. */
+export function restOnFloor(mesh: Mesh, rotation: Matrix): void {
+  mesh.bakeTransformIntoVertices(rotation);
+  mesh.refreshBoundingInfo();
+  const box = mesh.getBoundingInfo().boundingBox;
+  mesh.bakeTransformIntoVertices(Matrix.Translation(-box.center.x, -box.minimum.y, -box.center.z));
+  mesh.refreshBoundingInfo();
 }
