@@ -8,7 +8,8 @@ import { MOVEMENT } from "@twobullets/shared/constants";
 import { OPEN_MOVE_GATES, deriveMoveModifiers, moveInputFrom, type MoveGates, type PlayerInput, type PlayerState } from "@twobullets/shared/input";
 import type { LevelData } from "@twobullets/shared/level/types";
 import type { Stance, Vec3 } from "@twobullets/shared/movement/types";
-import type { FiredShot, RaycastFn, WeaponEvent } from "@twobullets/shared/weapons/types";
+import { combatInputInto, createCombatInput, createWeaponContext, stepPlayerWeapon, weaponContextInto } from "@twobullets/shared/weapons/playerWeapon";
+import type { AimedShot, RaycastFn, WeaponEvent } from "@twobullets/shared/weapons/types";
 import { CharacterBody } from "./CharacterBody";
 import { buildCollision } from "./level/collision";
 import { WorldRaycaster } from "./WorldRaycaster";
@@ -100,27 +101,43 @@ export interface PlayerBody {
 
 export interface StepResult {
   readonly state: PlayerState;
-  readonly shots: readonly FiredShot[];
+  /** Shots fired this tick (`weapons: true`, never on replay). Projectile ids: `projectileId(slot, shot.shotId, pellet)`. */
+  readonly shots: readonly AimedShot[];
+  /** Movement and weapon events of this tick; empty on replay. */
   readonly events: readonly SimEvent[];
 }
 
 export interface StepOptions {
-  /** Replaying after a correction: callers must not emit observers/FX for this step (R11). */
+  /**
+   * Replaying after a correction (R11): the state advances exactly as live, but no shots or events are returned, so
+   * nothing is re-emitted to observers and recoil is never kicked twice.
+   */
   readonly replay: boolean;
   /**
    * Movement gates from state the sim doesn't own yet (equipment: healing, knocked, boost). Default: open. Server and
    * client must pass the same gates for a tick; M5 derives them from `PlayerState` vitals/item state.
    */
   readonly gates?: MoveGates;
+  /**
+   * Run the weapon step after movement (T4.1). Default false: `s.weapon` passes through unchanged, for movement-only
+   * callers (M3 server and client net movement with a fixed weapon, offline PlayerController whose weapons CombatSystem
+   * steps). Client prediction and the server must agree on it.
+   */
+  readonly weapons?: boolean;
 }
 
-const NO_SHOTS: readonly FiredShot[] = Object.freeze([]);
+const NO_SHOTS: readonly AimedShot[] = Object.freeze([]);
 const NO_EVENTS: readonly SimEvent[] = Object.freeze([]);
+const weaponContext = createWeaponContext();
+const combatInput = createCombatInput();
 
 /**
- * One 60 Hz tick, movement only (T3.1): modifiers from start-of-tick weapon state and the input's buttons →
- * movement. The weapon state passes through unchanged; M4 adds the weapon step after movement.
- * Deterministic for (body restored to `s.move`'s feet/velocity/stance, `s`, `i`, `dt`, `gates`).
+ * One 60 Hz player tick, the authoritative step on client and server:
+ * 1. movement modifiers from the start-of-tick weapon state and this tick's buttons (R3),
+ * 2. movement (Havok character controller),
+ * 3. with `weapons`: the weapon step (fire, ADS, reload, switch, bolt) from the input's buttons and dequantized aim
+ *    (R10) at the moved eye.
+ * Deterministic for (body restored to `s.move`'s feet/velocity/stance, `s`, `i`, `dt`, options).
  */
 export function stepPlayer(body: PlayerBody, s: PlayerState, i: PlayerInput, dt: number, o: StepOptions): StepResult {
   if (!(body instanceof CharacterBody)) throw new Error("stepPlayer needs a CharacterBody (SimWorld.createBody or new CharacterBody)");
@@ -128,10 +145,23 @@ export function stepPlayer(body: PlayerBody, s: PlayerState, i: PlayerInput, dt:
   const previous = s.move;
   const move = body.step(previous, moveInput, dt);
 
+  let weapon = s.weapon;
+  let shots = NO_SHOTS;
+  let weaponEvents: readonly WeaponEvent[] = NO_EVENTS as readonly WeaponEvent[];
+  if (o.weapons) {
+    const ctx = weaponContextInto(weaponContext, body.feet, move, i);
+    const stepped = stepPlayerWeapon(s.weapon, combatInputInto(combatInput, i), ctx, dt, o.replay);
+    weapon = stepped.state;
+    shots = stepped.shots;
+    weaponEvents = stepped.events;
+  }
+  if (o.replay) return { state: { move, weapon }, shots: NO_SHOTS, events: NO_EVENTS };
+
   let events: SimEvent[] | null = null;
   if (move.groundIgnoreTimer > previous.groundIgnoreTimer) (events ??= []).push({ type: "jumped" });
   if (!previous.grounded && move.grounded) (events ??= []).push({ type: "landed", fallSpeed: previous.fallSpeed });
   if (move.stance !== previous.stance) (events ??= []).push({ type: "stanceChanged", stance: move.stance });
+  if (weaponEvents.length > 0) (events ??= []).push(...weaponEvents);
 
-  return { state: { move, weapon: s.weapon }, shots: NO_SHOTS, events: events ?? NO_EVENTS };
+  return { state: { move, weapon }, shots, events: events ?? NO_EVENTS };
 }

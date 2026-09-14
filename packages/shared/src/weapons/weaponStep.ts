@@ -2,8 +2,8 @@ import { MOVEMENT } from "../constants";
 import { len3 } from "../equipment/math";
 import type { Vec3 } from "../movement/types";
 import type {
+  AimedShot,
   CombatInput,
-  FiredShot,
   WeaponContext,
   WeaponDef,
   WeaponEvent,
@@ -37,41 +37,45 @@ export function createWeaponState(loadout: readonly (WeaponId | null)[]): Weapon
   };
 }
 
+/** Options of one weapon tick. */
+export interface WeaponStepOptions {
+  /**
+   * False fires without building shots or events: state (ammo, cooldown, bloom, shotCounter) advances exactly as usual,
+   * but nothing observable is produced. Replays after a correction use it (R11). Default true.
+   */
+  readonly emit?: boolean;
+}
+
+const NO_SHOTS: readonly AimedShot[] = Object.freeze([]);
+const NO_EVENTS: readonly WeaponEvent[] = Object.freeze([]);
+
 /**
  * Pure, deterministic weapon tick: switching, equip, reload, fire rate, fire modes, ADS blend,
  * bloom, spread and recoil. Same code runs on the server for authority.
  *
  * Order within a tick: phase timers → switch → reload request → fire → ADS blend.
  * Spread and recoil randomness is seeded from shotCounter only, so identical state + input ⇒ identical shots.
+ * Returns the input state object when nothing changed, and shared empty arrays when nothing fired or happened.
  */
-export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponContext, dt: number): WeaponStepResult {
-  const events: WeaponEvent[] = [];
-  const shots: FiredShot[] = [];
-  if (!state.slots[state.activeIndex]) {
-    return { state: { ...state, triggerHeld: input.fire }, shots, events };
+export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponContext, dt: number, options?: WeaponStepOptions): WeaponStepResult {
+  const emit = options?.emit ?? true;
+  const active = state.slots[state.activeIndex];
+  if (!active) {
+    return { state: state.triggerHeld === input.fire ? state : { ...state, triggerHeld: input.fire }, shots: NO_SHOTS, events: NO_EVENTS };
   }
 
   let slots = state.slots;
-  let activeIndex = state.activeIndex;
-  let slot = slots[activeIndex]!;
+  const activeIndex0 = state.activeIndex;
+  let activeIndex = activeIndex0;
+  let slot = active;
   let def = WEAPONS[slot.id];
   let phase: WeaponPhase = state.phase;
   let phaseTimer = state.phaseTimer;
   let bloom = state.bloom;
   let adsBlend = state.adsBlend;
   let shotCounter = state.shotCounter;
-
-  const setSlot = (next: WeaponSlotState): void => {
-    const copy = slots.slice();
-    copy[activeIndex] = next;
-    slots = copy;
-    slot = next;
-  };
-  const startReload = (): void => {
-    phase = "reloading";
-    phaseTimer = def.reloadSeconds;
-    events.push({ type: "reloadStarted", weaponId: def.id, seconds: def.reloadSeconds });
-  };
+  let events: WeaponEvent[] | null = null;
+  let shots: AimedShot[] | null = null;
 
   // Equip / reload timers. Advanced before new phases start, so a phase lasts exactly its duration in ticks.
   if (phase !== "ready") {
@@ -79,8 +83,9 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
     if (phaseTimer <= TIMER_EPSILON) {
       if (phase === "reloading") {
         const loaded = Math.min(def.magazineSize - slot.magazine, slot.reserve);
-        setSlot({ ...slot, magazine: slot.magazine + loaded, reserve: slot.reserve - loaded });
-        events.push({ type: "reloadFinished", weaponId: def.id });
+        slot = { ...slot, magazine: slot.magazine + loaded, reserve: slot.reserve - loaded };
+        slots = withSlot(slots, activeIndex, slot);
+        if (emit) (events ??= []).push({ type: "reloadFinished", weaponId: def.id });
       }
       phase = "ready";
       phaseTimer = 0;
@@ -89,7 +94,7 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
 
   const select = input.selectIndex;
   if (select !== null && Number.isInteger(select) && select !== activeIndex && slots[select]) {
-    if (phase === "reloading") events.push({ type: "reloadCancelled", weaponId: def.id });
+    if (phase === "reloading" && emit) (events ??= []).push({ type: "reloadCancelled", weaponId: def.id });
     activeIndex = select;
     slot = slots[select]!;
     def = WEAPONS[slot.id];
@@ -97,11 +102,13 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
     phaseTimer = def.equipSeconds;
     adsBlend = 0;
     bloom = 0;
-    events.push({ type: "equipStarted", weaponId: def.id, seconds: def.equipSeconds });
+    if (emit) (events ??= []).push({ type: "equipStarted", weaponId: def.id, seconds: def.equipSeconds });
   }
 
   if (input.reload && phase === "ready" && slot.magazine < def.magazineSize && slot.reserve > 0) {
-    startReload();
+    phase = "reloading";
+    phaseTimer = def.reloadSeconds;
+    if (emit) (events ??= []).push({ type: "reloadStarted", weaponId: def.id, seconds: def.reloadSeconds });
   }
 
   // Firing. `cooldown` is the time until the next shot is allowed, measured from this tick.
@@ -111,12 +118,17 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
   const wantsFire = def.fireMode === "auto" ? input.fire : pressed;
 
   if (phase === "ready" && input.fire && slot.magazine === 0) {
-    if (pressed) events.push({ type: "dryFire", weaponId: def.id });
-    if (slot.reserve > 0) startReload();
+    if (pressed && emit) (events ??= []).push({ type: "dryFire", weaponId: def.id });
+    if (slot.reserve > 0) {
+      phase = "reloading";
+      phaseTimer = def.reloadSeconds;
+      if (emit) (events ??= []).push({ type: "reloadStarted", weaponId: def.id, seconds: def.reloadSeconds });
+    }
   } else if (phase === "ready" && wantsFire && cooldown <= TIMER_EPSILON) {
     // ADS blend for accuracy/recoil is the pre-fire value: aiming this very tick doesn't retroactively tighten the shot.
-    shots.push(buildShot(def, shotCounter, ctx, spreadDegrees(def, adsBlend, bloom, ctx), adsBlend));
-    setSlot({ ...slot, magazine: slot.magazine - 1 });
+    if (emit) (shots ??= []).push(buildShot(def, shotCounter, ctx, spreadDegrees(def, adsBlend, bloom, ctx), adsBlend));
+    slot = { ...slot, magazine: slot.magazine - 1 };
+    slots = withSlot(slots, activeIndex, slot);
     shotCounter += 1;
     bloom = Math.min(def.spread.maxBloom, bloom + def.spread.bloomPerShot);
     // If the weapon became ready part-way through the last tick, carry that overshoot into the next interval so
@@ -131,20 +143,22 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
   const adsStep = dt / Math.max(def.ads.seconds, 1e-3);
   adsBlend = adsTarget > adsBlend ? Math.min(adsTarget, adsBlend + adsStep) : Math.max(adsTarget, adsBlend - adsStep);
 
+  const unchanged =
+    slots === state.slots &&
+    activeIndex === activeIndex0 &&
+    phase === state.phase &&
+    phaseTimer === state.phaseTimer &&
+    cooldown === state.cooldown &&
+    input.fire === state.triggerHeld &&
+    bloom === state.bloom &&
+    adsBlend === state.adsBlend &&
+    shotCounter === state.shotCounter;
   return {
-    state: {
-      slots,
-      activeIndex,
-      phase,
-      phaseTimer,
-      cooldown,
-      triggerHeld: input.fire,
-      bloom,
-      adsBlend,
-      shotCounter,
-    },
-    shots,
-    events,
+    state: unchanged
+      ? state
+      : { slots, activeIndex, phase, phaseTimer, cooldown, triggerHeld: input.fire, bloom, adsBlend, shotCounter },
+    shots: shots ?? NO_SHOTS,
+    events: events ?? NO_EVENTS,
   };
 }
 
@@ -176,7 +190,7 @@ function spreadDegrees(def: WeaponDef, adsBlend: number, bloom: number, ctx: Wea
   return lerp(s.hip, s.ads, adsBlend) + s.moving * moveScale + (ctx.grounded ? 0 : s.airborne) + bloom;
 }
 
-function buildShot(def: WeaponDef, shotId: number, ctx: WeaponContext, spread: number, adsBlend: number): FiredShot {
+function buildShot(def: WeaponDef, shotId: number, ctx: WeaponContext, spread: number, adsBlend: number): AimedShot {
   const random = createRng(shotId);
   const directions = pelletDirections(def, random, ctx.yaw, ctx.pitch, spread);
   const recoilScale = lerp(1, def.recoil.adsMultiplier, adsBlend) * DEG_TO_RAD;
@@ -188,7 +202,16 @@ function buildShot(def: WeaponDef, shotId: number, ctx: WeaponContext, spread: n
     recoilUp: def.recoil.up * recoilScale,
     // Drawn after the pellets, so it stays on the same RNG stream position as before shotDirections existed.
     recoilRight: (random() * 2 - 1) * def.recoil.yaw * recoilScale,
+    yaw: ctx.yaw,
+    pitch: ctx.pitch,
+    spreadDegrees: spread,
   };
+}
+
+function withSlot(slots: readonly (WeaponSlotState | null)[], index: number, slot: WeaponSlotState): (WeaponSlotState | null)[] {
+  const copy = slots.slice();
+  copy[index] = slot;
+  return copy;
 }
 
 /**

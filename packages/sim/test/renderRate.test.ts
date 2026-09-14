@@ -1,10 +1,9 @@
-import { Btn, selectIndexOf, type PlayerState } from "@twobullets/shared/input";
+import type { PlayerState } from "@twobullets/shared/input";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
-import { createMoveState, eyeHeightFor } from "@twobullets/shared/movement/movement";
+import { createMoveState } from "@twobullets/shared/movement/movement";
 import { AccumulatorClock, TICK_SECONDS } from "@twobullets/shared/tickClock";
 import { DEFAULT_LOADOUT } from "@twobullets/shared/weapons/weapons";
-import { createWeaponState, stepWeapon } from "@twobullets/shared/weapons/weaponStep";
-import { dequantizeAim } from "@twobullets/shared/aim";
+import { createWeaponState } from "@twobullets/shared/weapons/weaponStep";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CharacterBody } from "../src/CharacterBody";
 import { createSimWorld, stepPlayer, type SimWorld } from "../src/index";
@@ -39,25 +38,8 @@ function run(fps: number, hitchEvery: number): string[] {
     const dt = hitchEvery > 0 && frame % hitchEvery === 0 ? 0.1 : 1 / fps;
     for (let n = clock.advance(dt); n > 0 && prints.length < TICKS; n--) {
       const tick = clock.nextTick();
-      const input = inputs[tick]!;
-      // Movement first (modifiers from the start-of-tick weapon state), then the weapon (R3 tick order).
-      const moved = stepPlayer(body, state, input, TICK_SECONDS, { replay: false, gates: gates[tick] });
-      const aim = dequantizeAim(input.yawQ, input.pitchQ);
-      const move = moved.state.move;
-      const weapon = stepWeapon(
-        moved.state.weapon,
-        { fire: (input.buttons & Btn.fire) !== 0, aim: (input.buttons & Btn.aim) !== 0, reload: false, selectIndex: selectIndexOf(input) },
-        {
-          eye: { x: body.feet.x, y: body.feet.y + eyeHeightFor(move.stance), z: body.feet.z },
-          yaw: aim.yaw,
-          pitch: aim.pitch,
-          horizontalSpeed: Math.sqrt(move.velocity.x ** 2 + move.velocity.z ** 2),
-          grounded: move.grounded,
-          sprinting: move.sprinting,
-        },
-        TICK_SECONDS,
-      ).state;
-      state = { move, weapon };
+      // Movement (modifiers from the start-of-tick weapon state), then the weapon, in one step (R3 tick order).
+      state = stepPlayer(body, state, inputs[tick]!, TICK_SECONDS, { replay: false, gates: gates[tick], weapons: true }).state;
       prints.push(fingerprint(body, state));
     }
   }

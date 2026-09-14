@@ -7,8 +7,8 @@ import type {
   RaycastFn,
   WeaponDef,
 } from "./types";
-import { len3 } from "../equipment/math";
-import { BALLISTICS, WEAPONS } from "./weapons";
+import { ProjectileBuffer, projectileWeaponIndex, type ProjectileSink } from "./projectileBuffer";
+import { WEAPONS } from "./weapons";
 
 /** Creates one projectile per pellet direction of a fired shot. `nextId` supplies unique projectile ids. */
 export function spawnProjectiles(shot: FiredShot, nextId: () => number): Projectile[] {
@@ -24,53 +24,67 @@ export function spawnProjectiles(shot: FiredShot, nextId: () => number): Project
   }));
 }
 
+/** Adapter scratch: the object API runs the buffer's arithmetic so both stay bit-identical. */
+const scratch = new ProjectileBuffer(64);
+
 /**
  * Advances projectiles by dt with gravity, casting a segment per projectile per step so fast bullets never
  * tunnel. Pure apart from the injected raycast.
  *
  * Semi-implicit Euler: velocity is updated first, then position with the new velocity. The segment is
  * clipped at max range so nothing is hit beyond it.
+ *
+ * Buffer form (R7, hot path): steps a `ProjectileBuffer` in place with zero allocations, reporting to `sink`.
+ * Object form: a thin adapter over the same arithmetic that returns new objects (tests, offline client).
  */
-export function stepProjectiles(projectiles: readonly Projectile[], dt: number, raycast: RaycastFn): ProjectileStepResult {
+export function stepProjectiles(buffer: ProjectileBuffer, dt: number, raycast: RaycastFn, sink: ProjectileSink): void;
+export function stepProjectiles(projectiles: readonly Projectile[], dt: number, raycast: RaycastFn): ProjectileStepResult;
+export function stepProjectiles(
+  projectiles: ProjectileBuffer | readonly Projectile[],
+  dt: number,
+  raycast: RaycastFn,
+  sink?: ProjectileSink,
+): ProjectileStepResult | undefined {
+  if (projectiles instanceof ProjectileBuffer) {
+    if (!sink) throw new Error("stepProjectiles(buffer) needs a sink");
+    projectiles.step(dt, raycast, sink);
+    return undefined;
+  }
+
   const alive: Projectile[] = [];
   const impacts: ProjectileImpact[] = [];
   const expired: Projectile[] = [];
-
+  const buffer = scratch;
+  buffer.clear();
   for (const p of projectiles) {
-    const def = WEAPONS[p.weaponId];
-    const vx = p.velocity.x;
-    const vy = p.velocity.y - BALLISTICS.gravity * def.gravityScale * dt;
-    const vz = p.velocity.z;
+    const { position: q, velocity: v } = p;
+    buffer.add(0, 0, 0, projectileWeaponIndex(p.weaponId), q.x, q.y, q.z, v.x, v.y, v.z, p.distance, p.age);
+  }
 
-    let dx = vx * dt;
-    let dy = vy * dt;
-    let dz = vz * dt;
-    let length = len3(dx, dy, dz);
-    const remaining = Math.max(0, def.maxRangeMeters - p.distance);
-    const reachesMaxRange = length >= remaining;
-    if (reachesMaxRange && length > 0) {
-      const s = remaining / length;
-      dx *= s;
-      dy *= s;
-      dz *= s;
-      length = remaining;
-    }
-
-    const end = { x: p.position.x + dx, y: p.position.y + dy, z: p.position.z + dz };
-    const velocity = { x: vx, y: vy, z: vz };
-    const age = p.age + dt;
-    const hit = length > 0 ? raycast(p.position, end) : null;
+  // In input order and without removal, so the result lists keep the caller's order.
+  const seg = buffer.segment;
+  for (let i = 0; i < projectiles.length; i++) {
+    const p = projectiles[i]!;
+    const reachesMaxRange = buffer.integrate(i, dt, seg);
+    const i3 = i * 3;
+    const velocity = { x: buffer.velocity[i3]!, y: buffer.velocity[i3 + 1]!, z: buffer.velocity[i3 + 2]! };
+    const age = buffer.age[i]!;
+    const end = { x: seg[3]!, y: seg[4]!, z: seg[5]! };
+    const hit = seg[6]! > 0 ? raycast(p.position, end) : null;
 
     if (hit) {
-      const distance = p.distance + hit.fraction * length;
+      buffer.commitHit(i, seg, hit.point, hit.fraction);
+      const distance = buffer.distance[i]!;
       impacts.push({ projectile: { ...p, position: hit.point, velocity, distance, age }, hit, distance });
       continue;
     }
 
-    const next: Projectile = { ...p, position: end, velocity, distance: p.distance + length, age };
-    if (reachesMaxRange || age >= BALLISTICS.maxLifetimeSeconds) expired.push(next);
-    else alive.push(next);
+    const flying = buffer.advance(i, seg, reachesMaxRange);
+    const next: Projectile = { ...p, position: end, velocity, distance: buffer.distance[i]!, age };
+    if (flying) alive.push(next);
+    else expired.push(next);
   }
+  buffer.clear();
 
   return { alive, impacts, expired };
 }

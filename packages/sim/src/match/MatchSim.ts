@@ -79,13 +79,13 @@ import { eyeHeightFor, fallDamage } from "@twobullets/shared/movement/movement";
 import type { MoveState, Stance, Vec3 } from "@twobullets/shared/movement/types";
 import { createMoveState } from "@twobullets/shared/movement/movement";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
-import type { CombatInput, RaycastFn, WeaponContext, WeaponId, WeaponState } from "@twobullets/shared/weapons/types";
+import type { RaycastFn, WeaponId, WeaponState } from "@twobullets/shared/weapons/types";
 import { computeDamage } from "@twobullets/shared/weapons/ballistics";
 import { WEAPONS } from "@twobullets/shared/weapons/weapons";
-import { stepWeapon } from "@twobullets/shared/weapons/weaponStep";
+import { combatInputInto, createCombatInput, createWeaponContext, stepPlayerWeapon, weaponContextInto } from "@twobullets/shared/weapons/playerWeapon";
+import { ProjectileBuffer } from "@twobullets/shared/weapons/projectileBuffer";
 import { stepPlayer, type PlayerBody, type StepOptions } from "../index";
 import { queryGroundLootInto } from "./lootQuery";
-import { ProjectilePool } from "./projectiles";
 
 // Headless battle royale match (docs/bots/design.md §2): bot actors stepped through the shared movement, equipment and
 // weapon steps from their brains' PlayerInput, bullets against the static world and the procedural rig, knock/revive,
@@ -356,7 +356,7 @@ export class MatchSim implements MatchView {
   private readonly teams: MutableTeamState[];
   private readonly zonePhases: ZonePhase[] = [];
   private readonly zone: MutableZoneState;
-  private readonly projectiles = new ProjectilePool();
+  private readonly projectiles = new ProjectileBuffer();
   private readonly equipment: MatchSimEquipment;
   private readonly ownEquipment: OwnEquipment | null;
   private readonly eventListeners: ((event: MatchEvent) => void)[] = [];
@@ -397,8 +397,8 @@ export class MatchSim implements MatchView {
     useItem: null,
   };
   private readonly equipmentContext: { eye: Vec3; yaw: number; pitch: number; velocity: Vec3 } = { eye: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, velocity: { x: 0, y: 0, z: 0 } };
-  private readonly combatInput: Mutable<CombatInput> = { fire: false, aim: false, reload: false, selectIndex: null };
-  private readonly weaponContext: Mutable<WeaponContext> = { eye: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, horizontalSpeed: 0, grounded: true, sprinting: false };
+  private readonly combatInput = createCombatInput();
+  private readonly weaponContext = createWeaponContext();
   private readonly damageResult: MutableDamageResult = { dealt: 0, remainingHealth: 0, knocked: false, killed: false, armorAbsorbed: 0, armorSlot: null, armorDestroyed: false };
   private readonly queryLoot = (center: Vec3, radius: number, out: LootItem[]): number => queryGroundLootInto(this.ports.groundLoot, center, radius, out);
   private readonly actorOnSegmentBound = (from: Vec3, to: Vec3, excludeSlot: number): number => this.actorOnSegment(from, to, excludeSlot);
@@ -926,22 +926,13 @@ export class MatchSim implements MatchView {
     const synced = syncWeaponsFromInventory(actor.weapon, actor.equip.inventory, LOADOUT);
     for (const event of synced.events) this.fx({ type: "weapon", tick, slot: actor.slot, event });
     actor.modifiers = deriveEquipmentModifiers(actor.equip);
-    const raw = this.combatInput;
-    raw.fire = (buttons & Btn.fire) !== 0;
-    raw.aim = (buttons & Btn.aim) !== 0;
-    raw.reload = (buttons & Btn.reload) !== 0;
-    raw.selectIndex = select >= 1 && select <= 3 ? select - 1 : null;
+    // The weapon half of stepPlayer, run after equipment so its gates and inventory changes apply this tick.
+    const raw = combatInputInto(this.combatInput, input);
     const reviving = reviveTarget !== undefined && reviveTarget.state.life === "downed";
     const gated = gateCombatInput(raw, actor.modifiers.allowWeapons && !reviving, actor.fireLatched);
     actor.fireLatched = gated.fireLatched;
-    const wctx = this.weaponContext;
-    wctx.eye = actor.eye;
-    wctx.yaw = actor.yaw;
-    wctx.pitch = actor.pitch;
-    wctx.horizontalSpeed = Math.sqrt(actor.velocity.x * actor.velocity.x + actor.velocity.z * actor.velocity.z);
-    wctx.grounded = actor.grounded;
-    wctx.sprinting = actor.sprinting;
-    const fired = stepWeapon(synced.state, gated.input, wctx, DT);
+    const wctx = weaponContextInto(this.weaponContext, actor.feet, actor.move, input);
+    const fired = stepPlayerWeapon(synced.state, gated.input, wctx, DT, false);
     const inventory = commitWeaponsToInventory(synced.state, fired.state, actor.equip.inventory, LOADOUT);
     if (inventory !== actor.equip.inventory) actor.equip = { ...actor.equip, inventory };
     actor.weapon = fired.state;
@@ -1239,7 +1230,7 @@ export class MatchSim implements MatchView {
     let i = 0;
     while (i < pool.count) {
       const reachesMaxRange = pool.integrate(i, DT, seg);
-      const owner = pool.owner[i]!;
+      const owner = pool.shooter[i]!;
       from.x = seg[0]!;
       from.y = seg[1]!;
       from.z = seg[2]!;

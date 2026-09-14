@@ -139,6 +139,18 @@ export interface FiredShot {
   readonly recoilRight: number;
 }
 
+/**
+ * A shot as the weapon step fired it, with the facts remote replication needs (refactor R10): any machine rebuilds the
+ * pellets exactly with `shotDirections(WEAPONS[weaponId], shotId, yaw, pitch, spreadDegrees)`.
+ */
+export interface AimedShot extends FiredShot {
+  /** The tick's dequantized aim, radians. */
+  readonly yaw: number;
+  readonly pitch: number;
+  /** Spread half-angle the pellets were drawn with, degrees. */
+  readonly spreadDegrees: number;
+}
+
 export type WeaponEvent =
   | { readonly type: "equipStarted"; readonly weaponId: WeaponId; readonly seconds: number }
   | { readonly type: "reloadStarted"; readonly weaponId: WeaponId; readonly seconds: number }
@@ -148,7 +160,7 @@ export type WeaponEvent =
 
 export interface WeaponStepResult {
   readonly state: WeaponState;
-  readonly shots: readonly FiredShot[];
+  readonly shots: readonly AimedShot[];
   readonly events: readonly WeaponEvent[];
 }
 

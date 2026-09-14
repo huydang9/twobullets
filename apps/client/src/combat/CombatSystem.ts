@@ -2,24 +2,24 @@ import { Observable, Vector3, type Observer, type Scene } from "@babylonjs/core"
 import {
   Btn,
   DEFAULT_LOADOUT,
+  combatInputInto,
   commitWeaponsToInventory,
   computeDamage,
+  createCombatInput,
+  createWeaponContext,
   createWeaponState,
   currentSpreadDegrees,
   gateCombatInput,
   getWeaponDef,
-  len2,
-  selectIndexOf,
   spawnProjectiles,
+  stepPlayerWeapon,
   stepProjectiles,
-  stepWeapon,
   syncWeaponsFromInventory,
+  weaponContextInto,
   weaponStateFromInventory,
-  type CombatInput,
   type LevelData,
   type Projectile,
   type ProjectileImpact,
-  type WeaponContext,
   type WeaponDef,
   type WeaponEvent,
   type WeaponId,
@@ -89,7 +89,8 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
   private readonly raycaster: WorldRaycaster;
   private readonly inputQueue: CombatInputQueue;
   private readonly tickObserver: Observer<PlayerTick>;
-  private readonly eye = new Vector3();
+  private readonly weaponContext = createWeaponContext();
+  private readonly combatInput = createCombatInput();
   private nextProjectileId = 1;
   private readonly allocateProjectileId = (): number => this.nextProjectileId++;
   private equipment: CombatEquipmentLink | null = null;
@@ -200,18 +201,11 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     this.onDamage.clear();
   }
 
-  private tick({ dt, state: move, input: moveInput, playerInput }: PlayerTick): void {
+  /** The weapon half of `stepPlayer` (shared `stepPlayerWeapon`), after the player's movement tick, with the equipment gate. */
+  private tick({ dt, state: move, playerInput }: PlayerTick): void {
     const player = this.player;
-    const eye = player.getEyeToRef(this.eye);
-    const ctx: WeaponContext = {
-      eye: { x: eye.x, y: eye.y, z: eye.z },
-      // The tick's dequantized aim, so a server stepping the same input fires the same pellets (R10).
-      yaw: moveInput.yaw,
-      pitch: moveInput.pitch,
-      horizontalSpeed: len2(move.velocity.x, move.velocity.z),
-      grounded: move.grounded,
-      sprinting: move.sprinting,
-    };
+    // Tick feet + stance eye height and the tick's dequantized aim: a server stepping the same input fires the same pellets (R10).
+    const ctx = weaponContextInto(this.weaponContext, player.tickFeet, move, playerInput);
 
     const equipment = this.equipment;
     let state = this.weaponState;
@@ -225,17 +219,11 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
       for (const event of synced.events) this.onWeaponEvent.notifyObservers(event);
     }
 
-    const buttons = playerInput.buttons;
-    const raw: CombatInput = {
-      fire: (buttons & Btn.fire) !== 0,
-      aim: (buttons & Btn.aim) !== 0,
-      reload: (buttons & Btn.reload) !== 0,
-      selectIndex: selectIndexOf(playerInput),
-    };
+    const raw = combatInputInto(this.combatInput, playerInput);
     const gate = this.gate?.() ?? equipment?.modifiers;
     const gated = gateCombatInput(raw, gate?.allowWeapons ?? true, this.fireLatched);
     this.fireLatched = gated.fireLatched;
-    const result = stepWeapon(state, gated.input, ctx, dt);
+    const result = stepPlayerWeapon(state, gated.input, ctx, dt, false);
     this.weaponState = result.state;
     this.spreadDegrees = currentSpreadDegrees(result.state, ctx);
     const active = result.state.slots[result.state.activeIndex];
