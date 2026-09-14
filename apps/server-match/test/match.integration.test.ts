@@ -3,7 +3,7 @@ import { dequantizePosXZ, DisconnectReason, type Mutable, type OwnerMoveBlock } 
 import type { HavokModule } from "@twobullets/sim";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createOwnerBlock } from "../src/snapshot/replication";
+import { createOwnerBlock } from "@twobullets/netcode/replication";
 import { createHarness } from "./harness";
 
 // Host + simulated clients on a virtual clock over memory sessions and LinkConditioners.

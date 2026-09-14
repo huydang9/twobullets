@@ -7,9 +7,9 @@ import { localMatchConfig, LOCAL_HOST_ID } from "../src/app";
 import { createDevClaims, devHmacKey, JoinTokenVerifier, signDevJoinToken } from "../src/auth/joinToken";
 import { HeadlessClient } from "../src/dev/HeadlessClient";
 import { LocalMatchHost } from "../src/host/LocalMatchHost";
-import type { ServerMatch } from "../src/match/ServerMatch";
+import type { ServerMatch, ServerMatchOptions } from "../src/match/ServerMatch";
 import { SessionManager } from "../src/session/SessionManager";
-import { createOwnerBlock } from "../src/snapshot/replication";
+import { createOwnerBlock } from "@twobullets/netcode/replication";
 
 // In-process server + clients on a virtual clock: memory Session pairs wrapped in LinkConditioners (netcode.md §11.3).
 
@@ -28,7 +28,7 @@ export interface Harness {
   /** Server owner blocks recorded at the end of every tick, keyed `tick * 16 + slot`. */
   readonly ownerHistory: Map<number, OwnerMoveBlock>;
   token(overrides?: Partial<JoinClaims> & { secret?: string }): string;
-  connect(options?: { token?: string; profile?: NetworkProfile; seed?: number; protocolVersion?: number; leadTicks?: number }): HeadlessClient;
+  connect(options?: { token?: string; profile?: NetworkProfile; seed?: number; protocolVersion?: number; leadTicks?: number; team?: number; interpDelayMs?: number }): HeadlessClient;
   run(ms: number, stepMs?: number): void;
   /** Accepts a bare memory session (no client attached), e.g. one that never sends Hello. */
   acceptRaw(session: MemorySession): void;
@@ -77,7 +77,14 @@ class DeferredCloseSession implements Session {
   }
 }
 
-export async function createHarness(havok: HavokModule, options: { recordOwners?: boolean } = {}): Promise<Harness> {
+export interface HarnessOptions {
+  readonly recordOwners?: boolean;
+  /** Runs after the owner recording at the end of every tick. */
+  readonly onTickEnd?: (tick: number, match: ServerMatch) => void;
+  readonly combat?: ServerMatchOptions["combat"];
+}
+
+export async function createHarness(havok: HavokModule, options: HarnessOptions = {}): Promise<Harness> {
   const clock = new ManualClock(10_000);
   const ownerHistory = new Map<number, OwnerMoveBlock>();
   const scratch: Mutable<OwnerMoveBlock> = createOwnerBlock();
@@ -89,13 +96,18 @@ export async function createHarness(havok: HavokModule, options: { recordOwners?
     level: ARENA_LEVEL,
     resumeSecret: Buffer.alloc(32, 7),
     match: {
-      onTickEnd: options.recordOwners
-        ? (tick, m) => {
-            for (const p of m.players) {
-              if (m.ownerBlockOf(p.slot, scratch)) ownerHistory.set(tick * 16 + p.slot, { ...scratch });
+      combat: options.combat,
+      onTickEnd:
+        options.recordOwners || options.onTickEnd
+          ? (tick, m) => {
+              if (options.recordOwners) {
+                for (const p of m.players) {
+                  if (m.ownerBlockOf(p.slot, scratch)) ownerHistory.set(tick * 16 + p.slot, { ...scratch });
+                }
+              }
+              options.onTickEnd?.(tick, m);
             }
-          }
-        : undefined,
+          : undefined,
     },
   });
   const match = host.createMatch(localMatchConfig("local", 1234));
@@ -139,10 +151,11 @@ export async function createHarness(havok: HavokModule, options: { recordOwners?
       const client = new HeadlessClient({
         session: link,
         clock,
-        token: o.token ?? harness.token(),
+        token: o.token ?? harness.token(o.team !== undefined ? { team: o.team } : {}),
         seed: o.seed ?? 100 + clients.length,
         leadTicks: o.leadTicks ?? 3,
         protocolVersion: o.protocolVersion,
+        interpDelayMs: o.interpDelayMs,
       });
       clients.push(client);
       links.push(link);

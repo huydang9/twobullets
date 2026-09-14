@@ -1,10 +1,13 @@
 import type { JoinClaims, MatchConfig, MatchPhase } from "@twobullets/contracts";
-import { ServerInputBuffer, type Clock, type Session } from "@twobullets/netcode";
+import type { Clock, Session } from "@twobullets/netcode";
+import { writeOwnerMove } from "@twobullets/netcode/replication";
 import {
   CONTENT_HASH,
+  copyPlayerInput,
   createBitReader,
   createBitWriter,
   createInputPacketBuffer,
+  createMutablePlayerInput,
   decodeInputPacketInto,
   decodePing,
   decodeResyncRequest,
@@ -18,24 +21,24 @@ import {
   type Mutable,
   type OwnerMoveBlock,
 } from "@twobullets/protocol";
-import { quantizeYaw } from "@twobullets/shared/aim";
-import type { PlayerInput, PlayerState } from "@twobullets/shared/input";
-import { createMoveState } from "@twobullets/shared/movement/movement";
-import type { Vec3 } from "@twobullets/shared/movement/types";
+import { MOVEMENT } from "@twobullets/shared/constants";
+import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
+import { Btn, PlayerActionType, type MoveGates, type PlayerInput } from "@twobullets/shared/input";
+import { createMoveState, fallDamage } from "@twobullets/shared/movement/movement";
+import type { Stance, Vec3 } from "@twobullets/shared/movement/types";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
-import { DEFAULT_LOADOUT } from "@twobullets/shared/weapons/weapons";
-import { createWeaponState } from "@twobullets/shared/weapons/weaponStep";
-import { createSimWorld, stepPlayer, type HavokModule, type PlayerBody, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
+import { createSimWorld, stepPlayer, type HavokModule, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
 import { createHmac } from "node:crypto";
 import type { AttachResult, Match } from "../host/MatchHost";
 import { disconnectSession } from "../session/control";
-import { ClientReplication, SnapshotBuilder, type ReplicatedPlayer } from "../snapshot/SnapshotBuilder";
-import { writeOwnerMove } from "../snapshot/replication";
-import { chooseSlot, SpawnPlanner } from "./slots";
+import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
+import { freshPlayerState, Player } from "./Player";
+import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
+import { chooseSlot, SpawnPlanner, TEAM_COUNT } from "./slots";
 
-// One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement and snapshots.
-// Lifecycle (contracts MatchPhase): Booting (sim world loading) → Allocated (ready, accepting joins) → Warmup (ticking;
-// M5 continues to LandingSelect/Glide/Combat) → Ended.
+// One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
+// registration and vitals (ServerCombat), and snapshots. Lifecycle (contracts MatchPhase): Booting (sim world loading) →
+// Allocated (ready, accepting joins) → Warmup (ticking; M5 continues to LandingSelect/Glide/Combat) → Ended.
 
 export interface ServerMatchOptions {
   readonly config: MatchConfig;
@@ -54,6 +57,8 @@ export interface ServerMatchOptions {
   /** Datagrams per second above which extra datagrams are dropped (D18: 72/s), and the kick threshold (180/s). */
   readonly datagramRateLimit?: number;
   readonly datagramKickRate?: number;
+  /** Combat overrides (tests): damage toggle, spawn armor. */
+  readonly combat?: Partial<Pick<ServerCombatOptions, "damageEnabled" | "spawnArmor">>;
   readonly onPlayer?: (accountId: string, event: "joined" | "left") => void;
   /** Debug/test hook, runs at the end of every tick. */
   readonly onTickEnd?: (tick: number, match: ServerMatch) => void;
@@ -67,69 +72,30 @@ export interface MatchStats {
 
 /** Body blocking is a product rule, but T3.1's CharacterBody still excludes CollisionLayer.player from movement. */
 const BODY_BLOCKING_SUPPORTED = false;
-const STEP: StepOptions = { replay: false };
+/** Alive: open gates, weapons on. */
+const STEP_ALIVE: StepOptions = { replay: false, weapons: true };
+/** Knocked: prone crawl, no sprint or jump; combat buttons are cleared before the step (client mirrors both). */
+export const DOWNED_GATES: MoveGates = { speedScale: VITALS.crawlSpeed / MOVEMENT.walkSpeed, allowSprint: false, allowJump: false, crawl: true };
+const STEP_DOWNED: StepOptions = { replay: false, weapons: true, gates: DOWNED_GATES };
+const COMBAT_BUTTONS = Btn.fire | Btn.aim | Btn.reload;
 const INTERP_FLOOR_WS_MS = 50;
 const INTERP_FLOOR_WT_MS = 25;
 const MAX_REWIND_MS = 200;
-
-class Player implements ReplicatedPlayer {
-  readonly slot: number;
-  readonly teamId: number;
-  readonly accountId: string;
-  readonly body: PlayerBody;
-  readonly spawn: { readonly feet: Vec3; readonly yaw: number };
-  readonly inputs = new ServerInputBuffer();
-  readonly net = new ClientReplication();
-  state: PlayerState;
-  epoch = 0;
-  yawQ = 0;
-  pitchQ = 0;
-  buttons = 0;
-  session: Session | null = null;
-  lastRecvMs = 0;
-  disconnectedAtMs = -1;
-  rateWindowStartMs = 0;
-  rateWindowCount = 0;
-  abusiveWindows = 0;
-
-  constructor(slot: number, teamId: number, accountId: string, body: PlayerBody, spawn: { feet: Vec3; yaw: number }) {
-    this.slot = slot;
-    this.teamId = teamId;
-    this.accountId = accountId;
-    this.body = body;
-    this.spawn = spawn;
-    this.state = freshState();
-    this.yawQ = quantizeYaw(spawn.yaw);
-    this.pitchQ = quantizePitchLevel();
-  }
-
-  get feet(): Readonly<Vec3> {
-    return this.body.feet;
-  }
-}
-
-function freshState(): PlayerState {
-  return { move: createMoveState(), weapon: createWeaponState(DEFAULT_LOADOUT) };
-}
-
-/** 18-bit pitch of a level gaze (shared aim.ts: q = 2^17 − 1 is exactly 0). */
-function quantizePitchLevel(): number {
-  return (1 << 17) - 1;
-}
-
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
 
-export class ServerMatch implements Match {
+export class ServerMatch implements Match, CombatHost {
   readonly id: string;
   readonly config: MatchConfig;
   readonly ready: Promise<void>;
   readonly stats: MatchStats = { inputsMalformed: 0, datagramsRateLimited: 0, kicks: 0 };
   readonly snapshots: SnapshotBuilder;
+  /** Null until the sim world is ready. */
+  combat: ServerCombat | null = null;
   private phaseValue: MatchPhase = "Booting";
   private world: SimWorld | null = null;
   private readonly options: ServerMatchOptions;
   private readonly clock: Clock;
-  private readonly slots: (Player | null)[];
+  readonly slots: (Player | null)[];
   /** Dense, sorted by slot; rebuilt only on join/leave. */
   private active: Player[] = [];
   private readonly byAccount = new Map<string, Player>();
@@ -137,13 +103,17 @@ export class ServerMatch implements Match {
   private readonly spawns: SpawnPlanner;
   private readonly reader = createBitReader(new Uint8Array(0));
   private readonly packet = createInputPacketBuffer();
+  private readonly gatedInput = createMutablePlayerInput();
+  private readonly gatedAction: { type: PlayerActionType; arg: number } = { type: PlayerActionType.pickup, arg: 0 };
   private readonly datagramWriter = createBitWriter(64);
   private readonly controlWriter = createBitWriter(128);
   private readonly idleTimeoutMs: number;
   private readonly graceMs: number;
   private readonly rateLimit: number;
   private readonly kickRate: number;
+  private readonly tickMs: number;
   private next: number;
+  private lastTickStartMs = NaN;
   private lastSweepMs = 0;
 
   constructor(options: ServerMatchOptions) {
@@ -156,12 +126,16 @@ export class ServerMatch implements Match {
     this.graceMs = options.reconnectGraceMs ?? 60_000;
     this.rateLimit = options.datagramRateLimit ?? 72;
     this.kickRate = options.datagramKickRate ?? 180;
+    this.tickMs = 1000 / (options.tickRate ?? 60);
     const maxSlots = Math.min(16, options.config.maxPlayers);
     this.slots = new Array<Player | null>(maxSlots).fill(null);
     this.snapshots = new SnapshotBuilder(16);
     this.spawns = new SpawnPlanner(options.level.spawnPoints, options.config.matchSeed, options.config.maxTeamSize);
     this.ready = createSimWorld(options.havok, options.level).then((world) => {
       this.world = world;
+      const combat = new ServerCombat({ ...options.combat, rules: options.config.rules, maxSlots: 16, raycastWorld: world.raycastWorld, tickRate: options.tickRate });
+      combat.attach(this, TEAM_COUNT, options.config.maxTeamSize);
+      this.combat = combat;
       if (this.phaseValue === "Booting") this.phaseValue = "Allocated";
     });
   }
@@ -189,8 +163,13 @@ export class ServerMatch implements Match {
     return this.slots.length - this.active.length;
   }
 
-  get players(): readonly ReplicatedPlayer[] {
+  get players(): readonly Player[] {
     return this.active;
+  }
+
+  /** The player in `slot` (tests, debug tooling). */
+  player(slot: number): Player | null {
+    return this.slots[slot] ?? null;
   }
 
   attach(session: Session, claims: JoinClaims): AttachResult {
@@ -211,6 +190,7 @@ export class ServerMatch implements Match {
     if (!choice.ok) return { ok: false, reason: choice.reason === "matchFull" ? DisconnectReason.matchFull : DisconnectReason.notAssigned };
     const spawn = this.spawns.spawnFor(choice.slot);
     const player = new Player(choice.slot, choice.teamId, claims.sub, this.world.createBody(spawn.feet), spawn);
+    player.armor = this.combat!.armorForSpawn();
     this.slots[choice.slot] = player;
     this.byAccount.set(claims.sub, player);
     this.rebuildActive();
@@ -226,22 +206,29 @@ export class ServerMatch implements Match {
 
   tick(tick: number): void {
     const world = this.world;
-    if (world === null || this.phaseValue === "Ended") return;
+    const combat = this.combat;
+    if (world === null || combat === null || this.phaseValue === "Ended") return;
     if (this.phaseValue === "Allocated") this.phaseValue = "Warmup";
+    this.lastTickStartMs = this.clock.now();
     const players = this.active;
+    combat.beginTick(tick);
     if (BODY_BLOCKING_SUPPORTED && this.config.rules.bodyBlocking) this.syncBodiesForBlocking();
+    const killY = this.options.level.killY;
     for (let i = 0; i < players.length; i++) {
       const p = players[i]!;
       const input = p.inputs.take(tick);
+      // The dead are frozen (spectating): inputs still drain the buffer and ack, but nothing moves or aims.
+      if (p.life === "dead") continue;
       p.yawQ = input.yawQ;
       p.pitchQ = input.pitchQ;
       p.buttons = input.buttons;
-      p.state = this.step(p, input);
-      if (p.body.feet.y < this.options.level.killY) this.respawn(p);
+      this.step(p, input, combat);
+      if (p.body.feet.y < killY) combat.outOfBounds(p);
     }
+    combat.endTick(tick);
     this.next = tick + 1;
     const now = this.clock.now();
-    this.snapshots.build(tick, now, players);
+    this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
       this.lastSweepMs = now;
       this.sweep(now);
@@ -255,6 +242,15 @@ export class ServerMatch implements Match {
     if (p === null || p === undefined) return false;
     writeOwnerMove(p.body.feet, p.state.move, out);
     return true;
+  }
+
+  /** Teleports a player (tests, debug tooling); the lag-comp history snaps across it. */
+  debugPlace(slot: number, feet: Vec3, stance: Stance = "stand"): void {
+    const p = this.slots[slot];
+    if (!p) return;
+    p.body.restore(feet, ZERO, stance);
+    p.state = { move: { ...createMoveState(), stance, grounded: true }, weapon: p.state.weapon };
+    p.poseDiscontinuous = true;
   }
 
   /** Sends Disconnect{reason} to everyone, disposes the world. */
@@ -272,12 +268,45 @@ export class ServerMatch implements Match {
     this.active = [];
     this.slots.fill(null);
     this.byAccount.clear();
+    this.combat?.projectiles.clear();
     this.world?.dispose();
     this.world = null;
   }
 
-  private step(p: Player, input: PlayerInput): PlayerState {
-    return stepPlayer(p.body, p.state, input, TICK_SECONDS, STEP).state;
+  /** Server spawn, fresh loadout and vitals (M4 warmup respawn; CombatHost). */
+  respawn(p: Player): void {
+    p.body.restore(p.spawn.feet, ZERO, "stand");
+    p.state = freshPlayerState();
+    p.vitals = createVitals();
+    p.armor = this.combat!.armorForSpawn();
+    p.deathTick = -1;
+    p.reviveTarget = -1;
+    p.buttons = 0;
+    p.poseDiscontinuous = true;
+    this.combat!.history.clear(p.slot);
+  }
+
+  private step(p: Player, input: PlayerInput, combat: ServerCombat): void {
+    let options = STEP_ALIVE;
+    let effective = input;
+    if (p.life === "downed") {
+      options = STEP_DOWNED;
+      const gated = this.gatedInput;
+      copyPlayerInput(input, gated, this.gatedAction);
+      gated.buttons &= ~COMBAT_BUTTONS;
+      gated.select = 0;
+      effective = gated;
+      p.buttons = gated.buttons;
+    }
+    const result = stepPlayer(p.body, p.state, effective, TICK_SECONDS, options);
+    p.state = result.state;
+    const shots = result.shots;
+    for (let k = 0; k < shots.length; k++) combat.fire(p, shots[k]!, input.viewOffset8);
+    const events = result.events;
+    for (let k = 0; k < events.length; k++) {
+      const e = events[k]!;
+      if (e.type === "landed") combat.landed(p, fallDamage(e.fallSpeed));
+    }
   }
 
   /**
@@ -288,11 +317,6 @@ export class ServerMatch implements Match {
    */
   private syncBodiesForBlocking(): void {}
 
-  private respawn(p: Player): void {
-    p.body.restore(p.spawn.feet, ZERO, "stand");
-    p.state = freshState();
-  }
-
   private bind(player: Player, session: Session, claims: JoinClaims): void {
     player.session = session;
     player.epoch = claims.epoch;
@@ -302,7 +326,8 @@ export class ServerMatch implements Match {
     player.rateWindowCount = 0;
     player.abusiveWindows = 0;
     player.inputs.reset();
-    player.net.reset();
+    player.net.reset(this.next - 1);
+    player.viewDelay.reset();
     this.bySession.set(session, player);
     session.onDatagram((bytes, recvMs) => this.onDatagram(player, session, bytes, recvMs));
     session.onStream((bytes) => this.onStream(player, session, bytes));
@@ -372,8 +397,11 @@ export class ServerMatch implements Match {
         return;
       }
       player.inputs.insertPacket(packet.inputs, packet.count, this.next);
-      player.net.baselines.ack(packet.ackSnapshotTick);
-      player.net.onInputPacket(packet.newestTick, packet.clientTimeMs, recvMs);
+      const net = player.net;
+      net.baselines.ack(packet.ackSnapshotTick);
+      net.events.onAck(packet.ackSnapshotTick, packet.ackEventSeq);
+      net.onInputPacket(packet.newestTick, packet.clientTimeMs, recvMs);
+      player.viewDelay.onInputPacket(packet.newestTick, this.arrivalTick(recvMs), packet.interpDelayMs, packet.ackSnapshotTick, net.sentTimeOf(packet.ackSnapshotTick), recvMs);
     } else if (id === MsgId.Ping) {
       const r = this.reader;
       r.reset(bytes);
@@ -386,6 +414,14 @@ export class ServerMatch implements Match {
     }
   }
 
+  /** Fractional server tick at `recvMs`: the last tick started plus the time since, capped at one tick. */
+  private arrivalTick(recvMs: number): number {
+    const start = this.lastTickStartMs;
+    if (start !== start) return this.next;
+    const frac = (recvMs - start) / this.tickMs;
+    return this.next - 1 + (frac < 0 ? 0 : frac > 1 ? 1 : frac);
+  }
+
   private onStream(player: Player, session: Session, bytes: Uint8Array): void {
     if (player.session !== session || bytes.length === 0) return;
     player.lastRecvMs = this.clock.now();
@@ -395,7 +431,7 @@ export class ServerMatch implements Match {
       r.reset(bytes);
       const request = decodeResyncRequest(r);
       if (request === null) return;
-      player.net.reset();
+      player.net.reset(this.next - 1);
       const w = this.controlWriter;
       w.reset();
       encodeResyncResponse(w, { scope: request.scope, serverTick: this.next });
@@ -423,6 +459,7 @@ export class ServerMatch implements Match {
       } else if (p.disconnectedAtMs >= 0 && now - p.disconnectedAtMs > this.graceMs) {
         this.slots[p.slot] = null;
         this.byAccount.delete(p.accountId);
+        this.combat?.removed(p.slot);
         p.body.dispose();
         removed = true;
       }
@@ -436,3 +473,4 @@ export class ServerMatch implements Match {
     this.active = list;
   }
 }
+

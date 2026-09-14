@@ -24,7 +24,7 @@ export interface LocalMatchHostOptions {
   readonly resumeSecret: Uint8Array;
   readonly tickRate?: number;
   readonly spinMs?: number;
-  readonly match?: Partial<Pick<ServerMatchOptions, "idleTimeoutMs" | "reconnectGraceMs" | "onTickEnd" | "datagramRateLimit" | "datagramKickRate">>;
+  readonly match?: Partial<Pick<ServerMatchOptions, "idleTimeoutMs" | "reconnectGraceMs" | "onTickEnd" | "datagramRateLimit" | "datagramKickRate" | "combat">>;
   readonly onPlayer?: (matchId: string, accountId: string, event: "joined" | "left") => void;
   readonly onHitch?: (behindMs: number, tick: number) => void;
 }

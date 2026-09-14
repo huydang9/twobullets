@@ -1,10 +1,12 @@
-import { ClientSnapshotStore, createSeededRng, type Clock, type Rng, type Session } from "@twobullets/netcode";
+import { ClientSnapshotStore, createSeededRng, ReliableEventReceiver, type Clock, type Rng, type Session } from "@twobullets/netcode";
 import {
   CONTENT_HASH,
   createBitReader,
   createBitWriter,
   createMutablePlayerInput,
   decodeDisconnect,
+  decodeKillFeed,
+  LifeCode,
   decodeWelcome,
   encodeHello,
   encodeInputPacket,
@@ -12,15 +14,21 @@ import {
   MsgId,
   PROTOCOL_VERSION,
   type Disconnect,
+  type KillFeed,
+  type ReliableEvent,
   type MutablePlayerInput,
   type Snapshot,
   type Welcome,
 } from "@twobullets/protocol";
-import type { PlayerInput } from "@twobullets/shared/input";
+import { remoteLifeCode } from "@twobullets/netcode/replication";
+import { quantizePitch, quantizeYaw } from "@twobullets/shared/aim";
+import { Btn, type PlayerInput } from "@twobullets/shared/input";
 
 // Minimal protocol client for server tests and the local load driver (not the T3.6 bot: no prediction, clock sync or
-// sim). Hello → Welcome, then one Input packet per client tick with seeded random movement and ≤ 6 unacked inputs,
-// snapshots decoded against baselines through ClientSnapshotStore.
+// sim). Hello → Welcome, then one Input packet per client tick with seeded random movement (or a test script, or
+// `combat: "spray"` for load) and ≤ 6 unacked inputs, snapshots decoded against baselines through ClientSnapshotStore,
+// reliable events delivered once through ReliableEventReceiver and acked with `ackEventSeq`. Inputs with fire set carry
+// an honest view offset D = tick − (newest snapshot tick + its age − interpolation delay).
 
 export interface HeadlessClientOptions {
   readonly session: Session;
@@ -33,7 +41,14 @@ export interface HeadlessClientOptions {
   readonly contentHash?: number;
   readonly tickRate?: number;
   readonly onSnapshot?: (snapshot: Snapshot, client: HeadlessClient) => void;
+  /** Interpolation delay reported in Input and used for the honest view offset. Default 100 ms. */
+  readonly interpDelayMs?: number;
+  /** "spray": hold fire and aim at the nearest remote entity (load driver). Default: random movement only. */
+  readonly combat?: "none" | "spray";
 }
+
+/** Writes a tick's input after the default script; set `viewOffset8` ≥ 0 to override the honest view offset. */
+export type InputScript = (tick: number, input: MutablePlayerInput, client: HeadlessClient) => void;
 
 const HISTORY = 64;
 
@@ -51,6 +66,21 @@ export class HeadlessClient {
   /** Stops sending inputs while true (idle-timeout tests). */
   paused = false;
   onSnapshot: ((snapshot: Snapshot, client: HeadlessClient) => void) | null;
+  readonly events = new ReliableEventReceiver();
+  onReliable: ((event: ReliableEvent, client: HeadlessClient) => void) | null = null;
+  onKillFeed: ((feed: KillFeed, client: HeadlessClient) => void) | null = null;
+  script: InputScript | null = null;
+  reliableDelivered = 0;
+  killFeeds = 0;
+  shotsSeen = 0;
+  hitsSeen = 0;
+  /** View offsets (1/8 tick) sent with fire, newest last (tests; capped). */
+  readonly viewOffsets: number[] = [];
+  private newestRecvMs = 0;
+  private readonly deliver = (event: ReliableEvent): void => {
+    this.reliableDelivered++;
+    this.onReliable?.(event, this);
+  };
   private readonly options: HeadlessClientOptions;
   private readonly session: Session;
   private readonly clock: Clock;
@@ -144,8 +174,58 @@ export class HeadlessClient {
     e.select = 0;
     e.yawQ = this.yawQ;
     e.pitchQ = (1 << 17) - 1;
-    e.viewOffset8 = 0;
+    e.viewOffset8 = -1;
     e.action = null;
+    if (this.options.combat === "spray") this.spray(tick, e);
+    this.script?.(tick, e, this);
+    if ((e.buttons & Btn.fire) === 0) e.viewOffset8 = 0;
+    else {
+      if (e.viewOffset8 < 0) e.viewOffset8 = this.honestViewOffset8(tick);
+      if (this.viewOffsets.length < 4096) this.viewOffsets.push(e.viewOffset8);
+    }
+  }
+
+  /** 8 × (tick − render tick): the render tick is the newest snapshot tick advanced by its age, minus interpolation. */
+  honestViewOffset8(tick: number): number {
+    const newest = this.store.newestTick;
+    if (newest < 0) return 0;
+    const render = newest + (this.clock.now() - this.newestRecvMs) / this.tickMs - (this.options.interpDelayMs ?? 100) / this.tickMs;
+    const q = Math.round((tick - render) * 8);
+    return q < 0 ? 0 : q > 255 ? 255 : q;
+  }
+
+  private sprayAim = { x: 0, y: 0, z: 0 };
+
+  /** Load script: hold fire at the nearest remote entity; pistol taps once the rifle is dry. */
+  private spray(tick: number, e: MutablePlayerInput): void {
+    const snap = this.store.newestTick >= 0 ? this.store.get(this.store.newestTick) : null;
+    if (snap === null || snap.owner === null) return;
+    const o = snap.owner;
+    let best = Infinity;
+    for (const other of snap.entities) {
+      const dx = other.xMm - o.xMm;
+      const dz = other.zMm - o.zMm;
+      const d = dx * dx + dz * dz;
+      if (d < best && remoteLifeCode(other.flags) !== LifeCode.dead) {
+        best = d;
+        this.sprayAim.x = (other.xMm - o.xMm) / 1000;
+        this.sprayAim.y = (other.yMm - o.yMm) / 1000 - 0.4;
+        this.sprayAim.z = (other.zMm - o.zMm) / 1000;
+      }
+    }
+    if (best === Infinity) return;
+    const a = this.sprayAim;
+    const jitter = (this.rng.next() - 0.5) * 0.04;
+    e.yawQ = quantizeYaw(Math.atan2(a.x, a.z) + jitter);
+    e.pitchQ = quantizePitch(Math.atan2(-a.y, Math.sqrt(a.x * a.x + a.z * a.z)));
+    e.buttons |= Btn.fire | Btn.aim;
+    e.buttons &= ~Btn.sprint;
+    const weapon = snap.weapon;
+    if (weapon && weapon.slotCount > 0) {
+      const rifleDry = weapon.slotMagazine[0]! + weapon.slotReserve[0]! === 0;
+      if (rifleDry && weapon.activeIndex !== 2) e.select = 3;
+      if (weapon.activeIndex === 2 && tick % 2 === 1) e.buttons &= ~Btn.fire;
+    }
   }
 
   private send(newest: number): void {
@@ -163,7 +243,8 @@ export class HeadlessClient {
       newestTick: newest,
       ackSnapshotTick: this.store.newestTick,
       clientTimeMs: Math.floor(this.clock.now()) & 0xffff,
-      interpDelayMs: 100,
+      interpDelayMs: this.options.interpDelayMs ?? 100,
+      ackEventSeq: this.events.ackSeq,
       inputs: list,
     });
     if (this.session.sendDatagram(w.bytes())) {
@@ -179,6 +260,12 @@ export class HeadlessClient {
     if (bytes[0] === MsgId.Welcome) {
       this.welcome = decodeWelcome(r);
       this.welcomeAtMs = this.clock.now();
+    } else if (bytes[0] === MsgId.KillFeed) {
+      const feed = decodeKillFeed(r);
+      if (feed !== null) {
+        this.killFeeds++;
+        this.onKillFeed?.(feed, this);
+      }
     } else if (bytes[0] === MsgId.Disconnect) {
       this.disconnect = decodeDisconnect(r);
       this.closedByServer = true;
@@ -191,12 +278,17 @@ export class HeadlessClient {
     const r = this.reader;
     r.reset(bytes);
     const reference = this.store.newestTick >= 0 ? this.store.newestTick : (this.welcome?.serverTick ?? 0);
+    const previousNewest = this.store.newestTick;
     const snapshot = this.store.decode(r, reference);
     if (snapshot === null) {
       this.snapshotsDropped++;
       return;
     }
     this.snapshotsReceived++;
+    if (this.store.newestTick > previousNewest) this.newestRecvMs = this.clock.now();
+    this.shotsSeen += snapshot.shots?.length ?? 0;
+    this.hitsSeen += snapshot.hits?.length ?? 0;
+    if (snapshot.reliable !== undefined && snapshot.reliable.length > 0) this.events.receive(snapshot.reliable, this.deliver);
     if (snapshot.header.lastProcessedInputTick > this.lastProcessedInputTick) this.lastProcessedInputTick = snapshot.header.lastProcessedInputTick;
     this.onSnapshot?.(snapshot, this);
   }
