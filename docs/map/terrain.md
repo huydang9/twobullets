@@ -9,7 +9,7 @@ Map v1 terrain covers 1280 × 1280 m: a 1 km playable square plus a 140 m out-of
 |---|---|---|
 | MapData contract | `packages/shared/src/map/types.ts` | nothing |
 | Generation, flattening, surface mask, queries | `packages/shared/src/map/terrain/` | nothing (pure, deterministic, **no Babylon**) |
-| Havok heightfield body | `packages/shared/src/map/physics/` | Babylon deep imports + Havok, no rendering |
+| Havok heightfield body | `packages/sim/src/map/terrainBody.ts` (`@twobullets/sim`) | Babylon deep imports + Havok, no rendering |
 | Draft map used by the dev mode | `packages/shared/src/map/draftMapV1.ts` | the above |
 | Chunked LOD meshes, splat material, horizon | `apps/client/src/world/terrain/` | Babylon |
 
@@ -111,11 +111,11 @@ Regions apply in array order and later ones win, both for height and paint. Put 
 
 ## Physics
 
-`createTerrainBody(scene, terrain.field, { stride?, friction?, membershipMask?, shape? })` creates a static `PhysicsShapeHeightField` body. Pass `shape` to share one heightfield between bodies in the same Havok instance.
+`createTerrainBody(scene, terrain.field, { stride?, friction?, membershipMask?, shape? })` (from `@twobullets/sim`) creates a static `PhysicsShapeHeightField` body. Pass `shape` to share one heightfield between bodies in the same Havok instance.
 
 Babylon's Havok plugin reads `data[(n-1-a)*n + b]` as world (x = -size/2 + b·step, z = -size/2 + a·step), centered on the body, and splits each cell along the (ix+1, iz)–(ix, iz+1) diagonal. Both facts were verified with raycasts. `heightfieldToHavokOrder` does the row flip, and `Heightfield.sampleHeight` and the render meshes use the same diagonal.
 
-Headless validation (NullEngine + Havok, the real `CharacterBody`, 60 Hz):
+Headless validation (NullEngine + Havok, the real `CharacterBody` from `packages/sim`, 60 Hz):
 
 | Check | Result |
 |---|---|
@@ -200,6 +200,6 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
 - **Main-thread build of about 1 s at load** (generation + mask), plus 0.2 s for chunk meshes. Move it to a worker, which can hand over the `SharedArrayBuffer` heights, or ship a baked heights+mask binary verified by `terrain.checksum()`.
 - **Depth precision.** The near plane stays 0.05 m for the viewmodel, and the far plane is 4 km. Precision is about 1.2 m at 1 km, which is fine for terrain and could cause z-fighting between building bases and terrain at long range. Options: reverse-Z, or a larger near plane in map mode (the viewmodel has its own rendering group).
 - **LOD pops without geomorphing.** A 128-cell chunk near the camera is always LOD 0 (35k triangles). A quadtree with 64-cell leaves near the camera would cut about 40% of triangles.
-- **`packages/shared/src/index.ts` re-exports the physics folder,** like `buildLevel`, so the barrel still pulls Babylon. The planned pure/sim split should move `map/physics` to `packages/sim`; it already uses deep imports only.
+- **Resolved: the shared barrel is pure.** The heightfield body (`terrainBody.ts`) and `buildLevel` moved to `packages/sim` (M3 T3.1), so `@twobullets/shared` no longer pulls Babylon; import `createTerrainBody` from `@twobullets/sim`.
 - **Border.** Outside the playable square the mountains are walkable in places (83% of border cells are under 50°). The out-of-bounds timer or kill volume must do the enforcement.
 - **Terrain edge.** Havok rays exactly on the +X/+Z edge (640 m) miss. That's far outside the playable area.

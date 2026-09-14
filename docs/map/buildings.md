@@ -5,7 +5,7 @@ No free, cleanly licensed, realistic enterable houses exist. So buildings are ge
 | Where | What |
 |---|---|
 | `packages/shared/src/map/buildings/` | Pure data: types, kit (`kit.ts`), prefabs (`prefabs/`), geometry and AO bake (`geometry.ts`), BVH ray/box queries (`raycast.ts`), collision, transforms and loot (`placement.ts`), tests |
-| `packages/shared/src/map/buildings/babylon/` | Babylon, still headless-safe: compound Havok bodies (`buildingPhysics.ts`), placement API (`buildBuilding.ts`) |
+| `packages/sim/src/map/` (`@twobullets/sim`) | Babylon, headless-safe: compound Havok bodies (`buildingPhysics.ts`), placement API (`buildBuilding.ts`), headless Map v1 collision (`mapCollision.ts`) |
 | `apps/client/src/world/buildings/` | Client only: looks and PBR materials, interior shading plugin, thin-instanced renderer |
 | `apps/client/buildings.html`, `src/dev/buildingsPreview.ts` | DEV preview page |
 
@@ -110,11 +110,11 @@ Ask the environment pipeline owner (`tools/environment/`) to add these. Each rep
 ## Physics
 
 - `getPrefabCollision(id)`: pure `{ kind: "box" | "wedge", center, size, rises? }[]` in prefab-local space, one entry per part.
-- `getBuildingShape(scene, id)`: one `PhysicsShapeContainer` per prefab per scene (boxes plus wedge convex hulls). It is **shared by all placements**, which is the shared-static-shape layout from `docs/backend/runtime-performance.md`.
+- `getBuildingShape(scene, id)` (`@twobullets/sim`, like `createBuildingBody`): one `PhysicsShapeContainer` per prefab per scene (boxes plus wedge convex hulls). It is **shared by all placements**, which is the shared-static-shape layout from `docs/backend/runtime-performance.md`.
 - `createBuildingBody(scene, id, placement)`: one static body per building, friction 0.6, default filter bits (bullets hit it).
 - `prefabLevelBlocks(id, placement)`: the same shapes as `LevelBlock`s for tools that consume `LevelData`.
 
-Headless validation (NullEngine + Havok + the client's `CharacterBody`, 12 prefabs placed at assorted yaws): **25/25 checks pass**.
+Headless validation (NullEngine + Havok + the player's `CharacterBody`, now in `packages/sim`, 12 prefabs placed at assorted yaws): **25/25 checks pass**.
 - **Doors and walls:** walk in and out through the doors; sprinting into walls from inside and outside stops at the face.
 - **Stairs:** the two-story house stairs, balcony and upstairs door, then back down and out; the watchtower's three flights to 9 m and back down; the barn loft; the warehouse mezzanine; the radar stairs through the parapet gap onto the roof.
 - **Small steps:** container floor (0.15 m) and booth step (0.2 m).
@@ -138,7 +138,8 @@ Unit tests (`buildings.test.ts`, 125 cases) check every prefab for:
 ## Placement API
 
 ```ts
-import { buildBuilding, getPrefabCollision, type BuildingPlacement } from "@twobullets/shared";
+import { getPrefabCollision, type BuildingPlacement } from "@twobullets/shared";
+import { buildBuilding } from "@twobullets/sim";
 import { BuildingVisuals } from "../world/buildings";
 
 const visuals = new BuildingVisuals(scene, environment); // client only
