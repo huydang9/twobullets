@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { createBitReader, createBitWriter } from "../src/bits";
-import { decodeDisconnect, decodeHello, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../src/messages/control";
+import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../src/messages/control";
 import { MsgId } from "../src/messages/ids";
 import { createInputPacketBuffer, decodeInputPacketInto, encodeInputPacket } from "../src/messages/input";
 import { decodePing } from "../src/messages/ping";
 import { MAX_ENTITY_SLOTS, createSnapshotBuffer, decodeSnapshotInto, encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
 import { describeMessage } from "../src/debug/describe";
 import { StreamDeframer } from "../src/framing";
-import { randomInput, SnapshotWorld } from "./fixtures";
+import { CombatWorld, randomInput, randomPlayerHit, randomReliable, randomShot, randomVitalsBlock, randomWeaponBlock, SnapshotWorld } from "./fixtures";
 import { createTestRng, randInt } from "./rng";
 
 // netcode.md §11.4 gate: random bytes never throw uncaught. The BitReader bounds every read, so decoders see zeros
 // past the end and report `overflowed` instead of indexing out of range.
 
-const IDS = [MsgId.Input, MsgId.Ping, MsgId.Snapshot, MsgId.Hello, MsgId.Welcome, MsgId.Resync, MsgId.Disconnect];
+const IDS = [MsgId.Input, MsgId.Ping, MsgId.Snapshot, MsgId.Hello, MsgId.Welcome, MsgId.Resync, MsgId.Disconnect, MsgId.KillFeed];
 
 function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   const r = createBitReader(bytes);
@@ -25,7 +25,7 @@ function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   r.reset(bytes);
   const snap = createSnapshotBuffer();
   if (decodeSnapshotInto(r, 5000, () => baseline, snap)) expect(snap.entities.length).toBeLessThanOrEqual(MAX_ENTITY_SLOTS);
-  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing]) {
+  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed]) {
     r.reset(bytes);
     decode(r);
   }
@@ -53,12 +53,24 @@ describe("decoder fuzz", () => {
   it("mutated and truncated valid messages", () => {
     const rng = createTestRng(99);
     const world = new SnapshotWorld(rng);
+    const combat = new CombatWorld(rng);
     const w = createBitWriter(1500);
     let prevSnap: Snapshot | null = null;
-    for (let i = 0; i < 4000; i++) {
+    for (let i = 0; i < 6000; i++) {
       world.step();
       w.reset();
-      if (i % 2 === 0) {
+      if (i % 3 === 2) {
+        const snap: Snapshot = {
+          ...(i % 2 === 0 ? combat.snapshot(0) : world.snapshot(0, true)),
+          weapon: randomWeaponBlock(rng),
+          vitals: randomVitalsBlock(rng),
+          shots: [randomShot(rng), randomShot(rng)],
+          hits: [randomPlayerHit(rng)],
+          reliable: [randomReliable(rng, 1), randomReliable(rng, 2), randomReliable(rng, 9)],
+        };
+        encodeSnapshot(w, snap, prevSnap?.weapon ? prevSnap : null);
+        prevSnap = snap;
+      } else if (i % 2 === 0) {
         const inputs = [];
         let prev = null;
         for (let k = 0; k < randInt(rng, 1, 6); k++) inputs.push((prev = randomInput(rng, world.tick - k, prev)));

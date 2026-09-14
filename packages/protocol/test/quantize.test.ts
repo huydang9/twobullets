@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dequantizePitch as sharedDequantizePitch, dequantizeYaw as sharedDequantizeYaw, quantizePitch as sharedQuantizePitch, quantizeYaw as sharedQuantizeYaw } from "@twobullets/shared/aim";
 import * as Q from "../src/quantize";
 import { createTestRng } from "./rng";
 
@@ -21,12 +22,13 @@ describe("quantizers", () => {
     expect(Q.dequantizePosXZ(0)).toBeLessThan(-524);
   });
 
-  it("aim: yaw ≤ π/2^20 and pitch ≤ half a step; dequantize→quantize is identity", () => {
+  it("aim: the shared/aim layout (yaw ≤ π/2^20, pitch zero-exact), dequantize→quantize is identity", () => {
     const yawBound = Math.PI / 2 ** Q.AIM_YAW_BITS + 1e-12;
-    const pitchBound = Q.MAX_PITCH_RAD / (2 ** Q.AIM_PITCH_BITS - 1) + 1e-12;
+    const pitchStep = Q.MAX_PITCH_RAD / (2 ** (Q.AIM_PITCH_BITS - 1) - 1);
     for (let i = 0; i < N; i++) {
       const yaw = (rng() - 0.5) * 40;
       const q = Q.quantizeAimYaw(yaw);
+      expect(q).toBe(sharedQuantizeYaw(yaw));
       expect(q).toBeGreaterThanOrEqual(0);
       expect(q).toBeLessThan(2 ** Q.AIM_YAW_BITS);
       const back = Q.dequantizeAimYaw(q);
@@ -37,14 +39,18 @@ describe("quantizers", () => {
 
       const pitch = (rng() * 2 - 1) * Q.MAX_PITCH_RAD;
       const pq = Q.quantizeAimPitch(pitch);
-      expect(Math.abs(Q.dequantizeAimPitch(pq) - pitch)).toBeLessThanOrEqual(pitchBound);
+      expect(pq).toBe(sharedQuantizePitch(pitch));
+      expect(Math.abs(Q.dequantizeAimPitch(pq) - pitch)).toBeLessThanOrEqual(pitchStep / 2 + 1e-12);
       expect(Q.quantizeAimPitch(Q.dequantizeAimPitch(pq))).toBe(pq);
     }
+    for (let q = 0; q < 2 ** Q.AIM_PITCH_BITS - 1; q++) expect(Q.dequantizeAimPitch(q)).toBe(sharedDequantizePitch(q));
+    for (let q = 0; q < 2 ** Q.AIM_YAW_BITS; q += 3) expect(Q.dequantizeAimYaw(q)).toBe(sharedDequantizeYaw(q));
     expect(Q.dequantizeAimPitch(0)).toBeCloseTo(-Q.MAX_PITCH_RAD, 12);
-    expect(Q.dequantizeAimPitch(2 ** Q.AIM_PITCH_BITS - 1)).toBeCloseTo(Q.MAX_PITCH_RAD, 12);
+    expect(Q.dequantizeAimPitch(2 ** Q.AIM_PITCH_BITS - 2)).toBeCloseTo(Q.MAX_PITCH_RAD, 12);
+    expect(Q.dequantizeAimPitch(2 ** (Q.AIM_PITCH_BITS - 1) - 1)).toBe(0);
     // netcode.md §6.3: 6.0 µrad / 11.8 µrad steps.
     expect((2 * Math.PI) / 2 ** 20).toBeLessThan(6.0e-6);
-    expect((2 * Q.MAX_PITCH_RAD) / (2 ** 18 - 1)).toBeLessThan(11.9e-6);
+    expect(pitchStep).toBeLessThan(11.9e-6);
   });
 
   it("remote angles and velocities", () => {

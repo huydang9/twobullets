@@ -1,7 +1,9 @@
 import type { BitReader, BitWriter } from "../bits";
+import { ACTOR_BITS, KILL_CAUSES_BY_CODE } from "../codes";
 import { MsgId } from "./ids";
 
-// Control-stream messages for M3 (netcode.md §6.4–6.5, §7.3). Codecs write/read the id byte first.
+// Control-stream messages (netcode.md §6.4–6.5, §7.3): M3 session messages and the M4 kill feed. Codecs write/read
+// the id byte first.
 
 export type TransportKind = "wt" | "ws";
 
@@ -215,4 +217,60 @@ export function decodeResyncResponse(r: BitReader): ResyncResponse | null {
   const serverTick = r.read(32);
   if (!finished(r) || scope === 0 || scope > 7) return null;
   return { scope, serverTick };
+}
+
+/**
+ * 0x49, S→C stream, per kill or knock (10 B). The kill feed copy of a `Kill` reliable event, sent to everyone. Actor
+ * fields are `actorCode` values (slot, or WORLD_SLOT_CODE); `cause` indexes `KILL_CAUSES_BY_CODE`.
+ */
+export interface KillFeed {
+  /** u32 */
+  readonly serverTick: number;
+  readonly killer: number;
+  readonly victim: number;
+  readonly cause: number;
+  /** Who knocked the victim before the kill, or WORLD_SLOT_CODE for none. */
+  readonly knockedBy: number;
+  readonly headshot: boolean;
+  /** Same team. */
+  readonly friendlyFire: boolean;
+  /** A knock rather than a kill. */
+  readonly knock: boolean;
+  /** 0.1 m, u16. */
+  readonly distanceDm: number;
+}
+
+// KillFeed: type 8, serverTick 32, killer 5, victim 5, cause 5, knockedBy 5, flags 4 (headshot, friendlyFire, knock,
+// reserved), distance 16.
+export function encodeKillFeed(w: BitWriter, m: KillFeed): void {
+  w.write(MsgId.KillFeed, 8);
+  w.write(m.serverTick, 32);
+  w.write(m.killer, ACTOR_BITS);
+  w.write(m.victim, ACTOR_BITS);
+  w.write(m.cause, 5);
+  w.write(m.knockedBy, ACTOR_BITS);
+  w.write((m.headshot ? 1 : 0) | (m.friendlyFire ? 2 : 0) | (m.knock ? 4 : 0), 4);
+  w.write(Math.min(0xffff, Math.max(0, Math.round(m.distanceDm))), 16);
+}
+export function decodeKillFeed(r: BitReader): KillFeed | null {
+  if (r.read(8) !== MsgId.KillFeed) return null;
+  const serverTick = r.read(32);
+  const killer = r.read(ACTOR_BITS);
+  const victim = r.read(ACTOR_BITS);
+  const cause = r.read(5);
+  const knockedBy = r.read(ACTOR_BITS);
+  const flags = r.read(4);
+  const distanceDm = r.read(16);
+  if (!finished(r) || cause >= KILL_CAUSES_BY_CODE.length || victim > 15 || flags > 7) return null;
+  return {
+    serverTick,
+    killer,
+    victim,
+    cause,
+    knockedBy,
+    headshot: (flags & 1) !== 0,
+    friendlyFire: (flags & 2) !== 0,
+    knock: (flags & 4) !== 0,
+    distanceDm,
+  };
 }

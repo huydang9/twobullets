@@ -16,8 +16,10 @@ class SnapshotRing {
   readonly slots: MutableSnapshot[] = [];
   readonly ticks: Float64Array;
   readonly mask: number;
+  private readonly copyEvents: boolean;
 
-  constructor(size: number) {
+  constructor(size: number, copyEvents: boolean) {
+    this.copyEvents = copyEvents;
     if ((size & (size - 1)) !== 0) throw new RangeError("ring size must be a power of two");
     this.mask = size - 1;
     this.ticks = new Float64Array(size).fill(-1);
@@ -28,7 +30,7 @@ class SnapshotRing {
     const tick = snapshot.header.serverTick;
     const index = tick & this.mask;
     const slot = this.slots[index]!;
-    copySnapshot(snapshot, slot);
+    copySnapshot(snapshot, slot, this.copyEvents);
     this.ticks[index] = tick;
     return slot;
   }
@@ -51,7 +53,8 @@ export class ServerSnapshotBaselines {
 
   constructor(size = BASELINE_RING) {
     this.size = size;
-    this.ring = new SnapshotRing(size);
+    // Baselines only need state; events are never delta-coded.
+    this.ring = new SnapshotRing(size, false);
   }
 
   /** Newest acked tick still usable, or −1. */
@@ -93,7 +96,7 @@ export class ClientSnapshotStore {
 
   constructor(size = BASELINE_RING) {
     this.size = size;
-    this.ring = new SnapshotRing(size);
+    this.ring = new SnapshotRing(size, true);
   }
 
   /** Newest decoded tick: the `ackSnapshotTick` of the next input packet (−1 = none). */

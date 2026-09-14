@@ -1,5 +1,5 @@
 import { createBitReader } from "../bits";
-import { decodeDisconnect, decodeHello, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../messages/control";
+import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../messages/control";
 import { MsgId, peekMsgId } from "../messages/ids";
 import { decodeInputPacket } from "../messages/input";
 import { decodePing } from "../messages/ping";
@@ -72,6 +72,9 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
     case MsgId.Disconnect:
       message = decodeDisconnect(r);
       break;
+    case MsgId.KillFeed:
+      message = decodeKillFeed(r);
+      break;
     case MsgId.Resync:
       message = bytes.length === 2 ? decodeResyncRequest(r) : decodeResyncResponse(r);
       break;
@@ -80,8 +83,8 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
   }
   if (message === null && error === null) error = "malformed";
   if (message !== null && typeof message === "object" && "entityPool" in message) {
-    const { header, owner, entities } = message as unknown as Snapshot;
-    message = { header, owner, entities };
+    const { header, owner, entities, weapon, vitals, shots, hits, reliable } = message as unknown as Snapshot;
+    message = { header, owner, weapon, vitals, entities, shots, hits, reliable };
   }
   return { ...base, ok: error === null, ...(message !== null ? { message: plain(message) } : {}), ...(error ? { error } : {}) };
 }

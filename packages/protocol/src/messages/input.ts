@@ -17,12 +17,17 @@ export interface InputPacket {
   readonly clientTimeMs: number;
   /** 0–510 ms (sent /2), for the expected-D check. */
   readonly interpDelayMs: number;
+  /**
+   * Cumulative reliable-event ack: 12-bit seq of the newest event delivered in order (netcode ReliableEventReceiver),
+   * or −1/omitted before the first one. Complements `ackSnapshotTick`.
+   */
+  readonly ackEventSeq?: number;
   /** 1..MAX_INPUTS_PER_PACKET, newest first: ticks newestTick, newestTick−1, … */
   readonly inputs: readonly PlayerInput[];
 }
 
 // Wire layout. Header: type 8, newestTick 16, ackSnapshotTick 16 (0xFFFF none), clientTimeMs 16, interpDelayMs/2 8,
-// count 4. Per input, newest first: [sameAsNext 1 → stop] axes 2+2, buttons 8, select 4, [aimChanged 1 →] yaw 20 +
+// count 4, hasEventAck 1 → ackEventSeq 12. Per input, newest first: [sameAsNext 1 → stop] axes 2+2, buttons 8, select 4, [aimChanged 1 →] yaw 20 +
 // pitch 18, (fire set →) viewOffset 8, hasAction 1 → type 4 + arg 16. The newest input has no sameAsNext/aimChanged
 // bits (there is no newer input to compare with). viewOffset8 is only carried while fire is held; it reads back 0.
 
@@ -47,6 +52,8 @@ export interface MutableInputPacket {
   ackSnapshotTick: number;
   clientTimeMs: number;
   interpDelayMs: number;
+  /** −1 = none. */
+  ackEventSeq: number;
   count: number;
   /** Always MAX_INPUTS_PER_PACKET preallocated entries; only the first `count` are valid. */
   readonly inputs: MutablePlayerInput[];
@@ -65,7 +72,7 @@ export function createInputPacketBuffer(): MutableInputPacket {
     inputs.push(createMutablePlayerInput());
     actionPool.push({ type: 1, arg: 0 });
   }
-  return { newestTick: 0, ackSnapshotTick: NO_TICK, clientTimeMs: 0, interpDelayMs: 0, count: 0, inputs, actionPool };
+  return { newestTick: 0, ackSnapshotTick: NO_TICK, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, count: 0, inputs, actionPool };
 }
 
 /** Copies an input, reusing `dst.action` storage via `actionStore` when given. */
@@ -143,6 +150,9 @@ export function encodeInputPacket(w: BitWriter, m: InputPacket): void {
   w.write(m.clientTimeMs, 16);
   w.write(Math.min(255, Math.max(0, Math.round(m.interpDelayMs / 2))), 8);
   w.write(count, 4);
+  const ackEventSeq = m.ackEventSeq ?? -1;
+  w.writeBool(ackEventSeq >= 0);
+  if (ackEventSeq >= 0) w.write(ackEventSeq, 12);
   writeInputBody(w, m.inputs[0]!, null);
   for (let i = 1; i < count; i++) {
     const input = m.inputs[i]!;
@@ -171,6 +181,7 @@ export function decodeInputPacketInto(r: BitReader, referenceTick: number, out: 
   out.clientTimeMs = r.read(16);
   out.interpDelayMs = r.read(8) * 2;
   const count = r.read(4);
+  out.ackEventSeq = r.readBool() ? r.read(12) : -1;
   if (r.overflowed || count < 1 || count > MAX_INPUTS_PER_PACKET) return false;
   out.count = count;
   for (let i = 0; i < count; i++) {
@@ -229,6 +240,7 @@ export function decodeInputPacket(r: BitReader, referenceTick: number): InputPac
     ackSnapshotTick: buf.ackSnapshotTick,
     clientTimeMs: buf.clientTimeMs,
     interpDelayMs: buf.interpDelayMs,
+    ackEventSeq: buf.ackEventSeq,
     inputs,
   };
 }
