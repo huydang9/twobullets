@@ -16,7 +16,8 @@
     "@twobullets/shared": "workspace:*",
     "@twobullets/sim": "workspace:*",
     "@twobullets/netcode": "workspace:*",
-    "@twobullets/protocol": "workspace:*"
+    "@twobullets/protocol": "workspace:*",
+    "@twobullets/contracts": "workspace:*"
   },
   "devDependencies": {
     "@babylonjs/inspector": "9.26.0",

@@ -1,5 +1,7 @@
 # M3 local run: networked movement on the arena
 
+> **M4 update:** combat is networked now. See [m4-local-run.md](m4-local-run.md) for shooting, damage, knock/revive and the kill feed. The connection steps, URL flags and F6 panel below still apply.
+
 - **Scope:** T3.5 client networking against the T3.4 `server-match` in local mode. See [architecture.md](architecture.md) §7.3 and [netcode.md](netcode.md) §3, §4, §7 and §11.
 - **Authority in M3:** the server is authoritative for **movement only**. Combat, equipment, target dummies, loot, health and the HUD stay local/offline, as in single player. Shots don't reach other players, and nobody takes damage from them.
 

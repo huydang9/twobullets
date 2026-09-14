@@ -1,3 +1,4 @@
+import { LifeCode } from "@twobullets/protocol/codes";
 import type { Mutable, OwnerMoveBlock } from "@twobullets/protocol/messages/snapshot";
 import {
   dequantizeOwnerVel,
@@ -14,14 +15,37 @@ import type { MoveState, Stance, Vec3 } from "@twobullets/shared/movement/types"
 import type { WeaponState } from "@twobullets/shared/weapons/types";
 import { DEFAULT_LOADOUT } from "@twobullets/shared/weapons/weapons";
 import { createWeaponState } from "@twobullets/shared/weapons/weaponStep";
+import { netMoveGates } from "./netCombatRules";
 
-// M3 movement parity with server-match: the server steps movement with a fresh DEFAULT_LOADOUT weapon state that is
-// never stepped (adsBlend 0) and open gates. Owner-block quantization matches the server's snapshot builder.
+// Movement parity with server-match. M3: the server stepped movement with a fresh DEFAULT_LOADOUT weapon state that
+// was never stepped (adsBlend 0) and open gates. M4: movement modifiers come from the predicted weapon state at the
+// start of the tick and the gates from the owner's life (`NetMovement`). Owner-block quantization matches the server's
+// snapshot builder.
 
-/** The weapon state the server passes to `stepPlayer` in M3 (the owner block carries no weapon state). */
+/** The weapon state the server passed to `stepPlayer` in M3 (the owner block carried no weapon state). */
 export const NET_MOVE_WEAPON: WeaponState = createWeaponState(DEFAULT_LOADOUT);
 export const NET_MOVE_GATES: MoveGates = OPEN_MOVE_GATES;
 export const NET_MOVEMENT = { weapon: NET_MOVE_WEAPON, gates: NET_MOVE_GATES } as const;
+
+/**
+ * M4 movement inputs for `PlayerController({ movement })`, read at tick time: the predicted weapon state (start of the
+ * tick, so ADS slows movement exactly like `stepPlayer(..., { weapons: true })`) and the life gates of the newest owner
+ * vitals (`netMoveGates`: crawl while downed, frozen while dead).
+ */
+export class NetMovement {
+  /** Predicted weapon state source (CombatSystem in the browser); null keeps the M3 fixed weapon. */
+  weaponSource: (() => WeaponState) | null = null;
+  /** Owner vitals life code (`LifeCode`). */
+  life: number = LifeCode.alive;
+
+  get weapon(): WeaponState {
+    return this.weaponSource?.() ?? NET_MOVE_WEAPON;
+  }
+
+  get gates(): MoveGates {
+    return netMoveGates(this.life);
+  }
+}
 
 /** Owner block timers are 4-bit tick counts. */
 const TIMER_BITS = 4;

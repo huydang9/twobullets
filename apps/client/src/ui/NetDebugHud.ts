@@ -1,5 +1,6 @@
 import type { InputManager } from "../input/InputManager";
 import type { NetStats } from "../net/NetClient";
+import type { NetCombatStats } from "../net/NetCombat";
 import { el, textNode } from "./dom";
 
 const KEY = "F6";
@@ -11,6 +12,17 @@ const PANEL_STYLE =
 const BANNER_STYLE =
   "position:absolute;top:44px;left:50%;transform:translateX(-50%);z-index:50;padding:6px 14px;background:rgba(20,20,20,0.75);" +
   "color:#ffd9a0;font:600 13px/1.3 system-ui,sans-serif;letter-spacing:0.02em;pointer-events:none;border-radius:3px";
+
+const LIFE_TEXT: Readonly<Record<number, string>> = { 0: "alive", 1: "downed", 2: "dead" };
+/** `WeaponDiff` bit names (shared/weapons/reconcile). */
+const WEAPON_DIFF_NAMES = ["slots", "ammo", "active", "phase", "shots", "trigger", "phaseTimer", "cooldown", "bloom", "ads"];
+
+function weaponDiffText(mask: number): string {
+  if (mask === 0) return "-";
+  const names: string[] = [];
+  for (let i = 0; i < WEAPON_DIFF_NAMES.length; i++) if ((mask & (1 << i)) !== 0) names.push(WEAPON_DIFF_NAMES[i]!);
+  return names.join(",");
+}
 
 const f0 = (v: number) => v.toFixed(0);
 const f1 = (v: number) => v.toFixed(1);
@@ -50,7 +62,7 @@ export class NetDebugHud {
     );
   }
 
-  update(stats: NetStats, nowMs: number): void {
+  update(stats: NetStats, nowMs: number, combat: NetCombatStats | null = null, predictedHits = 0): void {
     if (this.input.wasPressed(KEY)) {
       this.visible = !this.visible;
       this.panel.hidden = !this.visible;
@@ -68,7 +80,12 @@ export class NetDebugHud {
       `corr ${stats.correctionsPerMin}/min (${stats.corrections})  last ${f1(stats.lastCorrectionCm)} cm  mean ${f1(stats.meanCorrectionCm)} cm\n` +
       `replayed ${stats.replayedTicks} t  resyncs ${stats.resyncs}  decode fail ${stats.decodeFailures}\n` +
       `in ${f1(stats.bytesInPerSec / 1024)} KB/s  out ${f1(stats.bytesOutPerSec / 1024)} KB/s  tick ${stats.clientTick}\n` +
-      `server: movement only; combat/equipment local (M3)`;
+      `weapon mispredict ${stats.weaponCorrectionsPerMin}/min (${stats.weaponCorrections})  last ${weaponDiffText(stats.lastWeaponDiff)}\n` +
+      `life ${LIFE_TEXT[stats.ownerLife] ?? stats.ownerLife}  events ${stats.eventsDelivered} (dup ${stats.eventDuplicates})  shots in ${stats.shotsReceived}  hits in ${stats.hitsReceived}\n` +
+      (combat
+        ? `confirms ${combat.hitConfirms}  predicted ${predictedHits}  dmg taken ${combat.damageTaken}  kills ${combat.kills}  feed ${combat.feedLines}  shots played ${combat.shotsPlayed}/${combat.shotsDropped} dropped\n`
+        : "") +
+      `server: movement + weapons + damage (M4); equipment local`;
   }
 
   /** Shown when there's no server yet (token fetch or socket failure before a NetClient exists). */

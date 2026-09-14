@@ -7,7 +7,14 @@ import { decodeHello, decodeResyncRequest, encodeResyncResponse, encodeWelcome }
 import { MsgId } from "@twobullets/protocol/messages/ids";
 import { createInputPacketBuffer, decodeInputPacketInto } from "@twobullets/protocol/messages/input";
 import { decodePing, encodePing } from "@twobullets/protocol/messages/ping";
-import { encodeSnapshot, EntityPresence, type Snapshot } from "@twobullets/protocol/messages/snapshot";
+import { writeOwnerWeapon } from "@twobullets/netcode/replication";
+import {
+  createOwnerVitalsBlock,
+  createOwnerWeaponBlock,
+  encodeSnapshot,
+  EntityPresence,
+  type Snapshot,
+} from "@twobullets/protocol/messages/snapshot";
 import {
   quantizeOwnerVel,
   quantizePosXZ,
@@ -24,13 +31,23 @@ import type { MoveState, Vec3 } from "@twobullets/shared/movement/types";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
 import type { CharacterBody } from "@twobullets/sim/CharacterBody";
 import { stepPlayer, type SimWorld } from "@twobullets/sim/index";
-import type { PredictedBody } from "../../src/net/LocalPlayerNet";
+import type { WeaponState } from "@twobullets/shared/weapons/types";
+import type { LocalPlayerNet, PredictedBody } from "../../src/net/LocalPlayerNet";
+import { createNetWeaponState, netInputButtons, netInputSelect, netMoveGates } from "../../src/net/netCombatRules";
 import type { NetClient } from "../../src/net/NetClient";
 import type { NetClock } from "../../src/net/NetClock";
 import { NET_MOVEMENT, NET_MOVE_WEAPON, stanceCode } from "../../src/net/netMovement";
 
 // In-process stand-ins for server-match (T3.4 spec: Hello/Welcome, input buffer, 60 Hz owner + entity snapshots,
-// server-owned spawn and killY respawn) and for PlayerController's tick loop, both on the real stepPlayer.
+// server-owned spawn and killY respawn; with `weapons`, the T4.6 spec: `stepPlayer(..., { weapons: true })` from the
+// net loadout, owner weapon and vitals groups) and for PlayerController's tick loop, both on the real stepPlayer.
+
+export interface FakeServerOptions {
+  /** M4: step weapons and send the owner weapon + vitals groups. Default false (M3 movement only). */
+  readonly weapons?: boolean;
+  /** Ticks whose input is simulated with fire cleared (forces a shot misprediction). */
+  readonly dropFireAt?: ReadonlySet<number>;
+}
 
 const BOT_SLOT = 5;
 
@@ -52,8 +69,19 @@ export class FakeMatchServer {
   private lastEcho = -1;
   private lastEchoTick = -1;
   private lastInputRecvMs = 0;
+  private readonly weapons: boolean;
+  private readonly dropFireAt: ReadonlySet<number>;
+  private readonly scratchInput: { -readonly [K in keyof PlayerInput]: PlayerInput[K] } = { tick: 0, forward: 0, right: 0, buttons: 0, select: 0, yawQ: 0, pitchQ: 0, viewOffset8: 0, action: null };
+  private readonly weaponBlock = createOwnerWeaponBlock();
+  private readonly vitalsBlock = createOwnerVitalsBlock();
+  /** Shot ids the server fired, in order. */
+  readonly firedShotIds: number[] = [];
+  /** Server weapon state after each simulated tick. */
+  readonly weaponStates = new Map<number, WeaponState>();
 
-  constructor(session: Session, clock: ManualClock, world: SimWorld, level: LevelData, spawnIndex: number) {
+  constructor(session: Session, clock: ManualClock, world: SimWorld, level: LevelData, spawnIndex: number, options: FakeServerOptions = {}) {
+    this.weapons = options.weapons ?? false;
+    this.dropFireAt = options.dropFireAt ?? new Set();
     this.session = session;
     this.clock = clock;
     this.level = level;
@@ -61,7 +89,7 @@ export class FakeMatchServer {
     this.spawn = { x, y, z };
     this.body = world.createBody(this.spawn) as CharacterBody;
     this.body.restore(this.spawn, { x: 0, y: 0, z: 0 }, "stand");
-    this.state = { move: createMoveState(), weapon: NET_MOVE_WEAPON };
+    this.state = { move: createMoveState(), weapon: this.weapons ? createNetWeaponState() : NET_MOVE_WEAPON };
     session.onDatagram((bytes, recvMs) => this.onMessage(bytes, recvMs));
     session.onStream((bytes) => this.onMessage(bytes, this.clock.now()));
   }
@@ -133,11 +161,19 @@ export class FakeMatchServer {
   step(): void {
     const tick = this.tick;
     if (this.attached) {
-      const input = this.inputs.take(tick);
-      this.state = stepPlayer(this.body, this.state, input, TICK_SECONDS, { replay: false }).state;
+      let input: PlayerInput = this.inputs.take(tick);
+      if (this.dropFireAt.has(tick) && (input.buttons & Btn.fire) !== 0) {
+        Object.assign(this.scratchInput, input);
+        this.scratchInput.buttons = input.buttons & ~Btn.fire;
+        input = this.scratchInput;
+      }
+      const result = stepPlayer(this.body, this.state, input, TICK_SECONDS, { replay: false, weapons: this.weapons });
+      this.state = result.state;
+      for (const shot of result.shots) this.firedShotIds.push(shot.shotId);
+      if (this.weapons) this.weaponStates.set(tick, this.state.weapon);
       if (this.body.feet.y < this.level.killY) {
         this.body.restore(this.spawn, { x: 0, y: 0, z: 0 }, "stand");
-        this.state = { move: createMoveState(), weapon: NET_MOVE_WEAPON };
+        this.state = { move: createMoveState(), weapon: this.weapons ? this.state.weapon : NET_MOVE_WEAPON };
       }
       this.states.set(tick, { feet: { ...this.body.feet }, move: this.state.move });
       this.sendSnapshot(tick);
@@ -148,6 +184,7 @@ export class FakeMatchServer {
   private sendSnapshot(tick: number): void {
     const m = this.state.move;
     const feet = this.body.feet;
+    if (this.weapons) writeOwnerWeapon(this.state.weapon, this.weaponBlock);
     const t = tick / 60;
     const snap: Snapshot = {
       header: {
@@ -175,6 +212,8 @@ export class FakeMatchServer {
         jumpBufferTicks: quantizeTicks(m.jumpBufferTimer, 4),
         groundIgnoreTicks: quantizeTicks(m.groundIgnoreTimer, 4),
       },
+      weapon: this.weapons ? this.weaponBlock : null,
+      vitals: this.weapons ? this.vitalsBlock : null,
       entities: [
         {
           slot: BOT_SLOT,
@@ -202,8 +241,11 @@ export class FakeMatchServer {
 export const botX = (t: number) => 10 * Math.sin(0.8 * t);
 export const botVx = (t: number) => 8 * Math.cos(0.8 * t);
 
-/** Scripted player: segments of held movement keys, sprint, crouch, jumps and a turning aim; a pure function of tick. */
-export function scriptedInput(tick: number, out: { -readonly [K in keyof PlayerInput]: PlayerInput[K] }): PlayerInput {
+/**
+ * Scripted player: segments of held movement keys, sprint, crouch, jumps and a turning aim; with `combat`, also fire
+ * bursts, ADS, reloads and weapon switches (rifle ↔ pistol). A pure function of tick.
+ */
+export function scriptedInput(tick: number, out: { -readonly [K in keyof PlayerInput]: PlayerInput[K] }, combat = false): PlayerInput {
   const seg = Math.floor(tick / 40);
   const h = (salt: number) => (Math.imul((seg + salt) ^ 0x9e3779b9, 0x85ebca6b) >>> 0) / 4294967296;
   out.tick = tick;
@@ -213,8 +255,15 @@ export function scriptedInput(tick: number, out: { -readonly [K in keyof PlayerI
   if (h(3) < 0.5) buttons |= Btn.sprint;
   if (h(4) < 0.15) buttons |= Btn.crouch;
   if (h(5) < 0.3 && tick % 40 === 10) buttons |= Btn.jump;
-  out.buttons = buttons;
   out.select = 0;
+  if (combat) {
+    // Bursts: fire held for part of a segment, so triggers press and release (semi-auto pistol, auto rifle).
+    if (h(7) < 0.45 && tick % 40 < 10 + Math.floor(h(8) * 25)) buttons |= Btn.fire;
+    if (h(9) < 0.35) buttons |= Btn.aim;
+    if (h(10) < 0.15 && tick % 40 === 30) buttons |= Btn.reload;
+    if (h(11) < 0.12 && tick % 40 === 0) out.select = h(12) < 0.5 ? 1 : 3;
+  }
+  out.buttons = buttons;
   out.yawQ = (((Math.floor(tick * (h(6) - 0.5) * 3000) % (1 << 20)) + (1 << 20)) % (1 << 20)) >>> 0;
   out.pitchQ = 131071;
   out.viewOffset8 = 0;
@@ -222,17 +271,41 @@ export function scriptedInput(tick: number, out: { -readonly [K in keyof PlayerI
   return out;
 }
 
-/** PlayerController's tick loop without Babylon cameras or DOM input. */
+/** PlayerController + CombatSystem's tick loop without Babylon cameras, FX or DOM input. */
 export class HeadlessPlayer implements PredictedBody {
   readonly body: CharacterBody;
   private state: MoveState = createMoveState();
+  /** M4 weapon prediction; null = M3 movement only with the fixed weapon. */
+  private weapon: WeaponState | null;
+  private readonly combat: boolean;
+  /** Owner life for gates and input clearing (LocalPlayerNet in `frame`). */
+  private local: LocalPlayerNet | null = null;
+  /** Shot ids presented (recoil/FX) after the ShotEmitter, and ids it suppressed as already shown. */
+  readonly emittedShotIds: number[] = [];
+  suppressedShots = 0;
+  /** Shots `stepPlayer` returned during replays (must stay 0). */
+  replayShots = 0;
   private readonly scratch = { tick: 0, forward: 0, right: 0, buttons: 0, select: 0, yawQ: 0, pitchQ: 0, viewOffset8: 0, action: null } as {
     -readonly [K in keyof PlayerInput]: PlayerInput[K];
   };
   ticks = 0;
 
-  constructor(world: SimWorld, feet: Vec3) {
+  constructor(world: SimWorld, feet: Vec3, options: { readonly weapons?: boolean } = {}) {
     this.body = world.createBody(feet) as CharacterBody;
+    this.combat = options.weapons ?? false;
+    this.weapon = this.combat ? createNetWeaponState() : null;
+  }
+
+  get weaponState(): WeaponState | null {
+    return this.weapon;
+  }
+
+  restoreWeapon(state: WeaponState): void {
+    if (this.combat) this.weapon = state;
+  }
+
+  private get gates() {
+    return this.combat ? netMoveGates(this.local?.ownerLife ?? 0) : NET_MOVEMENT.gates;
   }
 
   get tickFeet(): Readonly<Vec3> {
@@ -249,17 +322,43 @@ export class HeadlessPlayer implements PredictedBody {
   }
 
   replayTick(input: PlayerInput): MoveState {
-    this.state = stepPlayer(this.body, { move: this.state, weapon: NET_MOVEMENT.weapon }, input, TICK_SECONDS, { replay: true, gates: NET_MOVEMENT.gates }).state.move;
+    const result = stepPlayer(this.body, { move: this.state, weapon: this.weapon ?? NET_MOVEMENT.weapon }, input, TICK_SECONDS, {
+      replay: true,
+      gates: this.gates,
+      weapons: this.combat,
+    });
+    this.replayShots += result.shots.length;
+    this.state = result.state.move;
+    if (this.combat) this.weapon = result.state.weapon;
     return this.state;
   }
 
   setRenderOffset(): void {}
 
-  frame(dtSec: number, clock: NetClock, ring: PlayerInputRing, client: NetClient): void {
+  frame(dtSec: number, clock: NetClock, ring: PlayerInputRing, client: NetClient, local: LocalPlayerNet | null = null): void {
+    this.local = local;
     for (let n = clock.advance(dtSec); n > 0; n--) {
       const tick = clock.nextTick();
-      const input = ring.push(scriptedInput(tick, this.scratch));
-      this.state = stepPlayer(this.body, { move: this.state, weapon: NET_MOVEMENT.weapon }, input, TICK_SECONDS, { replay: false, gates: NET_MOVEMENT.gates }).state.move;
+      const scripted = scriptedInput(tick, this.scratch, this.combat);
+      if (this.combat) {
+        const life = local?.ownerLife ?? 0;
+        this.scratch.buttons = netInputButtons(scripted.buttons, life);
+        this.scratch.select = netInputSelect(scripted.select, life);
+      }
+      const input = ring.push(scripted);
+      const result = stepPlayer(this.body, { move: this.state, weapon: this.weapon ?? NET_MOVEMENT.weapon }, input, TICK_SECONDS, {
+        replay: false,
+        gates: this.gates,
+        weapons: this.combat,
+      });
+      this.state = result.state.move;
+      if (this.combat) this.weapon = result.state.weapon;
+      if (local) {
+        for (const shot of result.shots) {
+          if (local.shots.accept(shot)) this.emittedShotIds.push(shot.shotId);
+          else this.suppressedShots++;
+        }
+      }
       this.ticks++;
       client.onPredictedTick(input);
     }

@@ -1,11 +1,14 @@
 import { ClientSnapshotStore } from "@twobullets/netcode/baselines";
 import { InterpolationDelay } from "@twobullets/netcode/interpolation";
+import { ReliableEventReceiver } from "@twobullets/netcode/reliableEvents";
 import type { Clock } from "@twobullets/netcode/testing/clock";
 import { TimeSync } from "@twobullets/netcode/timeSync";
 import type { Session } from "@twobullets/netcode/transport/Session";
 import { createBitReader, createBitWriter } from "@twobullets/protocol/bits";
+import { LifeCode } from "@twobullets/protocol/codes";
 import {
   decodeDisconnect,
+  decodeKillFeed,
   decodeResyncResponse,
   decodeWelcome,
   DisconnectReason,
@@ -18,10 +21,13 @@ import {
 import { MsgId } from "@twobullets/protocol/messages/ids";
 import { encodeInputPacket, MAX_INPUTS_PER_PACKET, type InputPacket } from "@twobullets/protocol/messages/input";
 import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages/ping";
+import type { ReliableEvent } from "@twobullets/protocol/messages/events";
 import type { Mutable } from "@twobullets/protocol/messages/snapshot";
-import type { PlayerInput } from "@twobullets/shared/input";
+import { Btn, type PlayerInput } from "@twobullets/shared/input";
 import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, helloFor, WELCOME_TIMEOUT_MS } from "./handshake";
 import type { LocalPlayerNet } from "./LocalPlayerNet";
+import type { NetEventSink } from "./NetCombat";
+import { RESYNC_RESETS_RELIABLE_EVENTS, viewOffset8 } from "./netCombatRules";
 import type { NetClock } from "./NetClock";
 import type { RemoteRoster } from "./RemoteRoster";
 
@@ -64,6 +70,19 @@ export interface NetStats {
   lastCorrectionCm: number;
   meanCorrectionCm: number;
   replayedTicks: number;
+  /** Weapon-state mispredictions (ammo, phase, shot counter, timers beyond tolerance). */
+  weaponCorrectionsPerMin: number;
+  weaponCorrections: number;
+  /** `WeaponDiff` bits of the last weapon correction. */
+  lastWeaponDiff: number;
+  /** Owner life code from the newest vitals (`LifeCode`). */
+  ownerLife: number;
+  /** Reliable events delivered in order, and duplicates dropped. */
+  eventsDelivered: number;
+  eventDuplicates: number;
+  /** Remote `Shot` events and `PlayerHit`s received. */
+  shotsReceived: number;
+  hitsReceived: number;
   resyncs: number;
   decodeFailures: number;
   bytesInPerSec: number;
@@ -86,6 +105,10 @@ export interface NetClientOptions {
   readonly interpFloorMs?: number;
   readonly fallbackReason?: string;
   readonly onStateChange?: (state: NetConnectionState, client: NetClient) => void;
+  /** M4 combat: snapshot events, reliable events in order, owner vitals and the kill feed. */
+  readonly events?: NetEventSink | null;
+  /** Receives the owner's life before each reconcile, so replays step with that tick's life gates. */
+  readonly movement?: { life: number } | null;
 }
 
 /**
@@ -102,6 +125,8 @@ export class NetClient {
   readonly sync = new TimeSync();
   readonly interpDelay: InterpolationDelay;
   readonly store = new ClientSnapshotStore();
+  /** Tier R events: exactly once, in order; `ackSeq` rides every input. */
+  readonly receiver = new ReliableEventReceiver();
   private readonly session: Session;
   private readonly clock: Clock;
   private readonly netClock: NetClock;
@@ -110,6 +135,12 @@ export class NetClient {
   private readonly roster: RemoteRoster;
   private readonly joinToken: string;
   private readonly onStateChange: ((state: NetConnectionState, client: NetClient) => void) | null;
+  private readonly events: NetEventSink | null;
+  private readonly movement: { life: number } | null;
+  private deliverTick = 0;
+  private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
+  private ownerLife: number = LifeCode.alive;
+  private newestVitalsTick = -1;
   private readonly writer = createBitWriter(1500);
   private readonly reader = createBitReader(new Uint8Array(0));
   private readonly packetInputs: PlayerInput[] = [];
@@ -138,8 +169,10 @@ export class NetClient {
     this.roster = options.roster;
     this.joinToken = options.joinToken;
     this.onStateChange = options.onStateChange ?? null;
+    this.events = options.events ?? null;
+    this.movement = options.movement ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
-    this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, inputs: this.packetInputs };
+    this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
     this.stats = {
       state: "handshaking",
       transport: session.kind,
@@ -161,6 +194,14 @@ export class NetClient {
       lastCorrectionCm: 0,
       meanCorrectionCm: 0,
       replayedTicks: 0,
+      weaponCorrectionsPerMin: 0,
+      weaponCorrections: 0,
+      lastWeaponDiff: 0,
+      ownerLife: LifeCode.alive,
+      eventsDelivered: 0,
+      eventDuplicates: 0,
+      shotsReceived: 0,
+      hitsReceived: 0,
       resyncs: 0,
       decodeFailures: 0,
       bytesInPerSec: 0,
@@ -197,9 +238,14 @@ export class NetClient {
     this.rateWindowStartMs = this.stateStartedMs;
   }
 
-  /** After each predicted tick (not replays): record the prediction and send inputs with redundancy. */
+  /**
+   * After each predicted tick (not replays): record the prediction and send inputs with redundancy. An input with fire
+   * set carries the view offset D = input tick − the render tick remote players were drawn at this frame (the input is
+   * the input ring's own entry, so resends carry it too).
+   */
   onPredictedTick(input: PlayerInput): void {
     if (this.stats.state !== "playing") return;
+    if ((input.buttons & Btn.fire) !== 0) (input as Mutable<PlayerInput>).viewOffset8 = viewOffset8(input.tick, this.renderTickValue);
     this.local.recordTick(input);
     this.sendInputs(input.tick);
   }
@@ -274,6 +320,7 @@ export class NetClient {
         this.stats.slot = welcome.playerSlot;
         this.stats.team = welcome.teamId;
         this.roster.setOwnSlot(welcome.playerSlot);
+        this.events?.onWelcome(welcome.playerSlot, welcome.teamId);
         if (welcome.interpFloorMs > 0) this.interpDelay.setFloor(Math.max(welcome.interpFloorMs, this.session.kind === "websocket" ? 50 : 25));
         this.setState("syncing", "");
         break;
@@ -284,9 +331,14 @@ export class NetClient {
         break;
       }
       case MsgId.Resync:
-        // Response: the server reset our baselines; the next snapshot is full. Nothing else to do on the client.
-        decodeResyncResponse(reader);
+        // Response: the server reset our baselines (the next snapshot is full) and its reliable event queue.
+        if (decodeResyncResponse(reader) !== null && RESYNC_RESETS_RELIABLE_EVENTS) this.receiver.reset();
         break;
+      case MsgId.KillFeed: {
+        const feed = decodeKillFeed(reader);
+        if (feed !== null) this.events?.onKillFeed(feed);
+        break;
+      }
       default:
         break;
     }
@@ -309,19 +361,47 @@ export class NetClient {
     if (h.lastProcessedInputTick > this.lastProcessedInput) this.lastProcessedInput = h.lastProcessedInputTick;
     const playing = this.stats.state === "playing";
     if (playing && h.lastProcessedInputTick >= 0) this.netClock.dilation.onBufferDepth(h.inputBufferDepthQ / 4, recvMs);
+    const events = this.events;
+    const reliable = snap.reliable;
+    if (reliable !== undefined && reliable.length > 0) {
+      this.deliverTick = h.serverTick;
+      this.receiver.receive(reliable, this.deliver);
+    }
+    if (events !== null) {
+      this.stats.shotsReceived += snap.shots?.length ?? 0;
+      this.stats.hitsReceived += snap.hits?.length ?? 0;
+      events.onSnapshotEvents(snap);
+    }
     this.roster.onSnapshot(h.serverTick, snap.entities);
     if (snap.owner === null) return;
     if (h.serverTick > this.newestOwnerTick) this.newestOwnerTick = h.serverTick;
-    if (playing) this.local.onOwnerState(h.serverTick, snap.owner, recvMs);
+    const vitals = snap.vitals ?? null;
+    let life = this.ownerLife;
+    if (vitals !== null) {
+      life = vitals.life;
+      if (h.serverTick > this.newestVitalsTick) {
+        this.newestVitalsTick = h.serverTick;
+        this.ownerLife = life;
+        events?.onOwnerVitals(h.serverTick, vitals);
+      }
+    }
+    if (!playing) return;
+    if (this.movement !== null) this.movement.life = life;
+    this.local.onOwnerState(h.serverTick, snap.owner, recvMs, snap.weapon ?? null, life);
+    // Live ticks step with the newest life, whatever order snapshots arrived in.
+    if (this.movement !== null) this.movement.life = this.ownerLife;
   }
 
   private maybeStart(now: number): void {
     const sync = this.sync;
     if (sync.sampleCount < SYNC_SNAPSHOTS || this.newestOwnerTick < 0) return;
     if (this.pingReplies < SYNC_PINGS && now - this.stateStartedMs < SYNC_MAX_MS) return;
-    const owner = this.store.get(this.newestOwnerTick)?.owner;
-    if (!owner) return;
-    this.local.startFrom(owner);
+    const stored = this.store.get(this.newestOwnerTick);
+    const owner = stored?.owner;
+    if (!stored || !owner) return;
+    const life = stored.vitals?.life ?? this.ownerLife;
+    if (this.movement !== null) this.movement.life = life;
+    this.local.startFrom(owner, stored.weapon ?? null, life);
     const dilation = this.netClock.dilation;
     dilation.setJitter(sync.jitterMs);
     this.netClock.start(Math.ceil(sync.clientTargetTickAt(now, dilation.targetTicks)));
@@ -367,6 +447,7 @@ export class NetClient {
     packet.ackSnapshotTick = this.store.newestTick;
     packet.clientTimeMs = Math.floor(this.clock.now()) & 0xffff;
     packet.interpDelayMs = this.interpDelay.delayMs;
+    packet.ackEventSeq = this.receiver.ackSeq;
     this.writer.reset();
     encodeInputPacket(this.writer, packet);
     this.sendDatagram();
@@ -419,6 +500,12 @@ export class NetClient {
     s.lastCorrectionCm = ls.lastCorrectionM * 100;
     s.meanCorrectionCm = ls.corrections > 0 ? (ls.sumCorrectionM / ls.corrections) * 100 : 0;
     s.replayedTicks = ls.replayedTicks;
+    s.weaponCorrections = ls.weaponCorrections;
+    s.weaponCorrectionsPerMin = this.local.weaponCorrectionsPerMinute(now);
+    s.lastWeaponDiff = ls.lastWeaponDiff;
+    s.ownerLife = this.ownerLife;
+    s.eventsDelivered = this.receiver.stats.delivered;
+    s.eventDuplicates = this.receiver.stats.duplicates;
     s.extrapolatedPct = this.roster.sampledFrames > 0 ? (this.roster.extrapolatedFrames / this.roster.sampledFrames) * 100 : 0;
     const elapsed = now - this.rateWindowStartMs;
     if (elapsed >= 1000) {

@@ -133,6 +133,14 @@ export class AudioDirector {
     else this.audio.playImpact({ position: point, normal, weaponId });
   }
 
+  /**
+   * Networked play: the local tracer crossed a remote player's hitbox rig before the server confirmed anything. A dull,
+   * soft body thud only (netcode.md §5.7); the confirm sound comes with `HitConfirm`.
+   */
+  predictedBodyHit(point: Vec3Like): void {
+    this.audio.playImpact({ position: point, weaponId: "shotgun", surface: "flesh", zone: "limb" });
+  }
+
   casing(weaponId: WeaponId, position: Vector3): void {
     const design = WEAPON_SOUNDS[weaponId];
     this.audio.playCasing(position, design.casingRate, design.casingLowpass);

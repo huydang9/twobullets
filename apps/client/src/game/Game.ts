@@ -8,7 +8,7 @@ import { installDebugTools } from "../debug/debugTools";
 import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
 import { LootRenderer, presentationLootModels } from "../equipment/loot";
 import { OfflineMatch, readOfflineMatchOptions } from "../match";
-import { NET_MOVEMENT, NetGame, readNetConfig } from "../net/NetGame";
+import { NetGame, readNetConfig } from "../net/NetGame";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
 import { DynamicResolution } from "../perf/DynamicResolution";
@@ -25,9 +25,10 @@ import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
 /**
  * Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop.
  *
- * DEV `?net=ws://localhost:7350/m/local` joins a server-match (docs/backend/m3-local-run.md). M3 makes the server
- * authoritative for movement only: the local player is predicted and reconciled, remote players are interpolated.
- * Combat, equipment, dummies and loot stay local/offline in that mode. Without `?net` nothing changes.
+ * DEV `?net=ws://localhost:7350/m/local` joins a server-match (docs/backend/m4-local-run.md). The server is
+ * authoritative for movement and combat (M4): the local player's movement and weapons are predicted and reconciled,
+ * remote players are interpolated, hits, damage, knocks and kills come from the server. Equipment and loot stay local,
+ * and there are no practice dummies in that mode. Without `?net` nothing changes.
  */
 export class Game {
   private net: NetGame | null = null;
@@ -93,12 +94,12 @@ export class Game {
     if (!spawn) throw new Error(`Level "${levelData.name}" has no spawn points`);
     // Networked: the net clock drives ticks, the server places the player, movement uses the server's weapon/gates.
     const net = netConfig ? new NetGame(netConfig) : null;
-    const player = new PlayerController(scene, input, levelData, net ? { clock: net.clock, spawnAuthority: "server", movement: NET_MOVEMENT } : {});
+    const player = new PlayerController(scene, input, levelData, net ? { clock: net.clock, spawnAuthority: "server", movement: net.movement } : {});
     if (world) player.camera.maxZ = MAP_FAR_PLANE;
     scene.activeCamera = player.camera;
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
-    const combat = new CombatSystem(scene, input, player, levelData, environment, assets, { targets: !botsMatch });
+    const combat = new CombatSystem(scene, input, player, levelData, environment, assets, { targets: !botsMatch && !net });
     // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
     // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
     const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
@@ -146,7 +147,9 @@ export class Game {
 
     const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution, match);
     if (net) {
-      net.attach(scene, player, input, hudRoot, { assets, environment });
+      // Networked: no offline life (the server owns health, knocks, deaths and respawns), weapons without equipment.
+      life.dispose();
+      net.attach({ scene, player, input, hudRoot, hud, combat, presentation, equipment, soldiers: { assets, environment } });
       game.net = net;
       void net.connect();
     }

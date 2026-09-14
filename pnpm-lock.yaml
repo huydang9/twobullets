@@ -78,6 +78,9 @@ importers:
       '@babylonjs/loaders':
         specifier: 9.26.0
         version: 9.26.0(@babylonjs/core@9.26.0)(babylonjs-gltf2interface@9.26.0)
+      '@twobullets/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@twobullets/netcode':
         specifier: workspace:*
         version: link:../../packages/netcode
