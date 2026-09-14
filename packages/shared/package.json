@@ -1,0 +1,14 @@
+{
+  "name": "@twobullets/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.26.0"
+  }
+}

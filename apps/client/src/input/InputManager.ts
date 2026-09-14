@@ -1,0 +1,147 @@
+import { GAME_KEYS, KEY_BINDINGS, type Action } from "./bindings";
+
+/** Mouse events this soon after acquiring lock are dropped; some browsers report a bogus jump on lock. */
+const LOCK_SETTLE_MS = 50;
+/**
+ * Some browsers occasionally emit one huge movementX/Y. Real flicks ramp up over several events, so an event is
+ * dropped when it is both above SPIKE_MIN_PX and SPIKE_RATIO times larger than the previous event.
+ */
+const SPIKE_MIN_PX = 200;
+const SPIKE_RATIO = 8;
+/** The Babylon Inspector mounts this element while open; clicks in its viewport must not grab the mouse. */
+const INSPECTOR_CONTAINER_ID = "babylon-inspector-container";
+
+/**
+ * Keyboard state (tracked whether or not the pointer is locked, so debug hotkeys work in menus),
+ * pointer lock and mouse-look deltas (only while locked).
+ */
+export class InputManager {
+  /** When true, clicking the canvas requests pointer lock. Also skipped while the Babylon Inspector is open. */
+  lockOnCanvasClick = true;
+
+  private readonly held = new Set<string>();
+  private readonly pressed = new Set<string>();
+  private readonly lockListeners: Array<(locked: boolean) => void> = [];
+  private readonly events = new AbortController();
+  private mouseDx = 0;
+  private mouseDy = 0;
+  private lockedAt = 0;
+  private lastMouseMagnitude = 0;
+
+  constructor(private readonly canvas: HTMLCanvasElement) {
+    const options = { signal: this.events.signal };
+    window.addEventListener("keydown", this.handleKeyDown, options);
+    window.addEventListener("keyup", this.handleKeyUp, options);
+    window.addEventListener("blur", this.releaseKeys, options);
+    document.addEventListener("visibilitychange", this.releaseKeys, options);
+    document.addEventListener("pointerlockchange", this.handleLockChange, options);
+    document.addEventListener("mousemove", this.handleMouseMove, options);
+    canvas.addEventListener("click", this.handleCanvasClick, options);
+  }
+
+  get isLocked(): boolean {
+    return document.pointerLockElement === this.canvas;
+  }
+
+  requestLock(): void {
+    if (!this.isLocked) void this.lockPointer();
+  }
+
+  /** Fires whenever pointer lock is gained or lost. */
+  onLockChange(listener: (locked: boolean) => void): void {
+    this.lockListeners.push(listener);
+  }
+
+  /** True while the key (KeyboardEvent.code) is held. */
+  isDown(code: string): boolean {
+    return this.held.has(code);
+  }
+
+  /** True only on the frame the key went down. */
+  wasPressed(code: string): boolean {
+    return this.pressed.has(code);
+  }
+
+  isActionDown(action: Action): boolean {
+    return KEY_BINDINGS[action].some((code) => this.held.has(code));
+  }
+
+  wasActionPressed(action: Action): boolean {
+    return KEY_BINDINGS[action].some((code) => this.pressed.has(code));
+  }
+
+  /** Accumulated mouse movement since last frame, in pixels. Always zero while unlocked. */
+  lookDelta(): { readonly dx: number; readonly dy: number } {
+    return { dx: this.mouseDx, dy: this.mouseDy };
+  }
+
+  /** Call once at the end of every frame to reset per-frame state. */
+  endFrame(): void {
+    this.pressed.clear();
+    this.mouseDx = 0;
+    this.mouseDy = 0;
+  }
+
+  dispose(): void {
+    this.events.abort();
+    this.lockListeners.length = 0;
+    if (this.isLocked) document.exitPointerLock();
+  }
+
+  private async lockPointer(): Promise<void> {
+    try {
+      // Raw (unaccelerated) mouse input where supported. Some browsers return undefined instead of a promise.
+      await this.canvas.requestPointerLock({ unadjustedMovement: true });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "NotSupportedError")) return; // e.g. re-lock too soon after Esc
+      try {
+        await this.canvas.requestPointerLock();
+      } catch {
+        // Refused; the HUD overlay tells the player to click again.
+      }
+    }
+  }
+
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (this.isLocked && GAME_KEYS.has(event.code)) event.preventDefault();
+    if (event.repeat) return;
+    this.held.add(event.code);
+    this.pressed.add(event.code);
+  };
+
+  private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    // macOS swallows keyup for any key released while Cmd is held; drop everything to avoid stuck keys.
+    if (event.key === "Meta") this.held.clear();
+    this.held.delete(event.code);
+  };
+
+  private readonly releaseKeys = (): void => {
+    this.held.clear();
+  };
+
+  private readonly handleLockChange = (): void => {
+    const locked = this.isLocked;
+    this.mouseDx = 0;
+    this.mouseDy = 0;
+    this.lastMouseMagnitude = 0;
+    if (locked) this.lockedAt = performance.now();
+    else this.held.clear();
+    for (const listener of this.lockListeners) listener(locked);
+  };
+
+  private readonly handleMouseMove = (event: MouseEvent): void => {
+    if (!this.isLocked || performance.now() - this.lockedAt < LOCK_SETTLE_MS) return;
+    const { movementX, movementY } = event;
+    const magnitude = Math.max(Math.abs(movementX), Math.abs(movementY));
+    const spike = magnitude > SPIKE_MIN_PX && magnitude > this.lastMouseMagnitude * SPIKE_RATIO;
+    this.lastMouseMagnitude = magnitude;
+    if (spike) return;
+    this.mouseDx += movementX;
+    this.mouseDy += movementY;
+  };
+
+  private readonly handleCanvasClick = (): void => {
+    if (!this.lockOnCanvasClick || document.getElementById(INSPECTOR_CONTAINER_ID)) return;
+    this.requestLock();
+  };
+}

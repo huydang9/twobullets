@@ -1,0 +1,17 @@
+{
+  "name": "twobullets",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @twobullets/client dev",
+    "build": "pnpm --filter @twobullets/client build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
