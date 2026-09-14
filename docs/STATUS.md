@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-09-15. Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
+Last updated: 2026-09-15 (overnight session). Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
 
 ## Roadmap
 
@@ -14,43 +14,42 @@ Last updated: 2026-09-15. Updated at the end of every phase by the `phase-comple
 | — | Audio v2: CC0 recordings, spatial mix, distance acoustics, footsteps | ✅ Done (ambience off by default) | `4843c7a` |
 | — | Blood hit effects | ✅ Done | `5d29a3f` |
 | — | Performance: bench, overlay, cascade culling; round 2 presets/terrain/shadows | ✅ Done (awaiting 2nd user bench) | `5d050d6`, `7520858` |
-| — | Project rules, skills, architecture docs, STATUS.md | ✅ Done | `cf7ec07`, `6b3221f`, this commit |
-| M2.5 | **Equipment** (offline, server-ready rules) | 🔄 Phase 1 committed; phase 2 built but uncommitted | `f1e36ef` |
-| — | Real equipment models/animations/VFX; big-trunk trees, boulders, cover props | 🔄 Research in progress | — |
-| — | Vegetation stability (trees unstable while moving) | 🔄 In progress | — |
-| — | Offline match with bots on Map v1: 5 teams × 2, zone, easy/normal/hard | ⏭ Next | — |
-| M3 | Networked movement | Planned | `docs/backend/architecture.md` |
-| M4 | Networked combat (friendly fire) | Planned | |
+| — | Project rules, skills, architecture docs, STATUS.md | ✅ Done | `cf7ec07`, `6b3221f`, `e2a18a7` |
+| M2.5 | **Equipment** (offline, server-ready rules) | ✅ Done, browser-verified | `f1e36ef`, `2169d6d` |
+| — | Vegetation stability (LOD hysteresis/cross-fade, zoom-aware LOD, cover never culls) | ✅ Done, browser-checked | `d8d6794` |
+| — | Chain-link fence renders solid black; wall gaps 2× too wide (user's "see through wall" report) | 🔄 Fix agent running | — |
+| — | Real equipment models/animations/VFX; big-trunk trees, boulders, cover props | 🔄 Research done (`docs/assets-research/`); downloads pending | — |
+| — | Real-world map (OpenStreetMap) as an optional map | 🔍 Investigation only (user: "don't touch anything") | — |
+| M3 | Networked movement | 🔄 T3.0 skeleton done; T3.1 sim refactors + T3.2/T3.3 protocol/netcode running | `d093110` |
+| — | Offline match with bots on Map v1: 5 teams × 2, zone, easy/normal/hard | ⏭ After M3 core (user asked for backend tonight) | — |
+| M4 | Networked combat (friendly fire) | Planned | `docs/backend/architecture.md` |
 | M5 | BR loop: landing/glide, zone, networked equipment, knock/revive, lobby bots | Planned | |
 
-## Uncommitted work (equipment phase 2)
-All 4 phase-2 agents reported done, with typecheck and 311 tests passing. The pieces are not yet integrated or browser-tested:
+## In progress (overnight)
+| Area | Owner task | Files | Next |
+|---|---|---|---|
+| Sim refactors R1–R14 + real `stepPlayer` (movement) | T3.1 | `packages/shared/**` (except `map/layout/placement.ts`), `packages/sim/**`, `apps/client/src/{player,combat,game}/**` | Browser-check offline feel, commit; then T3.4 server-match + T3.5 client net |
+| Protocol codecs + netcode lib | T3.2/T3.3 | `packages/protocol/**`, `packages/netcode/**` | Commit; T3.4 uses them |
+| Chain-link alpha + gap trimming | map fix | `world/props/**`, `map/layout/placement.ts`, Map v1 bake/checksums | Browser-check at (240, −285) yaw 80 and the user's spot (100, −347) yaw 64 scoped |
+| Real-map investigation | research | none (report only) | Present report; user picks place and scope |
 
-| Area | Contents | Location |
-|---|---|---|
-| Integration | Prone/crawl stance, boost speed, jump gate, fall damage, `respawnAt`, PlayerLife death/respawn, soldier blast reactions | `game/Game.ts`, `player/**`, `packages/shared/src/movement`, `targets/**` |
-| Items/inventory/loot | Inventory weapon slots, ammo items, armor routing, loot rendering, F interaction, Tab inventory | `combat/**`, `equipment/EquipmentSystem.ts`, `equipment/loot/**`, `ui/inventory/**` |
-| HUD + audio | Armor/boost/knocked HUD, cook/use rings, prompts, pickup feed, death recap, equipment sounds | `ui/equipment/**`, `audio/equipment/**` |
-| Throwables presentation | Procedural hands and grenade meshes, smoke/fire/explosion/flash renderers | `equipment/presentation/**`, `viewmodel/HandsRig.ts` |
-
-**To close the phase:**
-1. Final wiring in `Game.ts`:
-   - `LootRenderer` and `InventoryScreen`, with their per-frame updates
-   - `soldierTargets(dummies, combat.targetArmor)`
-   - construct presentation after `EquipmentSystem`
-   - Engine antialias from `loadGraphicsSettings()`
-2. Browser test of the full flow.
-3. Commit, then update the devlog.
+**Backend plan for the rest of the night:** T3.4 server-match (MatchHost, scheduler, ws transport, sessions) and T3.5 client net (NetClient, prediction glue, remote players) once T3.1–T3.3 land; T3.6 bots + in-process integration test. Hosting (OVH), CI soak, control plane, login/queue and playtests need the user and are not started.
 
 ## Open user feedback
-- **Throwing looks fake:** the procedural hands, grenades and effects need replacing with downloaded realistic models, FP throw animations and VFX textures (research running; downloads need user OK).
-- **Trees:** "not stable when moving" (stability agent running). The user wants big-trunk trees with roots and big rocks/boulders as cover, using 3D models.
-- **Blood:** may be too subtle on the dark uniform; offer an intensity tweak (`presentation.debugBlood({ intensity })`).
+- **Throwing looks fake:** replace procedural hands/grenades/effects with the researched set (`docs/assets-research/equipment-environment-2026-09-15.md`). CC0 sources (Unity Labs flipbooks, Poly Haven rocks/medkit, Kenney particles) can be fetched without asking. Sketchfab/Mixamo downloads go through the user's Chrome and need one "y" per batch in chat.
+- **Trees/rocks:** user wants big-trunk trees and big boulders as cover (picks in the research doc).
+- **Blood:** may be too subtle on the dark uniform; offer `presentation.debugBlood({ intensity })`.
+- **Architecture conflict:** `docs/backend/architecture.md` D6 assumes players pass through each other; product rule is body blocking ON. The contract carries a `bodyBlocking` flag; sim needs player capsules later.
 
 ## Pending user actions
-- Re-run `?bench=v1` after perf round 2 and paste the results.
-- Listen to the equipment sounds (explosions, pin pull, bandage, fire loop, flash ring).
-- Review the Vietnamese devlog in `docs/devlog/` (uncommitted until the user asks).
+- One "y" for the Sketchfab + Mixamo download batch (list in the research doc's starter set).
+- Real-map decisions after the investigation report (place, real vs flat elevation, building count).
+- Re-run `?bench=v1` after perf round 2 and the vegetation changes, and paste the results.
+- Listen to the equipment sounds; review the Vietnamese devlog in `docs/devlog/` (uncommitted until asked; tonight's phases not yet written up).
+
+## Workflow notes
+- Weekly usage guard: if weekly Claude usage > 50% (checked hourly from `~/.claude/usage-last.json`), stop all agents and rewrite this file as a resumable report.
+- Downloads from open APIs don't need the user's OK; browser downloads need one batched "y".
 
 ## Decisions log
 Product decisions live in `CLAUDE.md` ("Product decisions"). Backend defaults live in `docs/backend/architecture.md`, overridden by: friendly fire ON, 5 s revive, body blocking ON, lobby bots YES, internal release (no legal work).
