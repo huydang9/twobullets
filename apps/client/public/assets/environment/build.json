@@ -2631,7 +2631,7 @@
   },
   "fern": {
    "url": "props/fern_02.glb",
-   "bytes": 375424,
+   "bytes": 359704,
    "lods": [
     {
      "url": "props/fern_02.glb",
@@ -2675,7 +2675,7 @@
   },
   "grass_clump_short": {
    "url": "props/grass_medium_01.glb",
-   "bytes": 568080,
+   "bytes": 646224,
    "lods": [
     {
      "url": "props/grass_medium_01.glb",
@@ -2713,7 +2713,7 @@
   },
   "grass_clump_medium": {
    "url": "props/grass_medium_01.glb",
-   "bytes": 568080,
+   "bytes": 646224,
    "lods": [
     {
      "url": "props/grass_medium_01.glb",
@@ -2757,7 +2757,7 @@
   },
   "grass_clump_tall": {
    "url": "props/grass_medium_01.glb",
-   "bytes": 568080,
+   "bytes": 646224,
    "lods": [
     {
      "url": "props/grass_medium_01.glb",
