@@ -3,6 +3,7 @@ import { INSTANCE_STRIDE, type ScatterContext, type ScatterRule } from "@twobull
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import type { PropVisuals } from "../props";
+import { enableDistanceFade } from "../props/lodFadePlugin";
 
 export interface GrassFieldOptions {
   /** Grass is drawn within this horizontal distance of the camera, m. */
@@ -31,12 +32,15 @@ const boundsMax = new Vector3();
 /**
  * Grass clumps around the camera from the map's detail scatter rules. Cells expand lazily through the same seeded
  * ScatterContext as the rest of the scatter (so grass stays off roads, pads and buildings), and one thin-instance
- * buffer per grass prop is rebuilt when the camera crosses into a new cell. No collision, no shadows.
+ * buffer per grass prop is rebuilt when the camera crosses into a new half cell. With `grassGpuFade` the buffers hold
+ * full-size clumps out to the radius plus the farthest the camera gets before the next rebuild, and the vertex shader
+ * shrinks them by live camera distance, so the edge moves smoothly instead of in rebuild steps. No collision, no shadows.
  */
 export class GrassField {
   private readonly radius: number;
   private readonly fade: number;
   private readonly cellSize: number;
+  private readonly gpuFade = OPTIMIZATIONS.grassGpuFade;
   private readonly cache = new Map<string, Map<string, number[]>>();
   private readonly buffers = new Map<string, PropBuffer>();
   private lastCell = "";
@@ -88,13 +92,15 @@ export class GrassField {
 
   private rebuild(cx: number, cz: number): void {
     const s = this.cellSize;
-    const reach = this.radius + s;
+    // Rebuilds happen on every half cell, so the camera stays within a half-cell diagonal of this point until the next.
+    const drawRadius = this.gpuFade ? this.radius + (s / 2) * Math.SQRT2 : this.radius;
+    const reach = drawRadius + s;
     const gathered = new Map<string, number[][]>();
     for (let iz = Math.floor((cz - reach) / s); iz * s <= cz + reach; iz++) {
       for (let ix = Math.floor((cx - reach) / s); ix * s <= cx + reach; ix++) {
         const dx = Math.max(ix * s - cx, 0, cx - (ix + 1) * s);
         const dz = Math.max(iz * s - cz, 0, cz - (iz + 1) * s);
-        if (dx * dx + dz * dz > this.radius * this.radius) continue;
+        if (dx * dx + dz * dz > drawRadius * drawRadius) continue;
         for (const [prop, list] of this.cell(ix, iz)) {
           let lists = gathered.get(prop);
           if (!lists) gathered.set(prop, (lists = []));
@@ -119,8 +125,8 @@ export class GrassField {
           const y = list[i + 1]!;
           const z = list[i + 2]!;
           const d = Math.sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz));
-          if (d >= this.radius) continue;
-          const t = d <= inner ? 1 : 1 - (d - inner) / this.fade;
+          if (d >= drawRadius) continue;
+          const t = this.gpuFade || d <= inner ? 1 : 1 - (d - inner) / this.fade;
           const scale = list[i + 4]! * t * t * (3 - 2 * t);
           const c = Math.cos(list[i + 3]!) * scale;
           const sn = Math.sin(list[i + 3]!) * scale;
@@ -217,6 +223,7 @@ export class GrassField {
         extent = Math.max(extent, -minimum.x, -minimum.y, -minimum.z, maximum.x, maximum.y, maximum.z);
         if (OPTIMIZATIONS.grassDynamicBuffers) mesh.doNotSyncBoundingInfo = true;
         if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
+        if (this.gpuFade) enableDistanceFade(mesh, this.radius - this.fade, this.radius);
         this.environment.skyFill.excludedMeshes.push(mesh);
       }
       this.buffers.set(key, (buffer = { meshes, data: new Float32Array(0), extent, uploaded: null }));

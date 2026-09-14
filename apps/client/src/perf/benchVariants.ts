@@ -17,7 +17,7 @@ export interface BenchSubsystems {
 }
 
 export interface GroupedBenchVariant extends BenchVariant {
-  /** resolution | shadows | terrain | shading | scene */
+  /** resolution | shadows | terrain | shading | vegetation | scene */
   readonly group: string;
   /** Part of the default run (`?variants` absent). */
   readonly byDefault: boolean;
@@ -117,6 +117,10 @@ export function createBenchVariants(s: BenchSubsystems, select?: readonly string
     toggle("fogOff", "shading", true, "fog off", (off) => (scene.fogEnabled = !off)),
     toggle("imageProcessingOff", "shading", true, "image processing off (ACES, contrast, dithering)", (off) => (scene.imageProcessingConfiguration.isEnabled = !off)),
     toggle("viewmodelOff", "shading", true, "viewmodel off", setViewmodelSuppressed),
+
+    flag("lodCrossFade", "vegetation", ["LOD cross-fade on", "LOD cross-fade off"], undefined, false),
+    flag("lodHysteresis", "vegetation", ["LOD hysteresis on", "LOD hysteresis off"], undefined, false),
+    flag("foliageAlphaMipScale", "vegetation", ["foliage alpha mip scale on", "foliage alpha mip scale off"], undefined, false),
 
     toggle("grassOff", "scene", false, "grass off", (off) => world.grass.setEnabled(!off)),
     toggle("propsOff", "scene", false, "props + vegetation off", (off) => world.props.setEnabled(!off)),

@@ -44,6 +44,17 @@ export interface RenderOptimizations {
    * dynamic caster (soldiers) touches them and no static caster changed; refreshed at least every 30 frames.
    */
   shadowStaticCache: boolean;
+
+  /** Runtime. Prop and vegetation LOD, cull and shadow switches use ±10% hysteresis bands per instance. */
+  lodHysteresis: boolean;
+  /** Runtime. LOD switches cross-fade with screen-door dithering over 0.4 s instead of popping. */
+  lodCrossFade: boolean;
+  /** Runtime. Alpha-tested foliage scales cutout alpha by mip level, so leaves keep their coverage at distance. */
+  foliageAlphaMipScale: boolean;
+  /** Runtime. Crossed-quad impostors turn (≤ 30°) toward the camera when they appear, so no quad shows edge-on. */
+  impostorFacing: boolean;
+  /** Grass shrinks out by live camera distance on the GPU instead of by the position its buffer was rebuilt at (startup). */
+  grassGpuFade: boolean;
 }
 
 const DEFAULTS: RenderOptimizations = {
@@ -63,6 +74,11 @@ const DEFAULTS: RenderOptimizations = {
   shadowMap1536: false,
   shadowPcfLow: false,
   shadowStaticCache: false,
+  lodHysteresis: true,
+  lodCrossFade: true,
+  foliageAlphaMipScale: true,
+  impostorFacing: true,
+  grassGpuFade: true,
 };
 
 export const OPTIMIZATIONS: RenderOptimizations = { ...DEFAULTS };

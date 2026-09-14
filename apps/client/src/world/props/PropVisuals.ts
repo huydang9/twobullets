@@ -1,5 +1,6 @@
-import { Color3, PBRMaterial, type Mesh, type Scene } from "@babylonjs/core";
-import { PROP_MANIFEST, PropLibrary, isPropId, type PropId, type PropLibraryOptions } from "../propAssets";
+import { Color3, PBRMaterial, VertexBuffer, type Mesh, type Scene } from "@babylonjs/core";
+import { PROP_MANIFEST, PropLibrary, isPropId, type PropId, type PropLevel, type PropLibraryOptions } from "../propAssets";
+import { detectImpostorPlanes, type ImpostorPlanes } from "./impostor";
 import { buildStandIn, standInSpec } from "./standInMeshes";
 
 export interface PropVisualLevel {
@@ -7,6 +8,8 @@ export interface PropVisualLevel {
   readonly distance: number;
   /** Impostors never cast shadows. */
   readonly billboard: boolean;
+  /** Plane layout of a crossed-quad impostor level, turned toward the camera when it appears. */
+  readonly impostor: ImpostorPlanes | null;
   /** Fresh meshes for one batch (unique geometry, shared materials), enabled. */
   create(name: string): Mesh[];
 }
@@ -73,7 +76,12 @@ export class PropVisuals {
         asset: true,
         cullDistance: template.asset.cullDistance,
         castShadow: template.asset.castShadow,
-        levels: template.levels.map((level, index) => ({ distance: level.distance, billboard: level.billboard, create: (name: string) => library.createBatch(prop, index, name) })),
+        levels: template.levels.map((level, index) => ({
+          distance: level.distance,
+          billboard: level.billboard,
+          impostor: level.billboard ? impostorPlanes(level) : null,
+          create: (name: string) => library.createBatch(prop, index, name),
+        })),
       };
     }
     const spec = standInSpec(prop);
@@ -83,7 +91,20 @@ export class PropVisuals {
       asset: false,
       cullDistance,
       castShadow: spec.castShadow,
-      levels: spec.levels.map((level, index) => ({ distance: level.distance, billboard: false, create: (name: string) => [buildStandIn(this.scene, prop, index, name, this.standInMaterial)] })),
+      levels: spec.levels.map((level, index) => ({ distance: level.distance, billboard: false, impostor: null, create: (name: string) => [buildStandIn(this.scene, prop, index, name, this.standInMaterial)] })),
     };
   }
+}
+
+/** Shared plane layout of every mesh of an impostor level, or null. */
+function impostorPlanes(level: PropLevel): ImpostorPlanes | null {
+  let planes: ImpostorPlanes | null = null;
+  for (const mesh of level.meshes) {
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+    const indices = mesh.getIndices();
+    const found = positions && indices ? detectImpostorPlanes(positions, indices) : null;
+    if (!found || (planes && (planes.spacing !== found.spacing || Math.abs(planes.offset - found.offset) > 1e-3))) return null;
+    planes = found;
+  }
+  return planes;
 }
