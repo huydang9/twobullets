@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-09-15 (overnight session). Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
+Last updated: 2026-09-15 (overnight session, ~04:00). Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
 
 ## Roadmap
 
@@ -11,45 +11,49 @@ Last updated: 2026-09-15 (overnight session). Updated at the end of every phase 
 | — | Realistic art swap: DJMaesen FP weapons, Mixamo Swat soldiers, PBR environment, PUBG HUD | ✅ Done | `12f0d9c` |
 | — | Backend design: netcode, runtime perf, platform, merged architecture | ✅ Done (design only) | `b9143f6` |
 | — | Map v1: terrain, building kit, 7-POI layout, CC0 materials/props/vegetation | ✅ Done | `c919201`, `02925d4` |
-| — | Audio v2: CC0 recordings, spatial mix, distance acoustics, footsteps | ✅ Done (ambience off by default) | `4843c7a` |
-| — | Blood hit effects | ✅ Done | `5d29a3f` |
-| — | Performance: bench, overlay, cascade culling; round 2 presets/terrain/shadows | ✅ Done (awaiting 2nd user bench) | `5d050d6`, `7520858` |
-| — | Project rules, skills, architecture docs, STATUS.md | ✅ Done | `cf7ec07`, `6b3221f`, `e2a18a7` |
+| — | Audio v2 · blood · performance rounds 1–2 · rules/skills/docs | ✅ Done | `4843c7a`, `5d29a3f`, `5d050d6`, `7520858`, `cf7ec07` |
 | M2.5 | **Equipment** (offline, server-ready rules) | ✅ Done, browser-verified | `f1e36ef`, `2169d6d` |
-| — | Vegetation stability (LOD hysteresis/cross-fade, zoom-aware LOD, cover never culls) | ✅ Done, browser-checked | `d8d6794` |
-| — | Chain-link fence renders solid black; wall gaps 2× too wide (user's "see through wall" report) | 🔄 Fix agent running | — |
-| — | Real equipment models/animations/VFX; big-trunk trees, boulders, cover props | 🔄 Research done (`docs/assets-research/`); downloads pending | — |
-| — | Real-world map (OpenStreetMap) as an optional map | 🔍 Investigation only (user: "don't touch anything") | — |
-| M3 | Networked movement | 🔄 T3.0 skeleton done; T3.1 sim refactors + T3.2/T3.3 protocol/netcode running | `d093110` |
-| — | Offline match with bots on Map v1: 5 teams × 2, zone, easy/normal/hard | ⏭ After M3 core (user asked for backend tonight) | — |
+| — | Vegetation stability; chain-link alpha and wall gaps (user's "see through wall") | ✅ Done | `d8d6794`, `cd57479`, `a43cc02` |
+| — | **Realistic throwables and gear:** CC0 flipbook VFX; real FP throw arms, grenades, consumables, helmet/vest/backpack | ✅ Done, browser-checked (medkit hold still large) | `f57776a`, `a1e6bdf` |
+| — | Cover props library: big oaks, rocks, wrecks, sandbags, hay, pipes, spools | ✅ Library done; 🔄 placement on Map v1 running | `6b63415` |
+| — | **Offline bots on Map v1** (5×2, zone, easy/normal/hard) | ✅ Nav, brain, MatchSim, client + HUD committed; browser check of combat pending | `fc4ced2`, `59c0d5a`, `bbd3ef3`, `258292e`, `32eb8ee` |
+| M3 | **Networked movement** (local server + client prediction) | ✅ Core done locally: sim refactor, protocol, netcode, server-match (ws), client net; WebTransport, CI gates, Linux staging not done | `d093110`, `2df36fd`, `357c19f`, `7c1066b` |
+| — | Real-world map (OpenStreetMap), optional | 🔍 Investigation done, waiting on user decisions | `15fb288` |
 | M4 | Networked combat (friendly fire) | Planned | `docs/backend/architecture.md` |
-| M5 | BR loop: landing/glide, zone, networked equipment, knock/revive, lobby bots | Planned | |
+| M5 | BR loop networked: landing/glide, zone, equipment, knock/revive, lobby bots | Planned (offline versions exist) | |
 
-## In progress (overnight)
-| Area | Owner task | Files | Next |
+## How to try things
+- Offline arena `http://localhost:5173/`, full map `?map=v1` (knock/revive `&teammate=1`, armored targets `&targetArmor=1`).
+- **Bot match:** `?bots=1&difficulty=easy|normal|hard` (implies Map v1). Extras: `&seed=`, `&zoneScale=0.25`, `&spectate=1`, `&botDebug=1`. Console: `__twobullets.match` (`state`, `debug(slot)`, `events(n)`, `follow(slot)`, `setZonePhase(n)`, `killAll()`).
+- **Local multiplayer (movement only):** `pnpm server:dev`, then two tabs at `?net=ws://localhost:7350/m/local` (F6 net HUD). Details: `docs/backend/m3-local-run.md`.
+- Props preview `/props.html`; equipment previews `__twobullets.presentation.debugThrow("frag")`, `debugSmoke()`, `debugMolotov(6)`, `debugUse("energy_drink")`.
+
+## In progress
+| Area | Owner | Files | Next |
 |---|---|---|---|
-| Sim refactors R1–R14 + real `stepPlayer` (movement) | T3.1 | `packages/shared/**` (except `map/layout/placement.ts`), `packages/sim/**`, `apps/client/src/{player,combat,game}/**` | Browser-check offline feel, commit; then T3.4 server-match + T3.5 client net |
-| Protocol codecs + netcode lib | T3.2/T3.3 | `packages/protocol/**`, `packages/netcode/**` | Commit; T3.4 uses them |
-| Chain-link alpha + gap trimming | map fix | `world/props/**`, `map/layout/placement.ts`, Map v1 bake/checksums | Browser-check at (240, −285) yaw 80 and the user's spot (100, −347) yaw 64 scoped |
-| Real-map investigation | research | none (report only) | Present report; user picks place and scope |
+| Cover props placement on Map v1 + radar roof stair fix | map layout agent | `packages/shared/src/map/{mapV1.ts,layout/**}`, bake/checksums, nav/match test expectations | Browser-check viewpoints, commit; then nav wall-link fixes |
 
-**Backend plan for the rest of the night:** T3.4 server-match (MatchHost, scheduler, ws transport, sessions) and T3.5 client net (NetClient, prediction glue, remote players) once T3.1–T3.3 land; T3.6 bots + in-process integration test. Hosting (OVH), CI soak, control plane, login/queue and playtests need the user and are not started.
+## Known issues / follow-ups
+- **Bots:** browser combat not yet watched (headless: bots arm, shoot, 36% hit at 30 m on normal). Nav links through walls on four small buildings (farm sheds at (316.8, 273.8)/(312.3, 274.8), military containers 2 and 5), two town-house staircases where bots loop, tight quarry office door. Nav grid builds on the main thread (0.55 s Node; slower in browser) — move to the map worker. Third-person knocked/crawl/revive/heal/throw clips (Mixamo files downloaded in `assets-src/animations/mixamo/`, not processed) and per-weapon third-person props.
+- **Hidden-tab testing:** a `?bots=1` page froze when the first `scene.render()` happened after START in a hidden automation tab; rendering once before starting avoids it. Not expected in a visible tab, but the user should confirm.
+- **Equipment:** medkit held in first person covers the centre of the screen; frag dust slightly speckled; molotov flames look like separate tongues.
+- **Backend:** WebTransport, CI perf gates, Linux re-measure, body blocking in the sim (hook in `CharacterBody` `MOVEMENT_COLLIDE_MASK`), `replication.ts` should move from server-match to netcode, protocol `quantize` duplicates shared `aim.ts`.
+- **Docs stale:** `docs/map/terrain.md`, `docs/map/buildings.md` and `CLAUDE.md` still name pre-`packages/sim` folders; `docs/architecture-overview.md` lacks sim/protocol/netcode/server-match/bots.
 
-## Open user feedback
-- **Throwing looks fake:** replace procedural hands/grenades/effects with the researched set (`docs/assets-research/equipment-environment-2026-09-15.md`). CC0 sources (Unity Labs flipbooks, Poly Haven rocks/medkit, Kenney particles) can be fetched without asking. Sketchfab/Mixamo downloads go through the user's Chrome and need one "y" per batch in chat.
-- **Trees/rocks:** user wants big-trunk trees and big boulders as cover (picks in the research doc).
-- **Blood:** may be too subtle on the dark uniform; offer `presentation.debugBlood({ intensity })`.
-- **Architecture conflict:** `docs/backend/architecture.md` D6 assumes players pass through each other; product rule is body blocking ON. The contract carries a `bodyBlocking` flag; sim needs player capsules later.
+## Pending user decisions
+- **Real-world map** (`docs/research/real-world-map-investigation.md`): place (Holašovice recommended / Shirakawa-go / Hội An), elevation real/scaled/flat, building cap 60 vs ~120, Training Yard on real maps, diacritics in names.
+- **Bot defaults** (agents used these): random start POI, death screen with spectate or new match, death drops the whole inventory, teammate bot uses the selected difficulty, ~11 min zone.
+- Body blocking conflict: product rule ON vs architecture D6 (pass-through) — sim hook exists, not built.
 
 ## Pending user actions
-- One "y" for the Sketchfab + Mixamo download batch (list in the research doc's starter set).
-- Real-map decisions after the investigation report (place, real vs flat elevation, building count).
-- Re-run `?bench=v1` after perf round 2 and the vegetation changes, and paste the results.
-- Listen to the equipment sounds; review the Vietnamese devlog in `docs/devlog/` (uncommitted until asked; tonight's phases not yet written up).
+- Play `?bots=1` in a visible tab and say how the bots feel (difficulty, aim, looting).
+- Re-run `?bench=v1` (perf round 2 plus vegetation, VFX, cover props, bots) and paste the results; F4 numbers with `?bots=1&spectate=1`.
+- Listen to the equipment sounds; review the Vietnamese devlog in `docs/devlog/` (tonight's phases not written up yet).
 
 ## Workflow notes
 - Weekly usage guard: if weekly Claude usage > 50% (checked hourly from `~/.claude/usage-last.json`), stop all agents and rewrite this file as a resumable report.
-- Downloads from open APIs don't need the user's OK; browser downloads need one batched "y".
+- Downloads of researched, license-checked assets don't need the user's approval (user, 2026-09-15). Raw files and download records are in gitignored `assets-src/` (`DOWNLOADS-2026-09-15.md`, `DOWNLOADS-CC0-2026-09-15.md`).
+- Browser checks while agents edit files: use a no-HMR Vite on :5174 (config in the session scratchpad) so pages don't reload mid-test.
 
 ## Decisions log
 Product decisions live in `CLAUDE.md` ("Product decisions"). Backend defaults live in `docs/backend/architecture.md`, overridden by: friendly fire ON, 5 s revive, body blocking ON, lobby bots YES, internal release (no legal work).
