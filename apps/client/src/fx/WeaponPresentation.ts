@@ -11,8 +11,7 @@ import {
   type WeaponId,
 } from "@twobullets/shared";
 import type { AssetLibrary } from "../assets";
-import { AudioEngine } from "../audio/AudioEngine";
-import { WeaponAudio } from "../audio/WeaponAudio";
+import { AudioDirector } from "../audio/AudioDirector";
 import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "../combat/types";
 import type { PlayerController } from "../player/PlayerController";
 import { VIEWMODEL_RENDERING_GROUP, Viewmodel, type ViewmodelFrame } from "../viewmodel/Viewmodel";
@@ -58,8 +57,8 @@ export class WeaponPresentation {
   private readonly tracers: Tracers;
   private readonly flash: MuzzleFlash;
   private readonly casings: ShellCasings;
-  private readonly audioEngine = new AudioEngine();
-  private readonly audio = new WeaponAudio(this.audioEngine);
+  /** All game audio (DEV console: `__audio.help()`). */
+  readonly audio: AudioDirector;
 
   private readonly shotObserver: Observer<ShotEvent>;
   private readonly weaponObserver: Observer<WeaponEvent>;
@@ -100,6 +99,7 @@ export class WeaponPresentation {
     assets: AssetLibrary | null,
     environment: Environment,
   ) {
+    this.audio = new AudioDirector(scene, player, combat);
     const initial = combat.activeWeapon;
     this.viewmodel = new Viewmodel(scene, player.camera, environment, assets, initial.id);
     this.frame = {
@@ -132,7 +132,7 @@ export class WeaponPresentation {
     this.tracers = new Tracers(this.worldAdditive);
     this.flash = new MuzzleFlash(scene, this.viewmodelAdditive);
     this.casings = new ShellCasings(scene);
-    this.casings.onBounce = (position) => this.audio.casingTink(Vector3.Distance(position, this.player.camera.position));
+    this.casings.onBounce = (position) => this.audio.casing(this.frame.weaponId, position);
 
     this.shotObserver = combat.onShot.add((event) => this.handleShot(event.shot));
     this.weaponObserver = combat.onWeaponEvent.add((event) => this.handleWeaponEvent(event));
@@ -153,16 +153,17 @@ export class WeaponPresentation {
     for (let i = 0; i < this.pendingShotCount; i++) {
       const shot = this.pendingShots[i] as FiredShot;
       const plan = this.viewmodel.fire(shot.recoilUp, shot.recoilRight, frame.adsBlend, this.pendingShotEmpty[i] === true);
-      if (plan.cues.length > 0) this.audio.actionCycle(plan);
+      this.audio.actionCycle(shot.weaponId, plan);
       if (plan.ejectAt !== null) this.scheduleEject(shot.weaponId, this.time + plan.ejectAt);
     }
 
     if (this.hitZone !== null) {
-      this.audio.hit(this.hitZone, this.hitKilled);
+      this.audio.hitConfirm(this.hitZone, this.hitKilled);
       this.hitZone = null;
       this.hitKilled = false;
     }
     this.impactSoundsThisFrame = 0;
+    this.audio.update(dt);
   }
 
   dispose(): void {
@@ -180,7 +181,7 @@ export class WeaponPresentation {
     this.flash.dispose();
     this.casings.dispose();
     this.atlas.dispose();
-    this.audioEngine.dispose();
+    this.audio.dispose();
   }
 
   // --- DEV preview helpers (console: __twobullets.presentation.debugFire("sniper")) -------------------------------
@@ -217,7 +218,7 @@ export class WeaponPresentation {
   /** Plays the reload clips and sounds for the displayed weapon. */
   debugReload(empty = false): void {
     const def = getWeaponDef(this.viewmodel.weaponId);
-    this.audio.reloadStarted(this.viewmodel.startReload(def.reloadSeconds, empty));
+    this.audio.weapon.reloadStarted(def.id, this.viewmodel.startReload(def.reloadSeconds, empty));
   }
 
   /** Shows `weaponId` until the real active weapon changes. */
@@ -229,7 +230,7 @@ export class WeaponPresentation {
     this.frame.weaponId = weaponId;
     this.frame.def = def;
     this.viewmodel.equip(weaponId, def.equipSeconds);
-    this.audio.equip();
+    this.audio.weapon.equip(weaponId);
   }
 
   debugDryFire(): void {
@@ -304,19 +305,19 @@ export class WeaponPresentation {
     switch (event.type) {
       case "equipStarted":
         this.viewmodel.equip(event.weaponId, event.seconds);
-        this.audio.equip();
+        this.audio.weapon.equip(event.weaponId);
         break;
       case "reloadStarted":
         // The magazine is refilled when the reload finishes, so it still reads 0 for an empty reload.
-        this.audio.reloadStarted(this.viewmodel.startReload(event.seconds, this.activeMagazine() === 0));
+        this.audio.weapon.reloadStarted(event.weaponId, this.viewmodel.startReload(event.seconds, this.activeMagazine() === 0));
         break;
       case "reloadCancelled":
         this.viewmodel.cancelReload();
-        this.audio.reloadCancelled();
+        this.audio.weapon.reloadCancelled();
         break;
       case "dryFire":
         this.viewmodel.onDryFire();
-        this.audio.dryFire();
+        this.audio.weapon.dryFire(event.weaponId);
         break;
       case "reloadFinished":
         break;
@@ -329,7 +330,7 @@ export class WeaponPresentation {
     this.tracers.noteImpact(weaponId, point);
     if (this.impactSoundsThisFrame < MAX_IMPACT_SOUNDS_PER_FRAME) {
       this.impactSoundsThisFrame++;
-      this.audio.impact(Vector3.Distance(point, this.player.camera.position), surface === "target");
+      this.audio.impact(weaponId, point, normal, surface === "target");
     }
   }
 

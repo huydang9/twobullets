@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2024"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["**/*.ts", "../../apps/client/src/audio/acoustics.ts", "../../apps/client/src/audio/audioManifest.ts", "../../apps/client/src/audio/weaponMix.ts"]
+}

@@ -1,40 +1,75 @@
-/** Overall loudness of all game sound effects. The single place to turn everything up or down. */
-export const MASTER_VOLUME = 0.55;
+import { clamp, dbToGain, type Vec3Like } from "./acoustics";
+import type { AudioSettings, AudioVolumeKey } from "./AudioSettings";
+import type { AudioBusId } from "./types";
 
-export type VoiceGroup = "shot" | "mechanical" | "feedback" | "impact";
+/**
+ * WebAudio graph (raw WebAudio rather than Babylon's AudioEngineV2: we need per-voice filters for air absorption and
+ * occlusion, per-voice reverb/echo sends and sample-accurate delayed starts, none of which the V2 sound API exposes).
+ *
+ *   voice: sources → layer gains → low-pass → gain → [HRTF panner] → bus ─→ [glue] → duck → fader ─→ master → limiter
+ *                                                                    └→ direct → gentle comp ─┘ (skips glue and duck)
+ *                                                  └→ room send ─→ bus room tap ─→ convolver ─→ indoor return ─┘
+ *                                                  └→ echo send ─→ bus echo tap ─→ slapback ──→ outdoor return ┘
+ *
+ * The context is created and resumed on the first user gesture. While it isn't running, voices are refused rather
+ * than queued (a suspended context would otherwise play the backlog all at once).
+ */
 
-/** Simultaneous voices per group; the oldest voice is faded out when a new one would exceed the limit. */
-const POLYPHONY: Readonly<Record<VoiceGroup, number>> = {
-  shot: 6,
-  mechanical: 8,
-  feedback: 4,
-  impact: 6,
-};
+export const BUSES: readonly AudioBusId[] = ["weapons", "impacts", "footsteps", "foley", "ambience", "ui"];
 
+const MAX_VOICES = 64;
+const BUS_CAP: Readonly<Record<AudioBusId, number>> = { weapons: 20, impacts: 12, footsteps: 14, foley: 12, ambience: 8, ui: 4 };
+const STEAL_FADE = 0.025;
 const NOISE_SECONDS = 2;
-const REVERB_SECONDS = 1.6;
-const STEAL_FADE = 0.02;
+const ROOM_SECONDS = 0.9;
 
-export interface Voice {
-  readonly group: VoiceGroup;
-  /** Tag for cancelling a family of scheduled sounds (e.g. a reload). */
-  readonly tag: string | null;
-  readonly output: GainNode;
-  readonly sources: AudioScheduledSourceNode[];
-  readonly start: number;
-  end: number;
-}
+/** Voice priorities: higher survives stealing. */
+export const Priority = {
+  ambient: 0,
+  detail: 1,
+  normal: 2,
+  important: 3,
+  local: 4,
+} as const;
 
 export interface VoiceOptions {
+  readonly bus: AudioBusId;
+  readonly priority: number;
+  /** Debug label (usually the sound id). */
+  readonly label: string;
+  /** World position; omitted = non-spatial (first person, UI, ambience beds). */
+  readonly position?: Vec3Like;
+  readonly panning?: PanningModelType;
   readonly gain?: number;
-  /** Send level into the shared reverb. */
-  readonly reverb?: number;
-  /** Send level into the slap-back echo. */
+  /** Low-pass cutoff, Hz (air absorption, occlusion). */
+  readonly lowpass?: number;
+  /** Send levels into the indoor room reverb and the outdoor echo. */
+  readonly room?: number;
   readonly echo?: number;
+  /** Listener distance, for stealing and the debug overlay. */
+  readonly distance?: number;
+  readonly occluded?: boolean;
   readonly tag?: string;
+  /**
+   * "direct" skips the bus glue compressor and ducking (the local player's own gunfire, which does the ducking, and
+   * the biggest remote guns whose transient must survive).
+   */
+  readonly route?: "bus" | "direct";
+}
+
+export interface LayerOptions {
+  /** Context time. */
+  readonly when: number;
+  readonly rate?: number;
+  readonly gain?: number;
+  readonly offset?: number;
+  /** Extra per-layer low-pass, Hz. */
+  readonly lowpass?: number;
+  readonly loop?: boolean;
 }
 
 export interface NoiseOptions {
+  readonly when: number;
   readonly gain: number;
   readonly attack?: number;
   /** Exponential decay time constant, s. */
@@ -42,13 +77,13 @@ export interface NoiseOptions {
   readonly filter: BiquadFilterType;
   readonly frequency: number;
   readonly frequencyEnd?: number;
-  /** Time over which the filter sweeps to frequencyEnd, s. */
   readonly sweep?: number;
   readonly q?: number;
   readonly rate?: number;
 }
 
 export interface ToneOptions {
+  readonly when: number;
   readonly gain: number;
   readonly type?: OscillatorType;
   readonly frequency: number;
@@ -58,30 +93,190 @@ export interface ToneOptions {
   readonly decay: number;
 }
 
-/**
- * Lazily-created WebAudio graph: voices → sfx bus (+ reverb / echo sends) → compressor → master → speakers.
- * The context is created and resumed on the first user gesture; while it isn't running, sounds are skipped
- * rather than queued (a suspended context would otherwise play the backlog all at once on resume).
- */
+interface Bus {
+  readonly input: GainNode;
+  readonly direct: GainNode;
+  readonly duck: GainNode;
+  readonly fader: GainNode;
+  readonly roomTap: GainNode;
+  readonly echoTap: GainNode;
+  duckUntil: number;
+  duckDepth: number;
+}
+
+/** One sound instance: any number of layered sources sharing a filter, gain, position and sends. */
+export class Voice {
+  readonly sources: AudioScheduledSourceNode[] = [];
+  readonly createdAt: number;
+  end: number;
+  private readonly nodes: AudioNode[] = [];
+
+  constructor(
+    private readonly ctx: AudioContext,
+    readonly options: VoiceOptions,
+    private readonly filter: BiquadFilterNode,
+    readonly output: GainNode,
+    readonly panner: PannerNode | null,
+    private readonly noise: AudioBuffer,
+  ) {
+    this.createdAt = ctx.currentTime;
+    this.end = ctx.currentTime;
+    this.nodes.push(filter, output);
+    if (panner) this.nodes.push(panner);
+  }
+
+  /** Stealing score: priority first, then how loud the voice is. */
+  get score(): number {
+    return this.options.priority * 4 + clamp(this.options.gain ?? 1, 0, 1);
+  }
+
+  addBuffer(buffer: AudioBuffer, layer: LayerOptions): AudioBufferSourceNode {
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const rate = layer.rate ?? 1;
+    source.playbackRate.value = rate;
+    source.loop = layer.loop ?? false;
+    let tail: AudioNode = source;
+    if (layer.lowpass !== undefined) tail = this.chain(tail, this.lowpass(layer.lowpass));
+    if (layer.gain !== undefined && layer.gain !== 1) {
+      const gain = this.ctx.createGain();
+      gain.gain.value = layer.gain;
+      tail = this.chain(tail, gain);
+    }
+    tail.connect(this.filter);
+    const offset = layer.offset ?? 0;
+    source.start(layer.when, offset);
+    this.track(source, source.loop ? Infinity : layer.when + (buffer.duration - offset) / rate);
+    return source;
+  }
+
+  /** Filtered noise burst with an attack/exponential-decay envelope (cracks, rumbles, whizzes). */
+  addNoise(options: NoiseOptions): BiquadFilterNode {
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.noise;
+    source.playbackRate.value = options.rate ?? 1;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = options.filter;
+    filter.Q.value = options.q ?? 0.7;
+    filter.frequency.setValueAtTime(options.frequency, options.when);
+    if (options.frequencyEnd !== undefined) {
+      filter.frequency.exponentialRampToValueAtTime(Math.max(20, options.frequencyEnd), options.when + (options.sweep ?? options.decay * 3));
+    }
+    const envelope = this.ctx.createGain();
+    const end = applyEnvelope(envelope.gain, options.when, options.gain, options.attack ?? 0.001, options.decay);
+    this.chain(this.chain(source, filter), envelope).connect(this.filter);
+    source.start(options.when, Math.random() * (NOISE_SECONDS - 0.6));
+    source.stop(end);
+    this.track(source, end);
+    return filter;
+  }
+
+  addTone(options: ToneOptions): void {
+    const osc = this.ctx.createOscillator();
+    osc.type = options.type ?? "sine";
+    osc.frequency.setValueAtTime(options.frequency, options.when);
+    if (options.frequencyEnd !== undefined) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.frequencyEnd), options.when + (options.sweep ?? options.decay * 2));
+    }
+    const envelope = this.ctx.createGain();
+    const end = applyEnvelope(envelope.gain, options.when, options.gain, options.attack ?? 0.002, options.decay);
+    this.chain(osc, envelope).connect(this.filter);
+    osc.start(options.when);
+    osc.stop(end);
+    this.track(osc, end);
+  }
+
+  /** Post-fader send from this voice into an effect input. */
+  send(to: AudioNode, level: number): void {
+    const send = this.ctx.createGain();
+    send.gain.value = level;
+    this.chain(this.output, send).connect(to);
+  }
+
+  setGain(gain: number, smoothing = 0.05): void {
+    this.output.gain.setTargetAtTime(gain, this.ctx.currentTime, smoothing);
+  }
+
+  setLowpass(frequency: number, smoothing = 0.05): void {
+    this.filter.frequency.setTargetAtTime(frequency, this.ctx.currentTime, smoothing);
+  }
+
+  /** Fades out and stops every source. */
+  stop(fade = STEAL_FADE): void {
+    const now = this.ctx.currentTime;
+    const gain = this.output.gain;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+    gain.linearRampToValueAtTime(0, now + fade);
+    for (const source of this.sources) {
+      try {
+        source.stop(now + fade + 0.005);
+      } catch {
+        // Already stopped.
+      }
+    }
+    this.end = Math.min(this.end, now + fade + 0.01);
+  }
+
+  disconnect(): void {
+    for (const node of this.nodes) node.disconnect();
+    for (const source of this.sources) source.disconnect();
+  }
+
+  private lowpass(frequency: number): BiquadFilterNode {
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = frequency;
+    filter.Q.value = 0.5;
+    return filter;
+  }
+
+  private chain(from: AudioNode, to: AudioNode): AudioNode {
+    from.connect(to);
+    this.nodes.push(to);
+    return to;
+  }
+
+  private track(source: AudioScheduledSourceNode, end: number): void {
+    this.sources.push(source);
+    this.end = Math.max(this.end, end);
+  }
+}
+
 export class AudioEngine {
   private context: AudioContext | null = null;
-  private bus: GainNode | null = null;
-  private reverb: GainNode | null = null;
-  private echo: GainNode | null = null;
-  private noiseBuffer: AudioBuffer | null = null;
+  private master: GainNode | null = null;
+  private roomReturn: GainNode | null = null;
+  private echoReturn: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private readonly buses = new Map<AudioBusId, Bus>();
   private readonly voices: Voice[] = [];
   private readonly events = new AbortController();
+  private readonly unsubscribe: () => void;
+  private indoor = 0;
+  /** Voices refused or stolen since start (debug). */
+  culled = 0;
+  stolen = 0;
 
-  constructor() {
+  constructor(private readonly settings: AudioSettings) {
     const unlock = () => this.unlock();
     const options = { capture: true, signal: this.events.signal };
     window.addEventListener("pointerdown", unlock, options);
     window.addEventListener("keydown", unlock, options);
+    this.unsubscribe = settings.onChange((key, value) => this.applyVolume(key, value));
   }
 
   /** The running context, or null if audio isn't available yet. */
   get live(): AudioContext | null {
     return this.context?.state === "running" ? this.context : null;
+  }
+
+  get now(): number {
+    return this.context?.currentTime ?? 0;
+  }
+
+  get activeVoices(): readonly Voice[] {
+    return this.voices;
   }
 
   unlock(): void {
@@ -95,163 +290,296 @@ export class AudioEngine {
   }
 
   /**
-   * Starts a voice (a gain node other nodes connect into) in `group`, enforcing polyphony.
-   * `reverb`/`echo` are send levels. Returns null when audio isn't running.
+   * Starts a voice. Returns null when audio isn't running or the pool is full of more important voices.
+   * Callers add layers with voice.addBuffer / addNoise / addTone.
    */
-  voice(group: VoiceGroup, start: number, duration: number, options: VoiceOptions = {}): Voice | null {
+  voice(options: VoiceOptions): Voice | null {
     const ctx = this.live;
-    if (!ctx || !this.bus) return null;
-    this.pruneAndSteal(ctx.currentTime, group);
+    const bus = this.buses.get(options.bus);
+    if (!ctx || !bus || !this.noise) return null;
+    if (!this.makeRoom(ctx.currentTime, options)) {
+      this.culled++;
+      return null;
+    }
 
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.5;
+    filter.frequency.value = options.lowpass ?? 22_000;
     const output = ctx.createGain();
     output.gain.value = options.gain ?? 1;
-    output.connect(this.bus);
-    if (options.reverb && this.reverb) connectSend(ctx, output, this.reverb, options.reverb);
-    if (options.echo && this.echo) connectSend(ctx, output, this.echo, options.echo);
-    const voice: Voice = { group, tag: options.tag ?? null, output, sources: [], start, end: start + duration };
+    filter.connect(output);
+
+    let panner: PannerNode | null = null;
+    if (options.position) {
+      panner = ctx.createPanner();
+      panner.panningModel = options.panning ?? "HRTF";
+      // Distance attenuation is computed by the caller (acoustics.ts), so the panner only positions.
+      panner.distanceModel = "inverse";
+      panner.rolloffFactor = 0;
+      setPannerPosition(panner, options.position, ctx.currentTime);
+      output.connect(panner).connect(options.route === "direct" ? bus.direct : bus.input);
+    } else {
+      output.connect(options.route === "direct" ? bus.direct : bus.input);
+    }
+    const voice = new Voice(ctx, options, filter, output, panner, this.noise);
+    if (options.room) voice.send(bus.roomTap, options.room);
+    if (options.echo) voice.send(bus.echoTap, options.echo);
     this.voices.push(voice);
     return voice;
   }
 
-  /** Filtered noise burst with an attack/exponential-decay envelope. */
-  noiseBurst(voice: Voice, when: number, options: NoiseOptions): void {
-    const ctx = this.live;
-    if (!ctx || !this.noiseBuffer) return;
-    const source = ctx.createBufferSource();
-    source.buffer = this.noiseBuffer;
-    source.playbackRate.value = options.rate ?? 1;
-    const filter = ctx.createBiquadFilter();
-    filter.type = options.filter;
-    filter.Q.value = options.q ?? 0.7;
-    filter.frequency.setValueAtTime(options.frequency, when);
-    if (options.frequencyEnd !== undefined) {
-      filter.frequency.exponentialRampToValueAtTime(Math.max(20, options.frequencyEnd), when + (options.sweep ?? options.decay * 3));
-    }
-    const envelope = ctx.createGain();
-    const end = applyEnvelope(envelope.gain, when, options.gain, options.attack ?? 0.001, options.decay);
-    source.connect(filter).connect(envelope).connect(voice.output);
-    source.start(when, Math.random() * (NOISE_SECONDS - 0.5));
-    source.stop(end);
-    voice.sources.push(source);
-    voice.end = Math.max(voice.end, end);
+  /** Stops every voice carrying `tag` (e.g. the rest of a cancelled reload). */
+  stopTag(tag: string): void {
+    for (const voice of this.voices) if (voice.options.tag === tag) voice.stop();
   }
 
-  tone(voice: Voice, when: number, options: ToneOptions): void {
+  /** Listener pose in Babylon (left-handed) world space. */
+  setListener(position: Vec3Like, forward: Vec3Like, up: Vec3Like): void {
     const ctx = this.live;
     if (!ctx) return;
-    const osc = ctx.createOscillator();
-    osc.type = options.type ?? "sine";
-    osc.frequency.setValueAtTime(options.frequency, when);
-    if (options.frequencyEnd !== undefined) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.frequencyEnd), when + (options.sweep ?? options.decay * 2));
+    const l = ctx.listener;
+    // WebAudio is right-handed: mirror Z for the listener and every source (setPannerPosition).
+    if (l.positionX) {
+      l.positionX.value = position.x;
+      l.positionY.value = position.y;
+      l.positionZ.value = -position.z;
+      l.forwardX.value = forward.x;
+      l.forwardY.value = forward.y;
+      l.forwardZ.value = -forward.z;
+      l.upX.value = up.x;
+      l.upY.value = up.y;
+      l.upZ.value = -up.z;
+    } else {
+      // Firefox: AudioListener has no AudioParams.
+      l.setPosition(position.x, position.y, -position.z);
+      l.setOrientation(forward.x, forward.y, -forward.z, up.x, up.y, -up.z);
     }
-    const envelope = ctx.createGain();
-    const end = applyEnvelope(envelope.gain, when, options.gain, options.attack ?? 0.002, options.decay);
-    osc.connect(envelope).connect(voice.output);
-    osc.start(when);
-    osc.stop(end);
-    voice.sources.push(osc);
-    voice.end = Math.max(voice.end, end);
   }
 
-  /** Fades out and stops every voice with `tag` (e.g. the rest of a cancelled reload). */
-  stopTag(tag: string): void {
+  /** 0 = open air (outdoor slapback echo), 1 = enclosed (short room reverb). */
+  setEnvironment(indoor: number): void {
+    const value = clamp(indoor, 0, 1);
+    // Called every frame: skip automation events for changes nobody can hear.
+    if (Math.abs(value - this.indoor) < 0.01) return;
+    this.indoor = value;
+    this.applyEnvironment();
+  }
+
+  get environment(): number {
+    return this.indoor;
+  }
+
+  /** Briefly lowers a bus (e.g. ambience under your own gunfire). Overlapping ducks keep the deepest. */
+  duck(busId: AudioBusId, depthDb: number, hold: number, release: number): void {
+    const ctx = this.live;
+    const bus = this.buses.get(busId);
+    if (!ctx || !bus) return;
+    const now = ctx.currentTime;
+    const target = dbToGain(-Math.abs(depthDb));
+    if (now < bus.duckUntil && target > bus.duckDepth) {
+      bus.duckUntil = Math.max(bus.duckUntil, now + hold);
+    } else {
+      bus.duckDepth = target;
+      bus.duckUntil = now + hold;
+    }
+    const gain = bus.duck.gain;
+    gain.cancelScheduledValues(now);
+    gain.setTargetAtTime(bus.duckDepth, now, 0.012);
+    gain.setTargetAtTime(1, bus.duckUntil, release / 3);
+  }
+
+  /** Per-frame housekeeping: frees finished voices. */
+  update(): void {
     const ctx = this.context;
     if (!ctx) return;
+    const now = ctx.currentTime;
     for (let i = this.voices.length - 1; i >= 0; i--) {
       const voice = this.voices[i] as Voice;
-      if (voice.tag !== tag) continue;
-      silence(voice, ctx.currentTime);
-      this.voices.splice(i, 1);
+      if (voice.end + 0.05 < now) {
+        voice.disconnect();
+        this.voices.splice(i, 1);
+      }
     }
   }
 
   dispose(): void {
     this.events.abort();
+    this.unsubscribe();
+    for (const voice of this.voices) voice.disconnect();
     this.voices.length = 0;
     void this.context?.close().catch(() => undefined);
     this.context = null;
   }
 
-  private pruneAndSteal(now: number, group: VoiceGroup): void {
-    let inGroup = 0;
-    for (let i = this.voices.length - 1; i >= 0; i--) {
-      const voice = this.voices[i] as Voice;
-      if (voice.end < now) {
-        voice.output.disconnect();
-        this.voices.splice(i, 1);
-      } else if (voice.group === group) {
-        inGroup++;
-      }
+  /** Enforces the global and per-bus polyphony caps. False = the new voice loses. */
+  private makeRoom(now: number, options: VoiceOptions): boolean {
+    let inBus = 0;
+    let active = 0;
+    for (const voice of this.voices) {
+      if (voice.end < now) continue;
+      active++;
+      if (voice.options.bus === options.bus) inBus++;
     }
-    while (inGroup >= POLYPHONY[group]) {
-      const index = this.voices.findIndex((voice) => voice.group === group);
-      const oldest = this.voices[index];
-      if (!oldest) break;
-      silence(oldest, now);
-      this.voices.splice(index, 1);
-      inGroup--;
+    const newScore = options.priority * 4 + clamp(options.gain ?? 1, 0, 1);
+    const busFull = inBus >= BUS_CAP[options.bus];
+    if (!busFull && active < MAX_VOICES) return true;
+
+    let victim: Voice | null = null;
+    for (const voice of this.voices) {
+      if (voice.end < now || (busFull && voice.options.bus !== options.bus)) continue;
+      if (!victim || voice.score < victim.score || (voice.score === victim.score && voice.createdAt < victim.createdAt)) victim = voice;
     }
+    if (!victim || victim.score > newScore) return false;
+    victim.stop();
+    this.stolen++;
+    return true;
   }
 
   private buildGraph(ctx: AudioContext): void {
-    const master = ctx.createGain();
-    master.gain.value = MASTER_VOLUME;
-    master.connect(ctx.destination);
+    // Safety limiter only: mix levels (weaponMix.ts) keep the loudest shot about 1 dB under it at full volume.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -1;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.1;
+    limiter.connect(ctx.destination);
+    this.master = ctx.createGain();
+    this.master.gain.value = this.settings.get("master");
+    this.master.connect(limiter);
 
-    // Gentle bus limiter so stacked gunshots duck instead of clipping.
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -12;
-    compressor.knee.value = 8;
-    compressor.ratio.value = 8;
-    compressor.attack.value = 0.002;
-    compressor.release.value = 0.18;
-    compressor.connect(master);
-
-    this.bus = ctx.createGain();
-    this.bus.connect(compressor);
-
-    this.noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
-    const noise = this.noiseBuffer.getChannelData(0);
+    this.noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
+    const noise = this.noise.getChannelData(0);
     for (let i = 0; i < noise.length; i++) noise[i] = Math.random() * 2 - 1;
 
-    // Procedural room: decaying stereo noise impulse response.
-    const convolver = ctx.createConvolver();
-    const irLength = Math.floor(ctx.sampleRate * REVERB_SECONDS);
-    const ir = ctx.createBuffer(2, irLength, ctx.sampleRate);
+    const roomIn = this.buildRoom(ctx);
+    const echoIn = this.buildEcho(ctx);
+
+    for (const id of BUSES) {
+      const input = ctx.createGain();
+      const duck = ctx.createGain();
+      const fader = ctx.createGain();
+      const volume = this.settings.get(id);
+      fader.gain.value = volume;
+      if (id === "weapons") {
+        // Glue: stacked remote gunfire compresses together before the master limiter.
+        const glue = ctx.createDynamicsCompressor();
+        glue.threshold.value = -14;
+        glue.knee.value = 6;
+        glue.ratio.value = 3;
+        glue.attack.value = 0.003;
+        glue.release.value = 0.15;
+        input.connect(glue).connect(duck);
+      } else {
+        input.connect(duck);
+      }
+      duck.connect(fader).connect(this.master);
+      // Direct path: a slow-attack compressor that lets transients through and only tames sustained stacking
+      // (long automatic bursts), well above a single shot's tail.
+      const direct = ctx.createGain();
+      const gentle = ctx.createDynamicsCompressor();
+      gentle.threshold.value = -8;
+      gentle.knee.value = 6;
+      gentle.ratio.value = 2;
+      gentle.attack.value = 0.02;
+      gentle.release.value = 0.25;
+      direct.connect(gentle).connect(fader);
+      const roomTap = ctx.createGain();
+      roomTap.gain.value = volume;
+      roomTap.connect(roomIn);
+      const echoTap = ctx.createGain();
+      echoTap.gain.value = volume;
+      echoTap.connect(echoIn);
+      this.buses.set(id, { input, direct, duck, fader, roomTap, echoTap, duckUntil: 0, duckDepth: 1 });
+    }
+    this.applyEnvironment();
+  }
+
+  private applyEnvironment(): void {
+    const ctx = this.context;
+    if (!ctx || !this.roomReturn || !this.echoReturn) return;
+    this.roomReturn.gain.setTargetAtTime(this.indoor, ctx.currentTime, 0.2);
+    this.echoReturn.gain.setTargetAtTime(1 - this.indoor * 0.85, ctx.currentTime, 0.2);
+  }
+
+  /** Short, bright room: procedural stereo impulse with dense early reflections. */
+  private buildRoom(ctx: AudioContext): GainNode {
+    const length = Math.floor(ctx.sampleRate * ROOM_SECONDS);
+    const ir = ctx.createBuffer(2, length, ctx.sampleRate);
     for (let channel = 0; channel < 2; channel++) {
       const data = ir.getChannelData(channel);
-      for (let i = 0; i < irLength; i++) {
-        const t = i / irLength;
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.5) * (i < 200 ? i / 200 : 1);
+      for (let i = 0; i < length; i++) {
+        const t = i / ctx.sampleRate;
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-t / 0.16) * (i < 96 ? i / 96 : 1);
       }
     }
+    const convolver = ctx.createConvolver();
     convolver.buffer = ir;
-    const reverbTone = ctx.createBiquadFilter();
-    reverbTone.type = "lowpass";
-    reverbTone.frequency.value = 3200;
-    this.reverb = ctx.createGain();
-    this.reverb.connect(reverbTone).connect(convolver).connect(compressor);
+    const input = ctx.createGain();
+    const tone = ctx.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = 5000;
+    this.roomReturn = ctx.createGain();
+    this.roomReturn.gain.value = 0;
+    input.connect(tone).connect(convolver).connect(this.roomReturn).connect(this.master as GainNode);
+    return input;
+  }
 
-    // Distant slap-back echo for heavy weapons.
-    const delay = ctx.createDelay(1);
-    delay.delayTime.value = 0.32;
-    const feedback = ctx.createGain();
-    feedback.gain.value = 0.32;
-    const echoTone = ctx.createBiquadFilter();
-    echoTone.type = "lowpass";
-    echoTone.frequency.value = 1400;
-    this.echo = ctx.createGain();
-    this.echo.connect(delay);
-    delay.connect(echoTone).connect(feedback).connect(delay);
-    echoTone.connect(compressor);
+  /**
+   * Open-field reflections: a stereo slapback (a nearby tree line / building face) plus a long, dark valley echo
+   * that makes distant gunfire roll.
+   */
+  private buildEcho(ctx: AudioContext): GainNode {
+    const input = ctx.createGain();
+    this.echoReturn = ctx.createGain();
+    this.echoReturn.gain.value = 1;
+    this.echoReturn.connect(this.master as GainNode);
+    const merger = ctx.createChannelMerger(2);
+    merger.connect(this.echoReturn);
+
+    const tap = (seconds: number, feedback: number, cutoff: number, level: number, channel: number) => {
+      const delay = ctx.createDelay(2);
+      delay.delayTime.value = seconds;
+      const tone = ctx.createBiquadFilter();
+      tone.type = "lowpass";
+      tone.frequency.value = cutoff;
+      const loop = ctx.createGain();
+      loop.gain.value = feedback;
+      const out = ctx.createGain();
+      out.gain.value = level;
+      input.connect(delay).connect(tone);
+      tone.connect(loop).connect(delay);
+      tone.connect(out).connect(merger, 0, channel);
+    };
+    tap(0.19, 0.22, 2800, 0.45, 0);
+    tap(0.27, 0.22, 2600, 0.45, 1);
+    tap(0.82, 0.38, 900, 0.5, 0);
+    tap(1.07, 0.38, 850, 0.5, 1);
+    return input;
+  }
+
+  private applyVolume(key: AudioVolumeKey, value: number): void {
+    const ctx = this.context;
+    if (!ctx) return;
+    if (key === "master") {
+      this.master?.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
+      return;
+    }
+    const bus = this.buses.get(key);
+    if (!bus) return;
+    for (const node of [bus.fader, bus.roomTap, bus.echoTap]) node.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
   }
 }
 
-function connectSend(ctx: AudioContext, from: AudioNode, to: AudioNode, level: number): void {
-  const send = ctx.createGain();
-  send.gain.value = level;
-  from.connect(send).connect(to);
+export function setPannerPosition(panner: PannerNode, p: Vec3Like, when: number): void {
+  if (panner.positionX) {
+    panner.positionX.setValueAtTime(p.x, when);
+    panner.positionY.setValueAtTime(p.y, when);
+    panner.positionZ.setValueAtTime(-p.z, when);
+  } else {
+    panner.setPosition(p.x, p.y, -p.z);
+  }
 }
 
 /** Linear attack then exponential decay; returns when the sound is effectively silent. */
@@ -260,18 +588,4 @@ function applyEnvelope(param: AudioParam, when: number, peak: number, attack: nu
   param.linearRampToValueAtTime(peak, when + attack);
   param.setTargetAtTime(0, when + attack, decay);
   return when + attack + decay * 7;
-}
-
-function silence(voice: Voice, now: number): void {
-  const gain = voice.output.gain;
-  gain.cancelScheduledValues(now);
-  gain.setValueAtTime(gain.value, now);
-  gain.linearRampToValueAtTime(0, now + STEAL_FADE);
-  for (const source of voice.sources) {
-    try {
-      source.stop(now + STEAL_FADE + 0.005);
-    } catch {
-      // Already stopped.
-    }
-  }
 }

@@ -1,0 +1,392 @@
+{
+  "note": "All shipped audio is CC0 (public domain). Attribution is not required but given here.",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "generated": "2026-09-14",
+  "formats": [
+    "ogg (Opus)",
+    "m4a (AAC-LC)"
+  ],
+  "sources": [
+    {
+      "id": "ffsl",
+      "title": "The Free Firearm Sound Library (Prepared SFX Library)",
+      "authors": [
+        "Ben Jaszczak",
+        "Brian Nelson",
+        "Kevin Heras",
+        "Matthew Nanney"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/the-free-firearm-sound-library",
+      "download": "https://opengameart.org/sites/default/files/Prepared%20SFX%20Library.7z",
+      "sounds": [
+        "shot.rifle.near",
+        "shot.rifle.far",
+        "shot.shotgun.near",
+        "shot.shotgun.far",
+        "shot.pistol.near",
+        "shot.pistol.far",
+        "shot.sniper.near",
+        "shot.sniper.far",
+        "shot.sniper.tail"
+      ],
+      "files": [
+        "shot.rifle.near.0 ← Prepared SFX Library/AR-15/D_32P.wav@0.700s",
+        "shot.rifle.near.1 ← Prepared SFX Library/AR-15/D_32P.wav@5.643s",
+        "shot.rifle.near.2 ← Prepared SFX Library/AK-47/C_28P.wav@0.607s",
+        "shot.rifle.near.3 ← Prepared SFX Library/AK-47/C_28P.wav@3.253s",
+        "shot.rifle.near.4 ← Prepared SFX Library/AK-47/C_28P.wav@6.017s",
+        "shot.rifle.far.0 ← Prepared SFX Library/AR-15/D_24P.wav@0.545s",
+        "shot.rifle.far.1 ← Prepared SFX Library/AR-15/D_24P.wav@3.906s",
+        "shot.rifle.far.2 ← Prepared SFX Library/AK-47/C_31P.wav@0.334s",
+        "shot.rifle.far.3 ← Prepared SFX Library/AK-47/C_31P.wav@4.397s",
+        "shot.shotgun.near.0 ← Prepared SFX Library/Nova/O_21P.wav@0.427s",
+        "shot.shotgun.near.1 ← Prepared SFX Library/Nova/O_21P.wav@3.462s",
+        "shot.shotgun.near.2 ← Prepared SFX Library/CD/H_21P.wav@0.460s",
+        "shot.shotgun.near.3 ← Prepared SFX Library/CD/H_21P.wav@3.071s",
+        "shot.shotgun.near.4 ← Prepared SFX Library/Model 12/K_22P.wav@0.838s",
+        "shot.shotgun.near.5 ← Prepared SFX Library/Model 12/K_22P.wav@7.441s",
+        "shot.shotgun.far.0 ← Prepared SFX Library/Nova/O_17P.wav@0.690s",
+        "shot.shotgun.far.1 ← Prepared SFX Library/Nova/O_17P.wav@3.704s",
+        "shot.shotgun.far.2 ← Prepared SFX Library/CD/H_16P.wav@0.603s",
+        "shot.shotgun.far.3 ← Prepared SFX Library/CD/H_16P.wav@4.113s",
+        "shot.shotgun.far.4 ← Prepared SFX Library/Model 12/K_17P.wav@0.903s",
+        "shot.shotgun.far.5 ← Prepared SFX Library/Model 12/K_17P.wav@7.053s",
+        "shot.pistol.near.0 ← Prepared SFX Library/Walther PPQ/X_39P.wav@1.403s",
+        "shot.pistol.near.1 ← Prepared SFX Library/Walther PPQ/X_39P.wav@6.440s",
+        "shot.pistol.near.2 ← Prepared SFX Library/Walther PPQ/X_39P.wav@10.656s",
+        "shot.pistol.near.3 ← Prepared SFX Library/1911/A_42P.wav@0.937s",
+        "shot.pistol.near.4 ← Prepared SFX Library/1911/A_42P.wav@4.998s",
+        "shot.pistol.far.0 ← Prepared SFX Library/Walther PPQ/X_31P.wav@1.081s",
+        "shot.pistol.far.1 ← Prepared SFX Library/Walther PPQ/X_31P.wav@5.239s",
+        "shot.pistol.far.2 ← Prepared SFX Library/1911/A_34P.wav@1.538s",
+        "shot.pistol.far.3 ← Prepared SFX Library/1911/A_34P.wav@6.651s",
+        "shot.sniper.near.0 ← Prepared SFX Library/Tikka/W_29P.wav@0.573s",
+        "shot.sniper.near.1 ← Prepared SFX Library/Tikka/W_29P.wav@5.661s",
+        "shot.sniper.near.2 ← Prepared SFX Library/1917/B_24P.wav@1.304s",
+        "shot.sniper.near.3 ← Prepared SFX Library/1917/B_24P.wav@6.727s",
+        "shot.sniper.near.4 ← Prepared SFX Library/Arisaka/E_25P.wav@0.520s",
+        "shot.sniper.near.5 ← Prepared SFX Library/Arisaka/E_25P.wav@4.026s",
+        "shot.sniper.far.0 ← Prepared SFX Library/Tikka/W_24P.wav@0.751s",
+        "shot.sniper.far.1 ← Prepared SFX Library/Tikka/W_24P.wav@5.373s",
+        "shot.sniper.far.2 ← Prepared SFX Library/Mosin Nagant/M_26P.wav@1.134s",
+        "shot.sniper.far.3 ← Prepared SFX Library/Mosin Nagant/M_26P.wav@6.101s",
+        "shot.sniper.far.4 ← Prepared SFX Library/Mosin Nagant/M_26P.wav@10.739s",
+        "shot.sniper.far.5 ← Prepared SFX Library/1917/B_16P.wav@0.603s",
+        "shot.sniper.tail.0 ← Prepared SFX Library/1917/B_16P.wav@0.727s",
+        "shot.sniper.tail.1 ← Prepared SFX Library/1917/B_16P.wav@6.092s",
+        "shot.sniper.tail.2 ← Prepared SFX Library/Tikka/W_24P.wav@0.875s",
+        "shot.sniper.tail.3 ← Prepared SFX Library/Tikka/W_24P.wav@5.497s",
+        "shot.sniper.tail.4 ← Prepared SFX Library/Arisaka/E_18P.wav@0.480s",
+        "shot.sniper.tail.5 ← Prepared SFX Library/Arisaka/E_18P.wav@4.607s"
+      ]
+    },
+    {
+      "id": "kenneyImpact",
+      "title": "Impact Sounds",
+      "authors": [
+        "Kenney (www.kenney.nl)"
+      ],
+      "license": "CC0",
+      "url": "https://kenney.nl/assets/impact-sounds",
+      "download": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "sounds": [
+        "foley.casing",
+        "foley.land",
+        "step.grass",
+        "step.wood",
+        "step.metal",
+        "impact.concrete",
+        "impact.metal",
+        "impact.wood",
+        "impact.dirt",
+        "impact.flesh"
+      ],
+      "files": [
+        "foley.casing.0 ← Audio/impactMetal_light_000.ogg@0.000s",
+        "foley.casing.1 ← Audio/impactMetal_light_001.ogg@0.000s",
+        "foley.casing.2 ← Audio/impactMetal_light_002.ogg@0.000s",
+        "foley.casing.3 ← Audio/impactMetal_light_003.ogg@0.000s",
+        "foley.casing.4 ← Audio/impactMetal_light_004.ogg@0.000s",
+        "foley.land.0 ← Audio/impactSoft_heavy_000.ogg@0.000s",
+        "foley.land.1 ← Audio/impactSoft_heavy_001.ogg@0.000s",
+        "foley.land.2 ← Audio/impactSoft_heavy_002.ogg@0.000s",
+        "foley.land.3 ← Audio/impactSoft_heavy_003.ogg@0.000s",
+        "foley.land.4 ← Audio/impactSoft_heavy_004.ogg@0.000s",
+        "step.grass.0 ← Audio/footstep_grass_000.ogg@0.000s",
+        "step.grass.1 ← Audio/footstep_grass_001.ogg@0.000s",
+        "step.grass.2 ← Audio/footstep_grass_002.ogg@0.000s",
+        "step.grass.3 ← Audio/footstep_grass_003.ogg@0.000s",
+        "step.grass.4 ← Audio/footstep_grass_004.ogg@0.000s",
+        "step.wood.0 ← Audio/footstep_wood_000.ogg@0.000s",
+        "step.wood.1 ← Audio/footstep_wood_001.ogg@0.000s",
+        "step.wood.2 ← Audio/footstep_wood_002.ogg@0.000s",
+        "step.wood.3 ← Audio/footstep_wood_003.ogg@0.000s",
+        "step.wood.4 ← Audio/footstep_wood_004.ogg@0.000s",
+        "step.metal.0 ← Audio/impactPlate_light_000.ogg@0.000s",
+        "step.metal.1 ← Audio/impactPlate_light_001.ogg@0.000s",
+        "step.metal.2 ← Audio/impactPlate_light_002.ogg@0.000s",
+        "step.metal.3 ← Audio/impactPlate_light_003.ogg@0.000s",
+        "step.metal.4 ← Audio/impactPlate_light_004.ogg@0.000s",
+        "impact.concrete.0 ← Audio/impactMining_000.ogg@0.000s",
+        "impact.concrete.1 ← Audio/impactMining_001.ogg@0.000s",
+        "impact.concrete.2 ← Audio/impactMining_002.ogg@0.000s",
+        "impact.concrete.3 ← Audio/impactMining_003.ogg@0.000s",
+        "impact.concrete.4 ← Audio/impactMining_004.ogg@0.000s",
+        "impact.metal.0 ← Audio/impactMetal_medium_000.ogg@0.000s",
+        "impact.metal.1 ← Audio/impactMetal_medium_001.ogg@0.000s",
+        "impact.metal.2 ← Audio/impactMetal_medium_002.ogg@0.000s",
+        "impact.metal.3 ← Audio/impactMetal_medium_003.ogg@0.000s",
+        "impact.metal.4 ← Audio/impactMetal_medium_004.ogg@0.000s",
+        "impact.wood.0 ← Audio/impactPlank_medium_000.ogg@0.000s",
+        "impact.wood.1 ← Audio/impactPlank_medium_001.ogg@0.000s",
+        "impact.wood.2 ← Audio/impactPlank_medium_002.ogg@0.000s",
+        "impact.wood.3 ← Audio/impactPlank_medium_003.ogg@0.000s",
+        "impact.wood.4 ← Audio/impactPlank_medium_004.ogg@0.000s",
+        "impact.dirt.0 ← Audio/impactSoft_medium_000.ogg@0.000s",
+        "impact.dirt.1 ← Audio/impactSoft_medium_001.ogg@0.000s",
+        "impact.dirt.2 ← Audio/impactSoft_medium_002.ogg@0.000s",
+        "impact.dirt.3 ← Audio/impactSoft_medium_003.ogg@0.000s",
+        "impact.dirt.4 ← Audio/impactSoft_medium_004.ogg@0.000s",
+        "impact.flesh.0 ← Audio/impactPunch_medium_000.ogg@0.004s",
+        "impact.flesh.1 ← Audio/impactPunch_medium_001.ogg@0.004s",
+        "impact.flesh.2 ← Audio/impactPunch_medium_002.ogg@0.019s",
+        "impact.flesh.3 ← Audio/impactPunch_medium_003.ogg@0.007s",
+        "impact.flesh.4 ← Audio/impactPunch_medium_004.ogg@0.012s"
+      ]
+    },
+    {
+      "id": "fantozziSteps",
+      "title": "Fantozzi's Footsteps (Grass/Sand & Stone)",
+      "authors": [
+        "Fantozzi",
+        "qubodup (extraction)"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "download": "https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z",
+      "sounds": [
+        "step.concrete",
+        "step.dirt"
+      ],
+      "files": [
+        "step.concrete.0 ← Fantozzi-footsteps/flac/Fantozzi-StoneL1.flac@0.000s",
+        "step.concrete.1 ← Fantozzi-footsteps/flac/Fantozzi-StoneL2.flac@0.005s",
+        "step.concrete.2 ← Fantozzi-footsteps/flac/Fantozzi-StoneL3.flac@0.000s",
+        "step.concrete.3 ← Fantozzi-footsteps/flac/Fantozzi-StoneR1.flac@0.001s",
+        "step.concrete.4 ← Fantozzi-footsteps/flac/Fantozzi-StoneR2.flac@0.012s",
+        "step.concrete.5 ← Fantozzi-footsteps/flac/Fantozzi-StoneR3.flac@0.006s",
+        "step.dirt.0 ← Fantozzi-footsteps/flac/Fantozzi-SandL1.flac@0.013s",
+        "step.dirt.1 ← Fantozzi-footsteps/flac/Fantozzi-SandL2.flac@0.008s",
+        "step.dirt.2 ← Fantozzi-footsteps/flac/Fantozzi-SandL3.flac@0.008s",
+        "step.dirt.3 ← Fantozzi-footsteps/flac/Fantozzi-SandR1.flac@0.012s",
+        "step.dirt.4 ← Fantozzi-footsteps/flac/Fantozzi-SandR2.flac@0.029s",
+        "step.dirt.5 ← Fantozzi-footsteps/flac/Fantozzi-SandR3.flac@0.011s"
+      ]
+    },
+    {
+      "id": "snowGravelSteps",
+      "title": "42 Snow and Gravel Footsteps",
+      "authors": [
+        "Corsica_S",
+        "Iwan Gabovitch (extraction)"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/42-snow-and-gravel-footsteps",
+      "download": "https://opengameart.org/sites/default/files/corsica_s-walking_in_snow.7z",
+      "sounds": [
+        "step.gravel"
+      ],
+      "files": [
+        "step.gravel.0 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_01.flac@0.035s",
+        "step.gravel.1 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_02.flac@0.011s",
+        "step.gravel.2 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_03.flac@0.014s",
+        "step.gravel.3 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_04.flac@0.026s",
+        "step.gravel.4 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_05.flac@0.018s",
+        "step.gravel.5 ← Corsica_S-Walking_in_Snow/Corsica_S-Walking_on_snow_covered_gravel_06.flac@0.010s"
+      ]
+    },
+    {
+      "id": "parkWind",
+      "title": "Park ambiences (park_ambience_wind)",
+      "authors": [
+        "Thimras"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/park-ambiences",
+      "download": "https://opengameart.org/sites/default/files/park_ambience_wind.wav",
+      "sounds": [
+        "amb.wind"
+      ],
+      "files": [
+        "amb.wind.0 ← park_ambience_wind.wav@12s+45s loop"
+      ]
+    },
+    {
+      "id": "parkBirds",
+      "title": "Park ambiences (park_ambience_birds)",
+      "authors": [
+        "Thimras"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/park-ambiences",
+      "download": "https://opengameart.org/sites/default/files/park_ambience_birds.wav",
+      "sounds": [
+        "amb.birds"
+      ],
+      "files": [
+        "amb.birds.0 ← park_ambience_birds.wav@30s+45s loop"
+      ]
+    },
+    {
+      "id": "isaiahBirds",
+      "title": "Ambient Bird Sounds",
+      "authors": [
+        "isaiah658"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/ambient-bird-sounds",
+      "download": "https://opengameart.org/sites/default/files/birds-isaiah658.ogg",
+      "sounds": [
+        "amb.birdCall"
+      ],
+      "files": [
+        "amb.birdCall.0 ← birds-isaiah658.ogg@1.481s",
+        "amb.birdCall.1 ← birds-isaiah658.ogg@5.786s",
+        "amb.birdCall.2 ← birds-isaiah658.ogg@7.755s",
+        "amb.birdCall.3 ← birds-isaiah658.ogg@10.998s",
+        "amb.birdCall.4 ← birds-isaiah658.ogg@14.921s",
+        "amb.birdCall.5 ← birds-isaiah658.ogg@19.082s",
+        "amb.birdCall.6 ← birds-isaiah658.ogg@24.795s"
+      ]
+    },
+    {
+      "id": "lfaClicks3",
+      "title": "equipment clicks III (bolt-action rifle, stapler, tape measure)",
+      "authors": [
+        "LFA"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/equipment-clicks-iii",
+      "download": "https://opengameart.org/sites/default/files/equipment_clicks3.wav",
+      "sounds": [
+        "mech.bolt.open",
+        "mech.bolt.close",
+        "mech.charge"
+      ],
+      "files": [
+        "mech.bolt.open.0 ← equipment_clicks3.wav@0.208s",
+        "mech.bolt.open.1 ← equipment_clicks3.wav@1.474s",
+        "mech.bolt.open.2 ← equipment_clicks3.wav@2.797s",
+        "mech.bolt.open.3 ← equipment_clicks3.wav@3.729s",
+        "mech.bolt.close.0 ← equipment_clicks3.wav@0.882s",
+        "mech.bolt.close.1 ← equipment_clicks3.wav@2.182s",
+        "mech.bolt.close.2 ← equipment_clicks3.wav@3.278s",
+        "mech.bolt.close.3 ← equipment_clicks3.wav@4.279s",
+        "mech.charge.0 ← equipment_clicks3.wav@9.617s",
+        "mech.charge.1 ← equipment_clicks3.wav@11.430s",
+        "mech.charge.2 ← equipment_clicks3.wav@19.658s",
+        "mech.charge.3 ← equipment_clicks3.wav@20.850s"
+      ]
+    },
+    {
+      "id": "lfaClicks2",
+      "title": "Equipment Clicks II",
+      "authors": [
+        "LFA"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/equipment-clicks-ii",
+      "download": "https://opengameart.org/sites/default/files/equipmentclicks.wav",
+      "sounds": [
+        "mech.dryFire",
+        "mech.latch"
+      ],
+      "files": [
+        "mech.dryFire.0 ← equipmentclicks.wav@0.093s",
+        "mech.dryFire.1 ← equipmentclicks.wav@5.452s",
+        "mech.latch.0 ← equipmentclicks.wav@1.936s",
+        "mech.latch.1 ← equipmentclicks.wav@2.281s",
+        "mech.latch.2 ← equipmentclicks.wav@3.786s"
+      ]
+    },
+    {
+      "id": "handgunReload",
+      "title": "Handgun Reload Sound Effect",
+      "authors": [
+        "zer0_sol"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/handgun-reload-sound-effect",
+      "download": "https://opengameart.org/sites/default/files/reload.wav",
+      "sounds": [
+        "mech.pistol.magOut",
+        "mech.pistol.magIn",
+        "mech.pistol.slide"
+      ],
+      "files": [
+        "mech.pistol.magOut.0 ← handgun-reload.wav@0.098s",
+        "mech.pistol.magIn.0 ← handgun-reload.wav@0.603s",
+        "mech.pistol.slide.0 ← handgun-reload.wav@1.034s"
+      ]
+    },
+    {
+      "id": "shotgunReload",
+      "title": "Shotgun Reload Sound effects",
+      "authors": [
+        "zer0_sol"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/shotgun-reload-sound-effects",
+      "download": "https://opengameart.org/sites/default/files/shotgunsounds.zip",
+      "sounds": [
+        "mech.shotgun.pump",
+        "mech.shotgun.shell"
+      ],
+      "files": [
+        "mech.shotgun.pump.0 ← ShotgunSounds/Rack.mp3@0.634s",
+        "mech.shotgun.shell.0 ← ShotgunSounds/Subsequent Shells.mp3@0.676s",
+        "mech.shotgun.shell.1 ← ShotgunSounds/4 Shell Reload.mp3@1.150s",
+        "mech.shotgun.shell.2 ← ShotgunSounds/4 Shell Reload.mp3@2.206s",
+        "mech.shotgun.shell.3 ← ShotgunSounds/4 Shell Reload.mp3@3.263s"
+      ]
+    },
+    {
+      "id": "rifleReload",
+      "title": "Gun reload sounds (assaultriflereload1)",
+      "authors": [
+        "SpringySpringo"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/gun-reload-sounds",
+      "download": "https://opengameart.org/sites/default/files/assaultriflereload1_0.wav",
+      "sounds": [
+        "mech.rifle.magOut",
+        "mech.rifle.magIn"
+      ],
+      "files": [
+        "mech.rifle.magOut.0 ← assaultriflereload1.wav@0.149s",
+        "mech.rifle.magIn.0 ← assaultriflereload1.wav@1.041s"
+      ]
+    },
+    {
+      "id": "swishes",
+      "title": "Swishes Sound Pack",
+      "authors": [
+        "artisticdude"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/swishes-sound-pack",
+      "download": "https://opengameart.org/sites/default/files/swishes.zip",
+      "sounds": [
+        "foley.cloth"
+      ],
+      "files": [
+        "foley.cloth.0 ← swishes/swish-1.wav@0.024s",
+        "foley.cloth.1 ← swishes/swish-2.wav@0.020s",
+        "foley.cloth.2 ← swishes/swish-3.wav@0.032s",
+        "foley.cloth.3 ← swishes/swish-4.wav@0.032s"
+      ]
+    }
+  ]
+}
