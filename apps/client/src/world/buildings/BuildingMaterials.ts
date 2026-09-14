@@ -1,5 +1,5 @@
 import { Color3, PBRMaterial, Texture, type Scene } from "@babylonjs/core";
-import type { BuildingMaterialId } from "@twobullets/shared";
+import type { BuildingMaterialId, BuildingPrefabId } from "@twobullets/shared";
 import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "../environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "../materials";
 import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "../surfaceVariation";
@@ -7,48 +7,77 @@ import { BuildingShadePlugin, type BuildingShadeSettings } from "./buildingShade
 
 interface BuildingLook {
   readonly set: TextureSetId;
-  /** Linear albedo multiplier. Values above 1 lift the dark scans toward real-world paint and plaster albedo. */
-  readonly tint?: Vec3;
+  /**
+   * Target mean albedo (linear). The material tint is this divided by the scan's measured mean, so swapping a scan keeps
+   * the intended brightness and paint color.
+   */
+  readonly albedo?: Vec3;
   /** Ground-level wall grime strength (0..1). */
   readonly grime?: number;
   /** World-space brightness breakup so repeated instances don't match exactly. */
   readonly breakup?: number;
 }
 
-/** Stand-ins until dedicated plaster/brick/roof-tile scans exist (see docs/map/buildings.md). */
 const LOOKS = {
-  // Board-formed concrete scan lifted and cooled toward off-white render.
-  plaster: { set: "concrete_wall_008", tint: [1.75, 1.8, 2.2], grime: 0.4, breakup: 0.3 },
-  plasterInterior: { set: "concrete_wall_008", tint: [2.1, 2.15, 2.6], grime: 0.15, breakup: 0.15 },
-  concrete: { set: "concrete_floor_worn_001", tint: [1.8, 1.8, 1.8], grime: 0.3, breakup: 0.25 },
-  planks: { set: "weathered_planks", tint: [1.9, 1.8, 1.7], grime: 0.25, breakup: 0.3 },
-  corrugated: { set: "corrugated_iron_02", tint: [1.6, 1.6, 1.6], grime: 0.35, breakup: 0.35 },
-  roofMetal: { set: "rusty_metal_02", tint: [0.5, 0.24, 0.2], breakup: 0.3 },
+  // Walls. Real painted render and whitewash sit around 0.5-0.6 albedo; the scans are photographed darker.
+  plaster: { set: "white_plaster_02", albedo: [0.5, 0.48, 0.43], grime: 0.4, breakup: 0.3 },
+  plasterInterior: { set: "painted_plaster_wall", albedo: [0.56, 0.54, 0.5], grime: 0.15, breakup: 0.15 },
+  plasterDamaged: { set: "damaged_plaster", albedo: [0.36, 0.3, 0.24], grime: 0.45, breakup: 0.35 },
+  brick: { set: "red_brick_03", albedo: [0.19, 0.11, 0.085], grime: 0.3, breakup: 0.25 },
+  brickWhitewashed: { set: "whitewashed_brick", albedo: [0.46, 0.44, 0.4], grime: 0.4, breakup: 0.3 },
+  concreteWall: { set: "concrete_wall_008", albedo: [0.42, 0.41, 0.38], grime: 0.35, breakup: 0.3 },
+  concrete: { set: "concrete_floor_worn_001", albedo: [0.17, 0.17, 0.16], grime: 0.3, breakup: 0.25 },
+  // Wood: finished floors, trims and furniture share one look so houses keep a single wood draw.
+  woodFloor: { set: "wood_floor_worn", albedo: [0.2, 0.11, 0.05], grime: 0.15, breakup: 0.2 },
+  planks: { set: "weathered_planks", albedo: [0.15, 0.11, 0.075], grime: 0.25, breakup: 0.3 },
+  plankSiding: { set: "weathered_plank_siding", albedo: [0.14, 0.1, 0.07], grime: 0.25, breakup: 0.3 },
+  // Metal and roofs. Desaturated scans (mean 0.35 grey) take their paint color from `albedo`.
+  corrugated: { set: "corrugated_iron_02", albedo: [0.16, 0.16, 0.13], grime: 0.35, breakup: 0.35 },
+  boxProfile: { set: "box_profile_metal_sheet", albedo: [0.27, 0.3, 0.31], grime: 0.35, breakup: 0.3 },
+  roofTiles: { set: "clay_roof_tiles_02", albedo: [0.26, 0.1, 0.05], breakup: 0.3 },
+  roofMetal: { set: "rusty_metal_02", albedo: [0.21, 0.07, 0.03], breakup: 0.3 },
   asphalt: { set: "asphalt_02", breakup: 0.2 },
-  paintedSteel: { set: "rusty_metal_02", tint: [0.34, 0.37, 0.27], grime: 0.2 },
-  darkSteel: { set: "rusty_metal_02", tint: [0.2, 0.2, 0.2] },
-  containerRed: { set: "corrugated_iron_02", tint: [2.6, 0.85, 0.6], grime: 0.3, breakup: 0.3 },
-  containerBlue: { set: "corrugated_iron_02", tint: [0.7, 1.15, 2.3], grime: 0.3, breakup: 0.3 },
+  paintedSteel: { set: "rusty_metal_02", albedo: [0.14, 0.11, 0.037], grime: 0.2 },
+  darkSteel: { set: "rusty_metal_02", albedo: [0.083, 0.058, 0.028] },
+  containerRed: { set: "container_side", albedo: [0.3, 0.06, 0.04], grime: 0.3, breakup: 0.3 },
+  containerBlue: { set: "container_side", albedo: [0.04, 0.12, 0.28], grime: 0.3, breakup: 0.3 },
 } as const satisfies Record<string, BuildingLook>;
 
 export type BuildingLookId = keyof typeof LOOKS;
 
-/** Material slot -> look. Slots sharing a look are merged into one mesh (one draw call). */
+/** Default material slot -> look. Slots sharing a look are merged into one mesh (one draw call). */
 export const LOOK_OF_MATERIAL: Readonly<Record<BuildingMaterialId, BuildingLookId>> = {
   plaster: "plaster",
   plasterInterior: "plasterInterior",
   concrete: "concrete",
-  woodFloor: "planks",
-  woodPlanks: "planks",
-  woodTrim: "planks",
+  woodFloor: "woodFloor",
+  woodPlanks: "woodFloor",
+  woodTrim: "woodFloor",
   corrugated: "corrugated",
-  roofMetal: "roofMetal",
+  roofMetal: "roofTiles",
   roofAsphalt: "asphalt",
   paintedSteel: "paintedSteel",
   darkSteel: "darkSteel",
   containerRed: "containerRed",
   containerBlue: "containerBlue",
 };
+
+/** Per-prefab variations on the defaults, so the kit's shared slots read as different construction. */
+const PREFAB_LOOKS: Partial<Record<BuildingPrefabId, Partial<Record<BuildingMaterialId, BuildingLookId>>>> = {
+  house_small_ruined: { plaster: "plasterDamaged" },
+  house_two_story: { plaster: "brick" },
+  barn: { woodPlanks: "plankSiding", woodTrim: "plankSiding", woodFloor: "plankSiding" },
+  warehouse: { corrugated: "boxProfile", woodPlanks: "planks", woodFloor: "planks" },
+  barracks: { plaster: "brickWhitewashed" },
+  guard_booth: { plaster: "brickWhitewashed" },
+  radar_station: { plaster: "concreteWall" },
+  watchtower: { corrugated: "boxProfile" },
+};
+
+/** Look for a material slot of a given prefab. */
+export function lookOf(prefabId: string, slot: BuildingMaterialId): BuildingLookId {
+  return PREFAB_LOOKS[prefabId as BuildingPrefabId]?.[slot] ?? LOOK_OF_MATERIAL[slot];
+}
 
 const MACRO_SET: TextureSetId = "aerial_grass_rock";
 
@@ -95,7 +124,7 @@ export class BuildingMaterials {
     const set = TEXTURE_SETS[look.set];
     const material = new PBRMaterial(`mat_building_${id}`, this.scene);
     material.albedoTexture = this.texture(set.albedo, set.meters);
-    if (look.tint) material.albedoColor = new Color3(...look.tint);
+    if (look.albedo) material.albedoColor = new Color3(...look.albedo.map((target, i) => target / set.meanAlbedo[i]!));
     if ("normal" in set) material.bumpTexture = this.texture(set.normal, set.meters);
     if ("arm" in set) {
       material.metallicTexture = this.texture(set.arm, set.meters);

@@ -19,7 +19,7 @@ import {
 import { installDebugTools } from "../debug/debugTools";
 import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../player/PlayerController";
-import { BuildingVisuals, LOOK_OF_MATERIAL, getPrefabGeometry } from "../world/buildings";
+import { BuildingVisuals, getPrefabGeometry, lookOf } from "../world/buildings";
 import { createEnvironment } from "../world/environment";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -189,7 +189,7 @@ function createLootMarkers(scene: Scene, buildings: readonly BuiltBuilding[]) {
 function describe(building: BuiltBuilding, visuals: BuildingVisuals, player: PlayerController, flying: boolean, fps: number, bakeMs: number): string {
   const { prefab } = building;
   const geometry = getPrefabGeometry(prefab);
-  const looks = [...new Set(geometry.groups.map((g) => LOOK_OF_MATERIAL[g.material]))];
+  const looks = [...new Set(geometry.groups.map((g) => lookOf(prefab.id, g.material)))];
   const { min, max } = prefab.bounds;
   const scene = visuals.stats();
   const debug = player.getDebugState();

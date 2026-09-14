@@ -9,9 +9,11 @@ import { segmentDistanceSq, sinCos, smoothstep } from "./math";
 export class SurfacePaint {
   readonly resolution: number;
   readonly channels: Uint8Array;
-  constructor(resolution: number) {
+  constructor(resolution: number, channels?: Uint8Array) {
+    const count = resolution * resolution * 4;
+    if (channels && channels.length !== count) throw new Error(`SurfacePaint expects ${count} bytes, got ${channels.length}`);
     this.resolution = resolution;
-    this.channels = new Uint8Array(resolution * resolution * 4);
+    this.channels = channels ?? new Uint8Array(count);
   }
 
   /** Composites `weight` (0..1) of `surface` over sample i. */

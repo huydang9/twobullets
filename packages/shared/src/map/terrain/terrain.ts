@@ -1,12 +1,25 @@
 import type { FlattenRegion, TerrainSpec, TerrainSurface } from "../types";
 import { SurfacePaint, flattenHeightfield } from "./flatten";
 import { createReliefFunction, generateHeightfield, type ReliefFunction } from "./generate";
-import { checksumBytes, type Heightfield, type NormalLike } from "./heightfield";
-import { computeSurfaceMask, type SurfaceMask } from "./surface";
+import { Heightfield, checksumBytes, type NormalLike } from "./heightfield";
+import { SurfaceMask, computeSurfaceMask } from "./surface";
 
 export interface TerrainBuildOptions {
   /** Storage for the heights, e.g. a SharedArrayBuffer of Heightfield.byteLength(resolution) bytes. */
   readonly heightBuffer?: ArrayBufferLike;
+  /** Generation progress 0..1 (heights are ~75% of the build time), for loading screens. */
+  readonly onProgress?: (fraction: number) => void;
+}
+
+/**
+ * The raw arrays behind a built terrain: enough to rebuild it without generating (worker transfer, baked binary).
+ * `paint` is the flatten paint, kept so `Terrain.flatten` can composite more regions later.
+ */
+export interface TerrainSnapshot {
+  readonly heights: Float32Array;
+  /** Surface mask, RGBA per sample. */
+  readonly weights: Uint8Array;
+  readonly paint: Uint8Array;
 }
 
 /**
@@ -22,12 +35,25 @@ export class Terrain {
   /** Paint from every flatten region so far, kept so later flattens composite over it. */
   private readonly paint: SurfacePaint;
 
-  constructor(spec: TerrainSpec, field: Heightfield, paint: SurfacePaint) {
+  /** `surface` may be passed when it was already computed for these heights and paint (see fromSnapshot). */
+  constructor(spec: TerrainSpec, field: Heightfield, paint: SurfacePaint, surface?: SurfaceMask) {
     this.spec = spec;
     this.field = field;
     this.paint = paint;
-    this.surface = computeSurfaceMask(spec, field, paint);
+    this.surface = surface ?? computeSurfaceMask(spec, field, paint);
     this.relief = createReliefFunction(spec);
+  }
+
+  /** Rebuilds a terrain from its arrays without generating anything. The arrays are used in place, not copied. */
+  static fromSnapshot(spec: TerrainSpec, snapshot: TerrainSnapshot): Terrain {
+    const field = new Heightfield(spec.size, spec.resolution, snapshot.heights);
+    const paint = new SurfacePaint(spec.resolution, snapshot.paint);
+    return new Terrain(spec, field, paint, new SurfaceMask(field, snapshot.weights));
+  }
+
+  /** Views of the terrain's arrays (not copies). Transferring them to a worker detaches this terrain. */
+  snapshot(): TerrainSnapshot {
+    return { heights: this.field.heights, weights: this.surface.weights, paint: this.paint.channels };
   }
 
   /** Physics surface height at (x, z) (identical to a Havok ray against the heightfield). */
@@ -78,7 +104,7 @@ export class Terrain {
 
 /** Generates heights, applies flatten regions in order, then derives the surface mask. */
 export function buildTerrain(spec: TerrainSpec, regions: readonly FlattenRegion[] = [], options: TerrainBuildOptions = {}): Terrain {
-  const field = generateHeightfield(spec, options.heightBuffer);
+  const field = generateHeightfield(spec, options.heightBuffer, options.onProgress);
   const paint = new SurfacePaint(field.resolution);
   flattenHeightfield(field, regions, paint);
   return new Terrain(spec, field, paint);

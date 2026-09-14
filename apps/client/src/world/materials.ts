@@ -3,7 +3,7 @@ import type { SurfaceKind } from "@twobullets/shared";
 import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "./environmentManifest";
 import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "./surfaceVariation";
 
-export const ENVIRONMENT_ASSET_ROOT = `${import.meta.env.BASE_URL}assets/environment/`;
+export const ENVIRONMENT_ASSET_ROOT = `${import.meta.env?.BASE_URL ?? "/"}assets/environment/`;
 
 interface SurfaceLook {
   readonly set: TextureSetId;

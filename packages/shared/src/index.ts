@@ -12,5 +12,7 @@ export * from "./map/types";
 export * from "./map/terrain/index";
 export * from "./map/physics/index";
 export * from "./map/draftMapV1";
+export * from "./map/mapV1";
+export * from "./map/layout/index";
 export * from "./map/buildings/index";
 export * from "./map/buildings/babylon/index";

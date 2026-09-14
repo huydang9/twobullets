@@ -9,7 +9,7 @@ import {
 } from "@twobullets/shared";
 import type { Environment } from "../environment";
 import { BUILDING_SHADE_ATTRIBUTE } from "./buildingShadePlugin";
-import { BuildingMaterials, LOOK_OF_MATERIAL, type BuildingLookId } from "./BuildingMaterials";
+import { BuildingMaterials, lookOf, type BuildingLookId } from "./BuildingMaterials";
 
 export interface BuildingVisualsOptions {
   /**
@@ -95,7 +95,7 @@ export class BuildingVisuals implements BuildingVisualHost {
     const geometry = getPrefabGeometry(prefab);
     const byLook = new Map<BuildingLookId, MeshGroup[]>();
     for (const group of geometry.groups) {
-      const look = LOOK_OF_MATERIAL[group.material];
+      const look = lookOf(prefab.id, group.material);
       byLook.set(look, [...(byLook.get(look) ?? []), group]);
     }
     const meshes = [...byLook].map(([look, groups]) => {

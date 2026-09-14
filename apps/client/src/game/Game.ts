@@ -9,7 +9,7 @@ import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../player/PlayerController";
 import { Hud } from "../ui/Hud";
 import { createEnvironment } from "../world/environment";
-import { LARGE_WORLD_FAR_PLANE, createDevMapV1 } from "../world/terrain";
+import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
 
 /** Top-level wiring: engine, physics, assets, world, player, combat, HUD. Owns the frame loop. */
 export class Game {
@@ -21,6 +21,7 @@ export class Game {
     private readonly combat: CombatSystem,
     private readonly presentation: WeaponPresentation,
     private readonly hud: Hud,
+    private readonly world: MapRuntime | null,
   ) {}
 
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement): Promise<Game> {
@@ -31,26 +32,30 @@ export class Game {
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
-    // DEV: `?map=v1` loads the Map v1 terrain with the arena as its Training Yard; no query keeps the arena.
+    // DEV: `?map=v1` loads the full Map v1; no query (or `?map=arena`) keeps the blockout arena.
     const mapV1 = import.meta.env.DEV && new URLSearchParams(window.location.search).get("map") === "v1";
     const environment = createEnvironment(scene, { largeWorld: mapV1 });
-    const world = mapV1 ? createDevMapV1(scene, environment) : null;
+    // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
+    const assetsLoading = loadAssets(scene);
+    const world = mapV1
+      ? await MapRuntime.load(scene, environment, { bakeUrl: `${import.meta.env.BASE_URL}assets/map/mapV1.terrain.bin`, overlay: new MapOverlay() })
+      : null;
     const levelData = world?.level ?? ARENA_LEVEL;
     const level = buildLevel(scene, levelData);
     environment.decorateLevel(level);
-    // Models download while the environment textures and IBL load.
-    const [assets] = await Promise.all([loadAssets(scene), environment.ready, world?.ready]);
+    const [assets] = await Promise.all([assetsLoading, environment.ready, world?.ready]);
 
     const input = new InputManager(canvas);
     const spawn = levelData.spawnPoints[0];
     if (!spawn) throw new Error(`Level "${levelData.name}" has no spawn points`);
     const player = new PlayerController(scene, input, levelData);
-    if (world) player.camera.maxZ = LARGE_WORLD_FAR_PLANE;
+    if (world) player.camera.maxZ = MAP_FAR_PLANE;
     scene.activeCamera = player.camera;
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
     const combat = new CombatSystem(scene, input, player, levelData, environment, assets);
     const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
+    world?.attach(player, presentation.audio.probe);
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
     input.onLockChange((locked) => hud.setLocked(locked));
@@ -60,7 +65,7 @@ export class Game {
 
     installDebugTools(scene, input, { hud });
 
-    const game = new Game(engine, scene, input, player, combat, presentation, hud);
+    const game = new Game(engine, scene, input, player, combat, presentation, hud, world);
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
@@ -76,6 +81,7 @@ export class Game {
       this.player.update(dt);
       this.combat.update(dt);
       this.presentation.update(dt);
+      this.world?.update(dt);
       this.scene.render();
       this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
       this.input.endFrame();

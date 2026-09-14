@@ -126,8 +126,14 @@ export function polylineDistanceSq(path: readonly Vec2Tuple[], x: number, z: num
   return best;
 }
 
-/** Samples the relief function onto a new heightfield grid (row-major, see Heightfield). */
-export function generateHeightfield(spec: TerrainSpec, buffer?: ArrayBufferLike): Heightfield {
+/** Rows between progress reports during generation. */
+const PROGRESS_ROWS = 32;
+
+/**
+ * Samples the relief function onto a new heightfield grid (row-major, see Heightfield). `onProgress` receives 0..1
+ * every few rows, for loading screens.
+ */
+export function generateHeightfield(spec: TerrainSpec, buffer?: ArrayBufferLike, onProgress?: (fraction: number) => void): Heightfield {
   const field = buffer ? Heightfield.fromBuffer(spec.size, spec.resolution, buffer) : new Heightfield(spec.size, spec.resolution);
   const relief = createReliefFunction(spec);
   const n = field.resolution;
@@ -136,6 +142,7 @@ export function generateHeightfield(spec: TerrainSpec, buffer?: ArrayBufferLike)
     const z = field.worldZ(iz);
     const row = iz * n;
     for (let ix = 0; ix < n; ix++) heights[row + ix] = relief(field.worldX(ix), z);
+    if (onProgress && iz % PROGRESS_ROWS === PROGRESS_ROWS - 1) onProgress((iz + 1) / n);
   }
   return field;
 }

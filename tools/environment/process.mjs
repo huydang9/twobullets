@@ -1,23 +1,32 @@
 #!/usr/bin/env node
 // Turns the raw Poly Haven downloads into web-ready environment assets and a generated TS manifest.
 //
-//   textures/<id>_<map>_<res>.jpg  albedo via sips (4:2:0), normal/ARM via ffmpeg (4:4:4, no chroma bleed)
+//   textures/<id>_<map>_<res>.jpg  albedo via sips (4:2:0), normal/ARM/NXA via ffmpeg (4:4:4, no chroma bleed)
 //   sky/sky_{px,py,pz,nx,ny,nz}.jpg  LDR skybox faces cut from the 4K HDRI (GL cube convention)
 //   sky/<hdri>_ibl_1k.hdr          sun-less, ground-filled panorama for runtime IBL prefiltering
 //
-// Requires macOS `sips` and `ffmpeg` on PATH. Usage: node tools/environment/process.mjs
+// Requires macOS `sips` and `ffmpeg` on PATH. Usage: node tools/environment/process.mjs [--only=textures|sky]
+// Props and vegetation are built separately by props.mjs; both regenerate the manifest from build.json.
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { HDRI, JPEG, MANIFEST_TS, OUT_DIR, SRC_DIR, TEXTURES } from "./config.mjs";
+import { HDRI, JPEG, OUT_DIR, SRC_DIR, TEXTURES } from "./config.mjs";
 import { readBmp, readHdr, writeBmp, writeHdr } from "./imageio.mjs";
+import { readBuildRecord, reportSizes, writeBuildRecord, writeManifest } from "./manifest.mjs";
+
+setTimeout(() => {
+  console.error("aborted after 600 s");
+  process.exit(2);
+}, 600_000).unref();
 
 const run = promisify(execFile);
 const TEX_OUT = path.join(OUT_DIR, "textures");
 const SKY_OUT = path.join(OUT_DIR, "sky");
 const DEG = Math.PI / 180;
+/** Linear mean of desaturated albedo maps. */
+const DESATURATED_MEAN = 0.35;
 
 const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const linearToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
@@ -25,15 +34,23 @@ const luminance = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const resLabel = (size) => (size >= 1024 ? `${size / 1024}k` : `${size}`);
 
 async function main() {
-  // Start clean so renamed or dropped outputs don't linger in the committed folder.
-  await Promise.all([TEX_OUT, SKY_OUT].map((dir) => rm(dir, { recursive: true, force: true })));
-  await Promise.all([mkdir(TEX_OUT, { recursive: true }), mkdir(SKY_OUT, { recursive: true })]);
+  const only = process.argv.find((a) => a.startsWith("--only="))?.slice(7);
+  const record = await readBuildRecord();
   const tmp = await mkdtemp(path.join(tmpdir(), "twobullets-env-"));
   try {
-    const textureSets = await processTextures(tmp);
-    const groundAlbedo = textureSets.forrest_ground_01.meanAlbedo;
-    const sky = await processHdri(tmp, groundAlbedo);
-    await writeManifest(textureSets, sky);
+    if (!only || only === "textures") {
+      // Start clean so renamed or dropped outputs don't linger in the committed folder.
+      await rm(TEX_OUT, { recursive: true, force: true });
+      await mkdir(TEX_OUT, { recursive: true });
+      record.textures = await processTextures(tmp);
+    }
+    if (!only || only === "sky") {
+      await rm(SKY_OUT, { recursive: true, force: true });
+      await mkdir(SKY_OUT, { recursive: true });
+      record.sky = await processHdri(tmp, record.textures.forrest_ground_01.meanAlbedo);
+    }
+    await writeBuildRecord(record);
+    await writeManifest(record);
     await reportSizes();
   } finally {
     await rm(tmp, { recursive: true, force: true });
@@ -43,31 +60,61 @@ async function main() {
 // ---------------------------------------------------------------------------------------------
 // Textures
 
+/** Sequential on purpose: each 2K map is a 12 MB bitmap in memory. */
 async function processTextures(tmp) {
   const sets = {};
-  await Promise.all(
-    TEXTURES.map(async ({ id, meters, sizes, macroOnly }) => {
-      const entry = { meters, files: {} };
-      for (const [map, size] of Object.entries(sizes)) {
-        const src = path.join(SRC_DIR, id, `${id}_${map}_2k.jpg`);
-        const name = `${id}_${map}_${resLabel(size)}.jpg`;
-        const out = path.join(TEX_OUT, name);
-        const bmp = path.join(tmp, `${id}_${map}.bmp`);
-        await run("sips", ["-Z", String(size), "-s", "format", "bmp", src, "--out", bmp]);
-        if (map === "diff") {
-          await run("sips", ["-s", "format", "jpeg", "-s", "formatOptions", String(JPEG.albedoQuality), bmp, "--out", out]);
-        } else {
-          await run("ffmpeg", ["-v", "error", "-y", "-i", bmp, "-pix_fmt", "yuvj444p", "-q:v", String(JPEG.dataQscale), out]);
+  for (const { id, meters, sizes, macroOnly, desaturate } of TEXTURES) {
+    const entry = { meters, files: {} };
+    const resized = async (map, size) => {
+      const bmp = path.join(tmp, `${id}_${map}_${size}.bmp`);
+      await run("sips", ["-Z", String(size), "-s", "format", "bmp", path.join(SRC_DIR, id, `${id}_${map}_2k.jpg`), "--out", bmp]);
+      return bmp;
+    };
+    for (const [map, size] of Object.entries(sizes)) {
+      const name = `${id}_${map}_${resLabel(size)}.jpg`;
+      const out = path.join(TEX_OUT, name);
+      let bmp;
+      if (map === "nxa") {
+        const normal = readBmp(await readFile(await resized("nor_gl", size)));
+        const arm = readBmp(await readFile(await resized("arm", size)));
+        const packed = new Uint8Array(normal.rgb.length);
+        let roughness = 0;
+        for (let i = 0; i < packed.length; i += 3) {
+          packed[i] = normal.rgb[i];
+          packed[i + 1] = normal.rgb[i + 1];
+          packed[i + 2] = arm.rgb[i];
+          roughness += arm.rgb[i + 1];
         }
-        entry.files[map] = `textures/${name}`;
-        const stats = channelStats(readBmp(await readFile(bmp)), map === "diff");
-        if (map === "diff") entry.meanAlbedo = stats.mean;
-        console.log(`${name.padEnd(44)} ${kb((await stat(out)).size)}  mean ${stats.mean.map((v) => v.toFixed(3)).join(" ")}`);
+        entry.roughness = roughness / (packed.length / 3) / 255;
+        bmp = path.join(tmp, `${id}_nxa.bmp`);
+        await writeFile(bmp, writeBmp(normal.width, normal.height, packed));
+      } else {
+        bmp = await resized(map, size);
+        if (map === "diff" && desaturate) {
+          // Luminance normalized to a mid-grey mean, so paint tints stay near 1 and don't amplify noise.
+          const image = readBmp(await readFile(bmp));
+          const lut = Array.from({ length: 256 }, (_, i) => srgbToLinear(i / 255));
+          const { rgb } = image;
+          const lum = new Float32Array(rgb.length / 3);
+          for (let i = 0; i < lum.length; i++) lum[i] = luminance(lut[rgb[i * 3]], lut[rgb[i * 3 + 1]], lut[rgb[i * 3 + 2]]);
+          const scale = DESATURATED_MEAN / (lum.reduce((a, b) => a + b, 0) / lum.length);
+          for (let i = 0; i < lum.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = Math.round(linearToSrgb(Math.min(1, lum[i] * scale)) * 255);
+          await writeFile(bmp, writeBmp(image.width, image.height, rgb));
+        }
       }
-      if (macroOnly) entry.macro = true;
-      sets[id] = entry;
-    }),
-  );
+      if (map === "diff") {
+        await run("sips", ["-s", "format", "jpeg", "-s", "formatOptions", String(JPEG.albedoQuality), bmp, "--out", out]);
+      } else {
+        await run("ffmpeg", ["-v", "error", "-y", "-i", bmp, "-pix_fmt", "yuvj444p", "-q:v", String(JPEG.dataQscale), out]);
+      }
+      entry.files[map] = `textures/${name}`;
+      if (map === "diff") entry.meanAlbedo = channelStats(readBmp(await readFile(bmp)), true).mean;
+      console.log(`${name.padEnd(44)} ${kb((await readFile(out)).length)}`);
+      await rm(bmp, { force: true });
+    }
+    if (macroOnly) entry.macro = true;
+    sets[id] = entry;
+  }
   return sets;
 }
 
@@ -327,79 +374,6 @@ function normalize(v) {
 function smoothstep(edge0, edge1, x) {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Manifest
-
-async function writeManifest(textureSets, sky) {
-  const texturesTs = Object.entries(textureSets)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, set]) => {
-      const files = Object.entries(set.files)
-        .map(([map, file]) => `${map === "nor_gl" ? "normal" : map === "diff" ? "albedo" : map}: "${file}"`)
-        .join(", ");
-      const mean = set.meanAlbedo.map((v) => v.toFixed(4)).join(", ");
-      return `  ${id}: { meters: ${set.meters}, ${files}, meanAlbedo: [${mean}] },`;
-    })
-    .join("\n");
-  const tuple = (v) => `[${v.join(", ")}]`;
-  const body = `// Generated by tools/environment/process.mjs. Do not edit by hand; re-run the script instead.
-// Paths are relative to the environment asset root (public/assets/environment/).
-
-export type Vec3 = readonly [number, number, number];
-
-export interface TextureSetFiles {
-  /** Real-world size of one texture tile, in meters. */
-  readonly meters: number;
-  readonly albedo: string;
-  readonly normal?: string;
-  /** Packed AO (R), roughness (G), metalness (B). */
-  readonly arm?: string;
-  /** Mean albedo in linear space. */
-  readonly meanAlbedo: Vec3;
-}
-
-export const TEXTURE_SETS = {
-${texturesTs}
-} as const satisfies Record<string, TextureSetFiles>;
-
-export type TextureSetId = keyof typeof TEXTURE_SETS;
-
-export const SKY = {
-  /** Sun-less, ground-filled equirectangular panorama for IBL (prefiltered at load). */
-  iblPanorama: "${sky.iblPanorama}",
-  /** Skybox faces in Babylon CubeTexture order: +X, +Y, +Z, -X, -Y, -Z. */
-  faces: [${sky.skyFaces.map((f) => `"${f}"`).join(", ")}],
-  /** Multiply the sRGB-decoded sky faces by this to get back to panorama units. */
-  skyScale: ${sky.skyScale},
-  /** Unit vector pointing from the scene toward the sun. */
-  sunDirection: ${tuple(sky.sunDirection)} as Vec3,
-  sunColor: ${tuple(sky.sunColor)} as Vec3,
-  /** DirectionalLight intensity matching the energy removed from the panorama (E_sun / π). */
-  sunIntensity: ${sky.sunIntensity},
-  sunElevationDeg: ${sky.sunElevationDeg},
-  /** Sky-only horizontal irradiance / π (what a hemispheric fill light should approximate). */
-  skyAmbient: ${sky.skyAmbient},
-  /** Mean linear radiance of the sky just above the horizon (fog/haze color). */
-  horizonColor: ${tuple(sky.horizonColor)} as Vec3,
-  /** Radiance of the sun- and sky-lit ground that fills the panorama below the horizon. */
-  groundRadiance: ${tuple(sky.groundRadiance)} as Vec3,
-} as const;
-`;
-  await writeFile(MANIFEST_TS, body);
-  console.log(`wrote ${path.relative(process.cwd(), MANIFEST_TS)}`);
-}
-
-async function reportSizes() {
-  let total = 0;
-  for (const dir of ["textures", "sky"]) {
-    let sum = 0;
-    for (const file of await readdir(path.join(OUT_DIR, dir))) sum += (await stat(path.join(OUT_DIR, dir, file))).size;
-    console.log(`${dir}/: ${kb(sum)}`);
-    total += sum;
-  }
-  console.log(`total environment payload: ${(total / 1e6).toFixed(2)} MB`);
 }
 
 const kb = (bytes) => `${(bytes / 1024).toFixed(0).padStart(6)} KB`;
