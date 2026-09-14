@@ -25,6 +25,7 @@ export class InputManager {
   private readonly events = new AbortController();
   private mouseDx = 0;
   private mouseDy = 0;
+  private wheelSteps = 0;
   private lockedAt = 0;
   private lastMouseMagnitude = 0;
 
@@ -36,6 +37,10 @@ export class InputManager {
     document.addEventListener("visibilitychange", this.releaseKeys, options);
     document.addEventListener("pointerlockchange", this.handleLockChange, options);
     document.addEventListener("mousemove", this.handleMouseMove, options);
+    document.addEventListener("mousedown", this.handleMouseDown, options);
+    document.addEventListener("mouseup", this.handleMouseUp, options);
+    document.addEventListener("wheel", this.handleWheel, { ...options, passive: false });
+    document.addEventListener("contextmenu", this.handleContextMenu, options);
     canvas.addEventListener("click", this.handleCanvasClick, options);
   }
 
@@ -75,11 +80,17 @@ export class InputManager {
     return { dx: this.mouseDx, dy: this.mouseDy };
   }
 
+  /** Mouse wheel notches since last frame: +1 per notch scrolled down/toward the user, -1 up. Zero while unlocked. */
+  wheelDelta(): number {
+    return this.wheelSteps;
+  }
+
   /** Call once at the end of every frame to reset per-frame state. */
   endFrame(): void {
     this.pressed.clear();
     this.mouseDx = 0;
     this.mouseDy = 0;
+    this.wheelSteps = 0;
   }
 
   dispose(): void {
@@ -138,6 +149,28 @@ export class InputManager {
     if (spike) return;
     this.mouseDx += movementX;
     this.mouseDy += movementY;
+  };
+
+  // Buttons only count while locked, so the click that grabs the mouse doesn't also fire a shot.
+  private readonly handleMouseDown = (event: MouseEvent): void => {
+    if (!this.isLocked) return;
+    const code = `Mouse${event.button}`;
+    this.held.add(code);
+    this.pressed.add(code);
+  };
+
+  private readonly handleMouseUp = (event: MouseEvent): void => {
+    this.held.delete(`Mouse${event.button}`);
+  };
+
+  private readonly handleWheel = (event: WheelEvent): void => {
+    if (!this.isLocked) return;
+    event.preventDefault();
+    if (event.deltaY !== 0) this.wheelSteps += Math.sign(event.deltaY);
+  };
+
+  private readonly handleContextMenu = (event: MouseEvent): void => {
+    if (this.isLocked) event.preventDefault();
   };
 
   private readonly handleCanvasClick = (): void => {

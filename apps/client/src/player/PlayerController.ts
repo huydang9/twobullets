@@ -1,4 +1,4 @@
-import { TargetCamera, Vector3, type Scene } from "@babylonjs/core";
+import { Observable, TargetCamera, Vector3, type PhysicsBody, type Scene } from "@babylonjs/core";
 import {
   CAMERA,
   MOVEMENT,
@@ -33,12 +33,30 @@ function blendFactor(rate: number, dt: number): number {
   return 1 - Math.exp(-rate * dt);
 }
 
+/** Emitted after every fixed movement tick, so other tick-based systems (weapons) run in lockstep with movement. */
+export interface PlayerTick {
+  readonly dt: number;
+  readonly input: MoveInput;
+  readonly state: MoveState;
+}
+
+/** Gameplay modifiers other systems apply to the player (e.g. aiming down sights). */
+export interface PlayerModifiers {
+  /** Multiplier on ground speed, 0..1. */
+  speedScale: number;
+  allowSprint: boolean;
+  /** Multiplier on mouse sensitivity. */
+  sensitivityScale: number;
+}
+
 /**
  * Local player: mouse look every render frame, movement on a fixed 60 Hz tick driven by MoveInput snapshots,
  * and a camera interpolated between the last two ticks.
  */
 export class PlayerController {
   readonly camera: TargetCamera;
+  readonly onTick = new Observable<PlayerTick>();
+  readonly modifiers: PlayerModifiers = { speedScale: 1, allowSprint: true, sensitivityScale: 1 };
 
   private readonly body: CharacterBody;
   private state: MoveState = createMoveState();
@@ -56,6 +74,9 @@ export class PlayerController {
   private sprintBlend = 0;
   private bobPhase = 0;
   private bobWeight = 0;
+  private zoomFovDegrees: number = CAMERA.fovDegrees;
+  private zoomBlend = 0;
+  private readonly punch = new Vector3();
 
   constructor(
     scene: Scene,
@@ -106,6 +127,42 @@ export class PlayerController {
     this.updateCamera(0, 1);
   }
 
+  /** Current aim in radians (pitch + = down). This is the gameplay aim; camera punch is not included. */
+  getAim(): { readonly yaw: number; readonly pitch: number } {
+    return { yaw: this.yaw, pitch: this.pitch };
+  }
+
+  /** Tick-accurate (not interpolated or smoothed) eye position, for spawning shots. */
+  getEyeToRef(result: Vector3): Vector3 {
+    const eye = this.state.stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight;
+    return result.set(this.currentFeet.x, this.currentFeet.y + eye, this.currentFeet.z);
+  }
+
+  get moveState(): MoveState {
+    return this.state;
+  }
+
+  get physicsBody(): PhysicsBody {
+    return this.body.physicsBody;
+  }
+
+  /** Permanently rotates the aim (weapon recoil). Positive `up` raises the aim, positive `right` turns right. */
+  kickAim(up: number, right: number): void {
+    this.yaw = (this.yaw + right) % TWO_PI;
+    this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch - up));
+  }
+
+  /** Blends the camera FOV toward `fovDegrees` (horizontal, like CAMERA.fovDegrees) by `blend` 0..1, e.g. for ADS. */
+  setZoom(fovDegrees: number, blend: number): void {
+    this.zoomFovDegrees = fovDegrees;
+    this.zoomBlend = Math.min(1, Math.max(0, blend));
+  }
+
+  /** Visual-only camera rotation offset in radians (x = pitch, y = yaw, z = roll); doesn't affect aim. Set every frame. */
+  setCameraPunch(pitch: number, yaw: number, roll: number): void {
+    this.punch.set(pitch, yaw, roll);
+  }
+
   getDebugState(): PlayerDebugState {
     const { x, y, z } = this.currentFeet;
     const v = this.state.velocity;
@@ -120,6 +177,7 @@ export class PlayerController {
   }
 
   dispose(): void {
+    this.onTick.clear();
     this.body.dispose();
     this.camera.dispose();
   }
@@ -127,23 +185,25 @@ export class PlayerController {
   private applyLook(): void {
     const { dx, dy } = this.input.lookDelta();
     if (dx === 0 && dy === 0) return;
-    this.yaw = (this.yaw + dx * CAMERA.mouseSensitivity) % TWO_PI;
-    this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch + dy * CAMERA.mouseSensitivity));
+    const sensitivity = CAMERA.mouseSensitivity * this.modifiers.sensitivityScale;
+    this.yaw = (this.yaw + dx * sensitivity) % TWO_PI;
+    this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch + dy * sensitivity));
   }
 
   /** Snapshot of player intent for one tick; this is what will be sent to the server. */
   private sampleInput(): MoveInput {
     const input = this.input;
     if (!input.isLocked) {
-      return { forward: 0, right: 0, jump: false, sprint: false, crouch: false, yaw: this.yaw, pitch: this.pitch };
+      return { forward: 0, right: 0, jump: false, sprint: false, crouch: false, speedScale: 1, yaw: this.yaw, pitch: this.pitch };
     }
     const axis = (positive: boolean, negative: boolean): number => (positive ? 1 : 0) - (negative ? 1 : 0);
     return {
       forward: axis(input.isActionDown("forward"), input.isActionDown("back")),
       right: axis(input.isActionDown("right"), input.isActionDown("left")),
       jump: this.jumpQueued || input.isActionDown("jump"),
-      sprint: input.isActionDown("sprint"),
+      sprint: input.isActionDown("sprint") && this.modifiers.allowSprint,
       crouch: input.isActionDown("crouch"),
+      speedScale: this.modifiers.speedScale,
       yaw: this.yaw,
       pitch: this.pitch,
     };
@@ -172,6 +232,8 @@ export class PlayerController {
         this.stepOffset = Math.max(-MAX_STEP_OFFSET, Math.min(MAX_STEP_OFFSET, this.stepOffset - jump));
       }
     }
+
+    this.onTick.notifyObservers({ dt: TICK_SECONDS, input: moveInput, state: this.state });
   }
 
   private updateCamera(dt: number, alpha: number): void {
@@ -184,8 +246,8 @@ export class PlayerController {
 
     const sprintTarget = this.state.sprinting && speed > MOVEMENT.walkSpeed ? 1 : 0;
     this.sprintBlend += (sprintTarget - this.sprintBlend) * blendFactor(CAMERA.fovBlendRate, dt);
-    const fov = CAMERA.fovDegrees + (CAMERA.sprintFovDegrees - CAMERA.fovDegrees) * this.sprintBlend;
-    this.camera.fov = verticalFovFromHorizontal(fov);
+    const moveFov = CAMERA.fovDegrees + (CAMERA.sprintFovDegrees - CAMERA.fovDegrees) * this.sprintBlend;
+    this.camera.fov = verticalFovFromHorizontal(moveFov + (this.zoomFovDegrees - moveFov) * this.zoomBlend);
 
     let bob = 0;
     if (CAMERA.headBob) {
@@ -197,6 +259,6 @@ export class PlayerController {
 
     const feet = Vector3.LerpToRef(this.previousFeet, this.currentFeet, alpha, this.camera.position);
     feet.y += this.eyeHeight + this.stepOffset + bob;
-    this.camera.rotation.set(this.pitch, this.yaw, 0);
+    this.camera.rotation.set(this.pitch + this.punch.x, this.yaw + this.punch.y, this.punch.z);
   }
 }

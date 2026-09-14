@@ -11,3 +11,8 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   parent?.appendChild(node);
   return node;
 }
+
+/** Appends an empty text node to `parent` and returns it, for cheap `data` updates. */
+export function textNode(parent: HTMLElement, initial = ""): Text {
+  return parent.appendChild(document.createTextNode(initial));
+}

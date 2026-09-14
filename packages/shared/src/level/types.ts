@@ -29,10 +29,25 @@ export interface SpawnPoint {
   readonly yaw: number;
 }
 
+/** Practice target dummy placement (milestone 2 shooting range). */
+export interface TargetSpawn {
+  /** Feet position. */
+  readonly position: Vec3Tuple;
+  /** Facing direction around Y in radians (0 = +Z). */
+  readonly yaw: number;
+  /** Strafing dummies move side to side along their local X axis. */
+  readonly motion: "static" | "strafe";
+  /** Total strafe travel, m (strafe only). */
+  readonly strafeDistance?: number;
+  /** Strafe speed, m/s (strafe only). */
+  readonly strafeSpeed?: number;
+}
+
 export interface LevelData {
   readonly name: string;
   readonly blocks: readonly LevelBlock[];
   readonly spawnPoints: readonly SpawnPoint[];
+  readonly targets: readonly TargetSpawn[];
   /** Players below this Y are respawned. */
   readonly killY: number;
 }

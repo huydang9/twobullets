@@ -14,6 +14,8 @@ export interface MoveInput {
   readonly jump: boolean;
   readonly sprint: boolean;
   readonly crouch: boolean;
+  /** Multiplier on target ground speed (e.g. 0.6 while aiming down sights). 1 = unmodified. */
+  readonly speedScale: number;
   /** Look yaw in radians (around +Y, 0 = facing +Z, positive turns right). */
   readonly yaw: number;
   /** Look pitch in radians (+ = look down, Babylon convention). */

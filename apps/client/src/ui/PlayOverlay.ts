@@ -1,11 +1,20 @@
 import { el } from "./dom";
 
-const CONTROLS: ReadonlyArray<readonly [keys: readonly string[], action: string]> = [
+type ControlRow = readonly [keys: readonly string[], action: string];
+
+const CONTROLS: readonly ControlRow[] = [
   [["W", "A", "S", "D"], "Move"],
   [["Mouse"], "Look"],
   [["Space"], "Jump"],
   [["Shift"], "Sprint"],
   [["C"], "Crouch"],
+  [["LMB"], "Fire"],
+  [["RMB"], "Aim"],
+  [["R"], "Reload"],
+  [["1–4", "Wheel"], "Switch weapon"],
+];
+
+const SYSTEM_CONTROLS: readonly ControlRow[] = [
   [["Esc"], "Release mouse"],
   [["F3"], "Debug stats"],
   [["F8"], "Physics debug"],
@@ -34,13 +43,9 @@ export class PlayOverlay {
     this.hint = el("div", "tb-hint", "Mouse lock was blocked. Wait a moment, then click again.", panel);
     this.hint.hidden = true;
 
-    const list = el("ul", "tb-controls", undefined, panel);
-    for (const [keys, action] of CONTROLS) {
-      const row = el("li", "tb-controls__row", undefined, list);
-      const keyCell = el("span", "tb-controls__keys", undefined, row);
-      for (const key of keys) el("kbd", "tb-key", key, keyCell);
-      el("span", "tb-controls__action", action, row);
-    }
+    const controls = el("div", "tb-controls", undefined, panel);
+    controlList(el("ul", "tb-controls__grid", undefined, controls), CONTROLS);
+    controlList(el("ul", "tb-controls__system", undefined, controls), SYSTEM_CONTROLS);
 
     this.node.addEventListener("click", () => {
       this.hideHint();
@@ -66,5 +71,14 @@ export class PlayOverlay {
     clearTimeout(this.hintTimer);
     this.hintTimer = undefined;
     this.hint.hidden = true;
+  }
+}
+
+function controlList(list: HTMLUListElement, rows: readonly ControlRow[]): void {
+  for (const [keys, action] of rows) {
+    const row = el("li", "tb-controls__row", undefined, list);
+    const keyCell = el("span", "tb-controls__keys", undefined, row);
+    for (const key of keys) el("kbd", "tb-key", key, keyCell);
+    el("span", "tb-controls__action", action, row);
   }
 }

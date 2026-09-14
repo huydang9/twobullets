@@ -181,6 +181,17 @@ const groundCover: LevelBlock[] = [
   crate("cover_barrierSouth", 0, -22, [8, 3, 1]),
 ];
 
+// Shooting range laid out around the first spawn (SW corner, facing NE): lanes fan out so no dummy hides another.
+const RANGE_ORIGIN: readonly [x: number, z: number] = [-24, -28];
+
+/** Practice dummy with feet at (x, y, z), facing the range origin. */
+function dummy(x: number, z: number, y = 0, strafe?: { distance: number; speed: number }): LevelData["targets"][number] {
+  const yaw = Math.atan2(RANGE_ORIGIN[0] - x, RANGE_ORIGIN[1] - z);
+  return strafe
+    ? { position: [x, y, z], yaw, motion: "strafe", strafeDistance: strafe.distance, strafeSpeed: strafe.speed }
+    : { position: [x, y, z], yaw, motion: "static" };
+}
+
 export const ARENA_LEVEL: LevelData = {
   name: "Blockout Arena",
   killY: -20,
@@ -195,4 +206,17 @@ export const ARENA_LEVEL: LevelData = {
     spawn(25, 0),
   ],
   blocks: [...shell, ...centralPlatform, ...westCatwalk, ...eastCatwalk, ...groundCover],
+  // Distances and bearings (0° = north, 90° = east) from the range origin.
+  targets: [
+    dummy(-21.4, -18.3), // 10 m, 15°
+    dummy(-14.2, -26.3), // 10 m, 80°
+    dummy(-11.5, -6.4), // 25 m, 30°, just north of the SW crate stack
+    dummy(-0.5, -19.5), // 25 m, 70°, north of the south barrier
+    dummy(-8.6, 14.3), // 45 m, 20°, past the west ramp
+    dummy(15.7, -6.9), // 45 m, 62°, south-east of the platform
+    dummy(-8.7, -15.1, 0, { distance: 5, speed: 3 }), // 20 m, 50°
+    dummy(-24, -6, 0, { distance: 6, speed: 4 }), // 22 m, 0°
+    dummy(-5, -5, PLATFORM_TOP), // 30 m, 40°, SW corner of the central platform
+    dummy(-31.8, -2, CATWALK_TOP), // 27 m, -17°, inner edge of the west catwalk
+  ],
 };

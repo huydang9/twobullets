@@ -47,7 +47,7 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
   const sprintAllowed = input.sprint && stance === "stand" && wishAmount > 0 && forward / wishAmount >= MOVEMENT.sprintMinForward;
   const sprinting = sprintAllowed && (grounded || state.sprinting);
   const baseSpeed = stance === "crouch" ? MOVEMENT.crouchSpeed : sprinting ? MOVEMENT.sprintSpeed : MOVEMENT.walkSpeed;
-  const targetSpeed = baseSpeed * wishAmount;
+  const targetSpeed = baseSpeed * wishAmount * clamp(input.speedScale, 0, 1);
 
   let { x: vx, y: vy, z: vz } = state.velocity;
 

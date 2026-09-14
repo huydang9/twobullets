@@ -228,6 +228,11 @@ export class CharacterBody {
     return result.set(feet.x, feet.y + KEEP_DISTANCE + heightOf(stance) / 2, feet.z);
   }
 
+  /** The player's own physics body, for queries (e.g. bullet raycasts) that must ignore it. */
+  get physicsBody(): PhysicsBody {
+    return this.ownBody();
+  }
+
   /** The controller doesn't expose its body, but queries need it so they ignore our own capsule. */
   private ownBody(): PhysicsBody {
     return (this.controller as unknown as { _body: PhysicsBody })._body;

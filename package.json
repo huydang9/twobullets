@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "pnpm --filter @twobullets/client dev",
     "build": "pnpm --filter @twobullets/client build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

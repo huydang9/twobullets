@@ -4,3 +4,7 @@ export * from "./level/arena";
 export * from "./level/buildLevel";
 export * from "./movement/types";
 export * from "./movement/movement";
+export * from "./weapons/types";
+export * from "./weapons/weapons";
+export * from "./weapons/weaponStep";
+export * from "./weapons/ballistics";
