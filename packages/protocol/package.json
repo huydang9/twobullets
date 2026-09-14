@@ -1,5 +1,5 @@
 {
-  "name": "@twobullets/shared",
+  "name": "@twobullets/protocol",
   "private": true,
   "type": "module",
   "exports": {
@@ -8,12 +8,12 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@twobullets/shared": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^5.0.0"
-  },
-  "dependencies": {
-    "@babylonjs/core": "^9.26.0"
   }
 }

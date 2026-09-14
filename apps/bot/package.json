@@ -1,0 +1,19 @@
+{
+  "name": "@twobullets/bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@twobullets/contracts": "workspace:*",
+    "@twobullets/netcode": "workspace:*",
+    "@twobullets/protocol": "workspace:*",
+    "@twobullets/shared": "workspace:*",
+    "@twobullets/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}

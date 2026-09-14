@@ -1,0 +1,20 @@
+{
+  "name": "@twobullets/server-match",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-transform-types src/main.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@twobullets/contracts": "workspace:*",
+    "@twobullets/netcode": "workspace:*",
+    "@twobullets/protocol": "workspace:*",
+    "@twobullets/shared": "workspace:*",
+    "@twobullets/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}
