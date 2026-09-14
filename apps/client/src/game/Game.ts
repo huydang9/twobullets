@@ -1,6 +1,7 @@
 import { Engine, HavokPlugin, Scene, Vector3 } from "@babylonjs/core";
 import HavokPhysics from "@babylonjs/havok";
 import { ARENA_LEVEL, MOVEMENT, buildLevel } from "@twobullets/shared";
+import { AssetLibrary, installAssetDevTools, type AssetLoadProgress, type Credit } from "../assets";
 import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
@@ -9,7 +10,7 @@ import { PlayerController } from "../player/PlayerController";
 import { Hud } from "../ui/Hud";
 import { createEnvironment } from "../world/environment";
 
-/** Top-level wiring: engine, physics, world, player, combat, HUD. Owns the frame loop. */
+/** Top-level wiring: engine, physics, assets, world, player, combat, HUD. Owns the frame loop. */
 export class Game {
   private constructor(
     private readonly engine: Engine,
@@ -32,6 +33,8 @@ export class Game {
     const environment = createEnvironment(scene);
     const level = buildLevel(scene, ARENA_LEVEL);
     environment.decorateLevel(level);
+    // Models download while the environment textures and IBL load.
+    const [assets] = await Promise.all([loadAssets(scene), environment.ready]);
 
     const input = new InputManager(canvas);
     const spawn = ARENA_LEVEL.spawnPoints[0];
@@ -40,20 +43,22 @@ export class Game {
     scene.activeCamera = player.camera;
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
-    const combat = new CombatSystem(scene, input, player, ARENA_LEVEL, environment);
-    const presentation = new WeaponPresentation(scene, player, combat);
+    const combat = new CombatSystem(scene, input, player, ARENA_LEVEL, environment, assets);
+    const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
     input.onLockChange((locked) => hud.setLocked(locked));
     hud.setLocked(input.isLocked);
     hud.attachCombat(combat, scene);
+    void loadCredits(assets).then((lines) => hud.setCredits(lines));
 
     installDebugTools(scene, input, { hud });
 
     const game = new Game(engine, scene, input, player, combat, presentation, hud);
     if (import.meta.env.DEV) {
+      installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets } });
     }
     game.start();
     return game;
@@ -71,4 +76,47 @@ export class Game {
     });
     window.addEventListener("resize", () => this.engine.resize());
   }
+}
+
+/** Weapon and character models; the soldiers can't exist without them, so a failure stops startup. */
+async function loadAssets(scene: Scene): Promise<AssetLibrary> {
+  let reported = -1;
+  const onProgress = ({ progress, loadedBytes, totalBytes }: AssetLoadProgress) => {
+    const step = Math.floor(progress * 4);
+    if (step === reported) return;
+    reported = step;
+    console.info(`[assets] ${Math.round(progress * 100)}% (${(loadedBytes / 1e6).toFixed(1)} / ${(totalBytes / 1e6).toFixed(1)} MB)`);
+  };
+  try {
+    return await AssetLibrary.load(scene, onProgress);
+  } catch (error) {
+    console.error("[assets] failed to load weapon/character assets", error);
+    throw error;
+  }
+}
+
+interface EnvironmentCredits {
+  readonly assets: readonly {
+    readonly name: string;
+    readonly authors: readonly { readonly name: string }[];
+    readonly license: string;
+    readonly url: string;
+  }[];
+}
+
+/** "Title by Author (License) — URL" for every attributed model plus the environment textures and sky. */
+async function loadCredits(assets: AssetLibrary): Promise<string[]> {
+  const format = (title: string, author: string, license: string, url: string) => `${title} by ${author} (${license}) — ${url}`;
+  const lines = assets.requiredCredits.map((c: Credit) => format(c.title, c.author, c.license, c.url));
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}assets/environment/credits.json`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const environment = (await response.json()) as EnvironmentCredits;
+    for (const entry of environment.assets) {
+      lines.push(format(entry.name, entry.authors.map((a) => a.name).join(", "), entry.license, entry.url));
+    }
+  } catch (error) {
+    console.warn("[credits] environment credits unavailable", error);
+  }
+  return lines;
 }

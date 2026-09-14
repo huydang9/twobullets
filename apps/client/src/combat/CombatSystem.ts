@@ -16,6 +16,7 @@ import {
   type WeaponEvent,
   type WeaponState,
 } from "@twobullets/shared";
+import type { AssetLibrary } from "../assets";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
 import { TargetRange } from "../targets/TargetRange";
@@ -38,7 +39,7 @@ const SCOPE_PRE_ZOOM = 0.15;
 
 /**
  * Local player's weapons: ticks the shared weapon simulation in lockstep with movement, flies projectiles
- * against Havok, applies damage to target dummies, and drives ADS modifiers on the player.
+ * against Havok, applies damage to practice soldiers, and drives ADS modifiers on the player.
  */
 export class CombatSystem implements CombatView {
   readonly onShot = new Observable<ShotEvent>();
@@ -69,10 +70,11 @@ export class CombatSystem implements CombatView {
     private readonly player: PlayerController,
     level: LevelData,
     environment: Environment,
+    assets: AssetLibrary,
   ) {
     this.inputQueue = new CombatInputQueue(input);
     this.raycaster = new HavokRaycaster(scene, this.hitboxes);
-    this.targets = new TargetRange(scene, level.targets, this.hitboxes, environment);
+    this.targets = new TargetRange(scene, level.targets, this.hitboxes, environment, assets);
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
   }
 
@@ -185,6 +187,7 @@ export class CombatSystem implements CombatView {
     this.onDamage.notifyObservers({
       weapon,
       targetId: owner.id,
+      targetName: owner.displayName,
       zone,
       amount: damage.amount,
       remainingHealth: damage.remainingHealth,

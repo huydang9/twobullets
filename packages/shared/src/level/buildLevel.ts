@@ -83,8 +83,7 @@ function facesToVertexData(faces: readonly Face[], offset: Vec3Tuple): VertexDat
   const indices: number[] = [];
 
   for (const { corners, normal } of faces) {
-    const uAxis: V3 = Math.abs(normal[0]) > 0.5 ? [0, 0, 1] : [1, 0, 0];
-    const vAxis = normalize(cross(normal, uAxis));
+    const [uAxis, vAxis] = faceUvAxes(normal);
     const base = positions.length / 3;
     for (const c of corners) {
       const world: V3 = [c[0] + offset[0], c[1] + offset[1], c[2] + offset[2]];
@@ -107,6 +106,17 @@ function facesToVertexData(faces: readonly Face[], offset: Vec3Tuple): VertexDat
   data.uvs = uvs;
   data.indices = indices;
   return data;
+}
+
+/**
+ * Orthonormal texture axes for a planar face. Vertical and sloped faces keep v pointing uphill, so
+ * directional detail (formwork seams, planks, rain streaks) stays upright on every side, and slopes are
+ * measured along the incline, so wedges don't stretch. Babylon is left-handed: an unmirrored mapping
+ * (matching its built-in meshes) has u × v = -normal.
+ */
+function faceUvAxes(normal: V3): [u: V3, v: V3] {
+  const u: V3 = Math.abs(normal[1]) > 0.999 ? [1, 0, 0] : normalize(cross(normal, [0, 1, 0]));
+  return [u, normalize(cross(u, normal))];
 }
 
 function sub(a: V3, b: V3): V3 {

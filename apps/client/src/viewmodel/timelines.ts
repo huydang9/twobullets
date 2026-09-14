@@ -1,68 +1,87 @@
-import type { WeaponDef, WeaponId } from "@twobullets/shared";
-import { clamp } from "./Spring";
+import type { WeaponId } from "@twobullets/shared";
+import type { WeaponClipName } from "../assets";
 
 /**
- * Timing shared by the viewmodel animation, shell ejection and audio so sounds land on the motion that makes them.
- * Reload cue positions are fractions (0..1) of the reload duration.
+ * Where things happen inside the baked weapon animations, so sounds and casings land on the motion that makes them.
+ *
+ * Frames are source frames (manifest `fps`, 30) relative to the clip's first frame. They were measured by sampling
+ * each moving part's local transform every frame (mag, bolt, charging handle, slide, pump, shell nodes) and taking
+ * the frame where the part leaves or returns to rest: a mag leaving is `magOut`, the mag coming to rest is `magIn`,
+ * a slide/bolt returning forward is `slide`, and so on. Re-measure if the clip tables in the manifest change.
  */
-export type ReloadCueKind = "magOut" | "magIn" | "shellInsert" | "pump" | "boltOpen" | "boltClose" | "slide" | "charge";
+export type MechanicalCueKind = "magOut" | "magIn" | "shellInsert" | "pump" | "boltOpen" | "boltClose" | "slide" | "charge";
 
-export interface ReloadCue {
-  /** Start of the motion, fraction of the reload. */
-  readonly at: number;
-  readonly kind: ReloadCueKind;
-  /** Length of multi-part motions (pump, bolt), fraction of the reload. */
+export interface ClipCue {
+  readonly frame: number;
+  readonly kind: MechanicalCueKind;
+  /** Length of multi-part motions (pump, bolt), frames. */
   readonly span?: number;
 }
 
-export const RELOAD_CUES: Readonly<Record<WeaponId, readonly ReloadCue[]>> = {
-  rifle: [
-    { at: 0.2, kind: "magOut" },
-    { at: 0.6, kind: "magIn" },
-    { at: 0.84, kind: "charge" },
-  ],
-  pistol: [
-    { at: 0.18, kind: "magOut" },
-    { at: 0.58, kind: "magIn" },
-    { at: 0.8, kind: "slide" },
-  ],
-  shotgun: [
-    { at: 0.3, kind: "shellInsert" },
-    { at: 0.48, kind: "shellInsert" },
-    { at: 0.66, kind: "shellInsert" },
-    { at: 0.8, kind: "pump", span: 0.14 },
-  ],
-  sniper: [
-    { at: 0.06, kind: "boltOpen", span: 0.14 },
-    { at: 0.32, kind: "magOut" },
-    { at: 0.62, kind: "magIn" },
-    { at: 0.76, kind: "boltClose", span: 0.12 },
-  ],
+type ClipTable<T> = Readonly<Partial<Record<WeaponClipName, T>>>;
+
+export const CLIP_CUES: Readonly<Record<WeaponId, ClipTable<readonly ClipCue[]>>> = {
+  rifle: {
+    // Mag swap, then the charging handle is pulled (45–47) and released (52–54).
+    reload: [
+      { frame: 14, kind: "magOut" },
+      { frame: 36, kind: "magIn" },
+      { frame: 53, kind: "charge" },
+    ],
+    // Mag swap, then the bolt catch drops the bolt (back from 14, home at 47).
+    reloadEmpty: [
+      { frame: 14, kind: "magOut" },
+      { frame: 36, kind: "magIn" },
+      { frame: 47, kind: "slide" },
+    ],
+  },
+  pistol: {
+    reload: [
+      { frame: 8, kind: "magOut" },
+      { frame: 37, kind: "magIn" },
+      { frame: 48, kind: "slide" },
+    ],
+    // Slide is locked back from fireLast and released at 57.
+    reloadEmpty: [
+      { frame: 9, kind: "magOut" },
+      { frame: 31, kind: "magIn" },
+      { frame: 57, kind: "slide" },
+    ],
+  },
+  shotgun: {
+    // Pump back at 1–2, forward home at 12.
+    pump: [{ frame: 1, kind: "pump", span: 11 }],
+    // Shell pushed home in the loading port.
+    reloadInsert: [{ frame: 11, kind: "shellInsert" }],
+  },
+  sniper: {
+    // Bolt lifts at 9 and is back by ~21; pushed forward from 26, locked down at 33.
+    bolt: [
+      { frame: 9, kind: "boltOpen", span: 12 },
+      { frame: 26, kind: "boltClose", span: 8 },
+    ],
+    reload: [
+      { frame: 13, kind: "magOut" },
+      { frame: 37, kind: "magIn" },
+    ],
+  },
 };
 
-export function reloadCueAt(id: WeaponId, kind: ReloadCueKind, fallback: number): number {
-  for (const cue of RELOAD_CUES[id]) {
-    if (cue.kind === kind) return cue.at;
-  }
-  return fallback;
-}
+/** Manual action played after every shot, if any. */
+export const ACTION_CLIP: Readonly<Record<WeaponId, "bolt" | "pump" | null>> = {
+  rifle: null,
+  pistol: null,
+  shotgun: "pump",
+  sniper: "bolt",
+};
 
-/** Post-shot manual action (bolt or pump). Times in seconds after the shot. */
-export interface ActionCycle {
-  readonly kind: "bolt" | "pump";
-  readonly delay: number;
-  readonly duration: number;
-  /** Fraction of the duration at which the spent shell leaves the gun. */
-  readonly ejectAt: number;
-}
+/** Frame in the action clip where the spent case leaves the gun (shell node starts/finishes its travel). */
+export const EJECT_FRAME: Readonly<Record<WeaponId, ClipTable<number>>> = {
+  rifle: {},
+  pistol: {},
+  shotgun: { pump: 3 },
+  sniper: { bolt: 28 },
+};
 
-export function actionCycleFor(def: WeaponDef): ActionCycle | null {
-  const interval = 60 / def.roundsPerMinute;
-  if (def.fireMode === "bolt") {
-    return { kind: "bolt", delay: 0.16, duration: clamp(interval - 0.25, 0.45, 1.0), ejectAt: 0.42 };
-  }
-  if (def.id === "shotgun") {
-    return { kind: "pump", delay: 0.09, duration: clamp(interval - 0.15, 0.3, 0.55), ejectAt: 0.35 };
-  }
-  return null;
-}
+/** fire + action must finish this long before the next shot is allowed. */
+export const ACTION_MARGIN_SECONDS = 0.05;

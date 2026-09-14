@@ -1,39 +1,39 @@
 import { el } from "./dom";
 
-/** Horizontal/upper mil-dot positions and bullet-drop ticks below centre, in reticle units (scope radius = 500). */
-const MIL_DOTS = [60, 120, 180, 240];
-const DROP_TICKS: ReadonlyArray<readonly [y: number, halfWidth: number, label: string]> = [
-  [55, 70, "1"],
-  [115, 55, "2"],
-  [185, 42, "3"],
-  [265, 30, "4"],
+/** Reticle units: the lens radius is 500. */
+const POST_INNER = 240;
+/** Small windage marks on the horizontal line. */
+const WIND_MARKS = [45, 90, 135, 180];
+/** Bullet-drop marks below centre: [y, half width, label]. */
+const DROP_MARKS: ReadonlyArray<readonly [y: number, halfWidth: number, label: string]> = [
+  [38, 16, "2"],
+  [82, 13, "3"],
+  [132, 10, "4"],
+  [188, 7, "5"],
 ];
 
 function reticleSvg(): string {
-  const parts: string[] = [];
-  // Thick outer posts, thin inner cross with a small centre gap.
-  parts.push(
-    '<g class="tb-scope__posts">',
-    '<path d="M-500 0H-300M300 0H500M0 -500V-300M0 300V500"/>',
-    "</g>",
-    '<g class="tb-scope__lines">',
-    '<path d="M-300 0H-8M8 0H300M0 -300V-8M0 8V300"/>',
+  const thin: string[] = [
+    // Continuous fine cross between the posts.
+    `M${-POST_INNER} 0H${POST_INNER}M0 ${-POST_INNER}V${POST_INNER}`,
+  ];
+  for (const x of WIND_MARKS) thin.push(`M${-x} -4V4M${x} -4V4`);
+  for (const [y, w] of DROP_MARKS) thin.push(`M${-w} ${y}H${w}`);
+  const labels = DROP_MARKS.map(([y, w, label]) => `<text x="${w + 7}" y="${y + 4}">${label}</text>`).join("");
+
+  return (
+    '<svg class="tb-scope__reticle" viewBox="-500 -500 1000 1000" aria-hidden="true">' +
+    `<path class="tb-scope__posts" d="M-500 0H${-POST_INNER}M${POST_INNER} 0H500M0 -500V${-POST_INNER}M0 ${POST_INNER}V500"/>` +
+    `<path class="tb-scope__fine" d="${thin.join("")}"/>` +
+    `<g class="tb-scope__labels">${labels}</g>` +
+    "</svg>"
   );
-  for (const d of MIL_DOTS) {
-    parts.push(`<path d="M${-d} -6V6M${d} -6V6M-6 ${-d}H6"/>`);
-  }
-  for (const [y, w] of DROP_TICKS) parts.push(`<path d="M${-w} ${y}H${w}"/>`);
-  parts.push("</g>", '<g class="tb-scope__labels">');
-  for (const [y, w, label] of DROP_TICKS) parts.push(`<text x="${w + 10}" y="${y + 7}">${label}</text>`);
-  parts.push(
-    "</g>",
-    '<circle class="tb-scope__dot" r="2.5"/>',
-    '<circle class="tb-scope__rim" r="497"/>',
-  );
-  return `<svg class="tb-scope__reticle" viewBox="-500 -500 1000 1000" aria-hidden="true">${parts.join("")}</svg>`;
 }
 
-/** Full-screen sniper scope: black mask with a circular lens, vignette and a mil-dot / bullet-drop reticle. */
+/**
+ * Full-screen optic: black surround with a soft circular edge, faint chromatic fringe, glass tint and a duplex
+ * reticle with subtle drop marks. Static markup; toggling is a single attribute (opacity transition).
+ */
 export class ScopeOverlay {
   private readonly node: HTMLDivElement;
   private active = false;

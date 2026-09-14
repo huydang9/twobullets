@@ -1,103 +1,134 @@
-import { Color3, DynamicTexture, StandardMaterial, Texture, VertexBuffer, type Mesh, type Scene } from "@babylonjs/core";
+import { Color3, PBRMaterial, Texture, type BaseTexture, type Mesh, type Scene } from "@babylonjs/core";
 import type { SurfaceKind } from "@twobullets/shared";
+import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "./environmentManifest";
+import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "./surfaceVariation";
 
-/** Flat, saturated blockout palette (sRGB hex). Kinds with several entries pick a variant per mesh. */
-const PALETTE: Record<SurfaceKind, readonly string[]> = {
-  ground: ["#dccfb2"],
-  wall: ["#46b1d6"],
-  platform: ["#9a86e8"],
-  ramp: ["#ffc93c"],
-  cover: ["#ff8a3d", "#ef476f", "#2ec4b6"],
-  accent: ["#3d5afe"],
+export const ENVIRONMENT_ASSET_ROOT = `${import.meta.env.BASE_URL}assets/environment/`;
+
+interface SurfaceLook {
+  readonly set: TextureSetId;
+  /** Linear albedo multiplier, e.g. a paint color over a bare metal scan. */
+  readonly tint?: Vec3;
+  readonly anisotropy?: number;
+  readonly variation?: SurfaceVariationSettings;
+}
+
+/** Low-frequency layer shared by every look with `variation`: an aerial grass/rock scan. */
+const MACRO_SET: TextureSetId = "aerial_grass_rock";
+
+const LOOKS = {
+  // Grass/leaf-litter ground, tinted in 23 m patches so the 2 m tile doesn't read as a grid.
+  ground: {
+    set: "forrest_ground_01",
+    anisotropy: 16,
+    variation: { colorMeters: 23, colorStrength: 0.55, lumaMeters: 7.3, lumaStrength: 0.35, grimeStrength: 0, grimeHeight: 1 },
+  },
+  // Board-formed concrete; blotchy weathering plus dirt splash along the base.
+  concreteWall: {
+    set: "concrete_wall_008",
+    anisotropy: 8,
+    variation: { colorMeters: 1, colorStrength: 0, lumaMeters: 11, lumaStrength: 0.3, grimeStrength: 0.35, grimeHeight: 1.4 },
+  },
+  concreteFloor: {
+    set: "concrete_floor_worn_001",
+    anisotropy: 8,
+    variation: { colorMeters: 1, colorStrength: 0, lumaMeters: 9, lumaStrength: 0.25, grimeStrength: 0.25, grimeHeight: 0.8 },
+  },
+  asphalt: { set: "asphalt_02", anisotropy: 8 },
+  planks: { set: "weathered_planks" },
+  corrugatedIron: { set: "corrugated_iron_02" },
+  // rusty_metal_02 is white paint over rust; the tint turns the paint olive drab and keeps the rust dark.
+  paintedSteel: { set: "rusty_metal_02", tint: [0.34, 0.37, 0.27] },
+  darkSteel: { set: "rusty_metal_02", tint: [0.2, 0.2, 0.2] },
+} as const satisfies Record<string, SurfaceLook>;
+
+type LookId = keyof typeof LOOKS;
+
+/**
+ * Material per surface kind. Rules are tested in order against the mesh name (`level_<block name>`);
+ * the last rule of each kind has no pattern and acts as the default.
+ */
+const SURFACE_RULES: Record<SurfaceKind, readonly { readonly match?: RegExp; readonly look: LookId }[]> = {
+  ground: [{ look: "ground" }],
+  wall: [{ look: "concreteWall" }],
+  platform: [{ match: /catwalk/i, look: "paintedSteel" }, { look: "concreteFloor" }],
+  ramp: [{ match: /stairs/i, look: "concreteFloor" }, { look: "asphalt" }],
+  cover: [
+    { match: /barrier/i, look: "corrugatedIron" },
+    { match: /lowWall/i, look: "concreteWall" },
+    { match: /stack/i, look: "paintedSteel" },
+    { look: "planks" },
+  ],
+  accent: [{ match: /wallCap/i, look: "concreteFloor" }, { look: "darkSteel" }],
 };
 
-/** Grid tile size in meters; the texture holds a 2 × 2 checker of 1 m cells. */
-const GRID_TILE_METERS = 2;
-
-/** Vertex brightness at the bottom of a mesh, fading to 1 at its top: cheap fake ambient occlusion. */
-const BOTTOM_SHADE = 0.8;
-/** Max per-mesh brightness jitter (±), so repeated props don't look copy-pasted. */
-const BRIGHTNESS_JITTER = 0.04;
-
+/**
+ * Shared PBR materials for level geometry, one per look. All looks are created up front so their
+ * textures start downloading immediately and `loaded` covers everything a level can use.
+ */
 export class LevelMaterials {
-  private readonly materials: Record<SurfaceKind, readonly StandardMaterial[]>;
+  readonly loaded: Promise<void>;
+  private readonly materials = new Map<LookId, PBRMaterial>();
+  private readonly textures: BaseTexture[] = [];
+  private macro: Texture | null = null;
 
-  constructor(scene: Scene) {
-    const grid = createGridTexture(scene);
-    const build = (kind: SurfaceKind) =>
-      PALETTE[kind].map((hex, i) => {
-        const mat = new StandardMaterial(`mat_${kind}_${i}`, scene);
-        mat.diffuseColor = Color3.FromHexString(hex);
-        mat.diffuseTexture = grid;
-        mat.specularColor = new Color3(0.06, 0.06, 0.06);
-        mat.specularPower = 48;
-        return mat;
-      });
-    this.materials = {
-      ground: build("ground"),
-      wall: build("wall"),
-      platform: build("platform"),
-      ramp: build("ramp"),
-      cover: build("cover"),
-      accent: build("accent"),
-    };
+  constructor(private readonly scene: Scene) {
+    for (const id of Object.keys(LOOKS) as LookId[]) this.materials.set(id, this.createMaterial(id));
+    this.loaded = Promise.all(this.textures.map(waitForTexture)).then(() => undefined);
   }
 
   apply(mesh: Mesh, kind: SurfaceKind): void {
-    const variants = this.materials[kind];
-    const hash = hashString(mesh.name);
-    mesh.material = variants[hash % variants.length] ?? null;
-    applyVertexShading(mesh, 1 + (((hash >>> 8) % 1000) / 999 - 0.5) * 2 * BRIGHTNESS_JITTER);
+    const rule = SURFACE_RULES[kind].find((r) => !r.match || r.match.test(mesh.name));
+    if (rule) mesh.material = this.materials.get(rule.look) ?? null;
+  }
+
+  private createMaterial(id: LookId): PBRMaterial {
+    const look: SurfaceLook = LOOKS[id];
+    const set = TEXTURE_SETS[look.set];
+    const anisotropy = look.anisotropy ?? 4;
+    const material = new PBRMaterial(`mat_${id}`, this.scene);
+
+    material.albedoTexture = this.texture(set.albedo, set.meters, anisotropy);
+    if (look.tint) material.albedoColor = new Color3(...look.tint);
+    if ("normal" in set) material.bumpTexture = this.texture(set.normal, set.meters, anisotropy);
+    if ("arm" in set) {
+      material.metallicTexture = this.texture(set.arm, set.meters, anisotropy);
+      material.useAmbientOcclusionFromMetallicTextureRed = true;
+      material.useRoughnessFromMetallicTextureGreen = true;
+      material.useRoughnessFromMetallicTextureAlpha = false;
+      material.useMetallnessFromMetallicTextureBlue = true;
+    }
+    // Scalars multiply the packed channels, so 1 means "use the texture as authored".
+    material.metallic = 1;
+    material.roughness = 1;
+    // Filters normal-map specular aliasing (sparkle) at grazing angles and distance.
+    material.enableSpecularAntiAliasing = true;
+
+    if (look.variation) {
+      const macro = (this.macro ??= this.texture(TEXTURE_SETS[MACRO_SET].albedo, 1, 1));
+      new SurfaceVariationPlugin(material, macro, TEXTURE_SETS[MACRO_SET].meanAlbedo, look.variation);
+    }
+
+    return material;
+  }
+
+  /** UVs from buildLevel are in meters, so the scale sets real-world texel density. */
+  private texture(file: string, meters: number, anisotropy: number): Texture {
+    const texture = new Texture(ENVIRONMENT_ASSET_ROOT + file, this.scene, { samplingMode: Texture.TRILINEAR_SAMPLINGMODE });
+    texture.uScale = 1 / meters;
+    texture.vScale = 1 / meters;
+    texture.anisotropicFilteringLevel = anisotropy;
+    this.textures.push(texture);
+    return texture;
   }
 }
 
-/** White-based tile multiplied by each material's diffuse color, so one texture serves every surface. */
-function createGridTexture(scene: Scene): DynamicTexture {
-  const size = 256;
-  const half = size / 2;
-  const line = 3;
-  const texture = new DynamicTexture("tex_blockoutGrid", { width: size, height: size }, scene, true, Texture.TRILINEAR_SAMPLINGMODE);
-  const ctx = texture.getContext();
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = "#ededed";
-  ctx.fillRect(0, 0, half, half);
-  ctx.fillRect(half, half, half, half);
-  // Lines on tile edges are split across both sides so they stay seamless when wrapped.
-  ctx.fillStyle = "#cdcdcd";
-  for (const at of [0, half, size]) {
-    ctx.fillRect(at - line, 0, line * 2, size);
-    ctx.fillRect(0, at - line, size, line * 2);
-  }
-  texture.update();
-  texture.wrapU = Texture.WRAP_ADDRESSMODE;
-  texture.wrapV = Texture.WRAP_ADDRESSMODE;
-  texture.uScale = 1 / GRID_TILE_METERS;
-  texture.vScale = 1 / GRID_TILE_METERS;
-  texture.anisotropicFilteringLevel = 8;
-  return texture;
-}
-
-function applyVertexShading(mesh: Mesh, brightness: number): void {
-  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
-  if (!positions) return;
-  const { minimum, maximum } = mesh.getBoundingInfo().boundingBox;
-  const height = Math.max(maximum.y - minimum.y, 1e-3);
-  const colors = new Float32Array((positions.length / 3) * 4);
-  for (let v = 0; v < positions.length / 3; v++) {
-    const t = ((positions[v * 3 + 1] ?? 0) - minimum.y) / height;
-    const shade = (BOTTOM_SHADE + (1 - BOTTOM_SHADE) * t) * brightness;
-    colors.set([shade, shade, shade, 1], v * 4);
-  }
-  mesh.setVerticesData(VertexBuffer.ColorKind, colors, false, 4);
-}
-
-/** FNV-1a, for stable per-mesh variation derived from mesh names. */
-function hashString(text: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
+export function waitForTexture(texture: BaseTexture): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (texture.isReady()) return resolve();
+    const internal = texture.getInternalTexture();
+    if (!internal) return reject(new Error(`Texture ${texture.name} has no internal texture`));
+    internal.onLoadedObservable.addOnce(() => resolve());
+    internal.onErrorObservable.addOnce((err) => reject(new Error(`Failed to load ${texture.name}: ${err.message ?? ""}`)));
+  });
 }

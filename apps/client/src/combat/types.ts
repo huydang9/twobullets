@@ -19,6 +19,8 @@ export interface ImpactEvent {
 export interface DamageEvent {
   readonly weapon: WeaponDef;
   readonly targetId: string;
+  /** Display name of the target when it has one ("Soldier"); otherwise derive one from `targetId`. */
+  readonly targetName?: string;
   readonly zone: HitZone;
   readonly amount: number;
   readonly remainingHealth: number;

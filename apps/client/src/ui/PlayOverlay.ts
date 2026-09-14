@@ -21,13 +21,18 @@ const SYSTEM_CONTROLS: readonly ControlRow[] = [
   [["F9"], "Inspector"],
 ];
 
+const CREDITS_PLACEHOLDER = "No third-party asset credits yet.";
+
 /** If pointer lock hasn't arrived this long after a click, assume the browser refused it. */
 const LOCK_TIMEOUT_MS = 300;
 
-/** Full-screen "click to play" menu shown while the pointer is not locked. */
+/** Full-screen title / "click to play" menu shown while the pointer is not locked. */
 export class PlayOverlay {
   private readonly node: HTMLDivElement;
   private readonly hint: HTMLDivElement;
+  private readonly creditsToggle: HTMLButtonElement;
+  private readonly creditsSection: HTMLDivElement;
+  private readonly creditsList: HTMLUListElement;
   private locked = false;
   private hintTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -35,9 +40,9 @@ export class PlayOverlay {
     this.node = el("div", "tb-overlay", undefined, parent);
     const panel = el("div", "tb-overlay__panel", undefined, this.node);
 
-    const title = el("h1", "tb-title", undefined, panel);
-    el("span", "tb-title__a", "TWO", title);
-    el("span", "tb-title__b", "BULLETS", title);
+    const header = el("header", "tb-title", undefined, panel);
+    el("h1", "tb-title__name", "TWOBULLETS", header);
+    el("div", "tb-title__tagline", "Prototype · Battle Royale", header);
 
     el("div", "tb-play", "CLICK TO PLAY", panel);
     this.hint = el("div", "tb-hint", "Mouse lock was blocked. Wait a moment, then click again.", panel);
@@ -46,6 +51,22 @@ export class PlayOverlay {
     const controls = el("div", "tb-controls", undefined, panel);
     controlList(el("ul", "tb-controls__grid", undefined, controls), CONTROLS);
     controlList(el("ul", "tb-controls__system", undefined, controls), SYSTEM_CONTROLS);
+
+    // Clicks inside the credits area must not start the game.
+    const credits = el("div", "tb-credits", undefined, panel);
+    credits.addEventListener("click", (event) => event.stopPropagation());
+    this.creditsToggle = el("button", "tb-credits__toggle", "Credits", credits);
+    this.creditsToggle.type = "button";
+    this.creditsToggle.setAttribute("aria-expanded", "false");
+    this.creditsSection = el("div", "tb-credits__section", undefined, credits);
+    this.creditsSection.hidden = true;
+    this.creditsList = el("ul", "tb-credits__list", undefined, this.creditsSection);
+    this.setCredits([]);
+    this.creditsToggle.addEventListener("click", () => {
+      const open = this.creditsSection.hidden;
+      this.creditsSection.hidden = !open;
+      this.creditsToggle.setAttribute("aria-expanded", String(open));
+    });
 
     this.node.addEventListener("click", () => {
       this.hideHint();
@@ -59,12 +80,23 @@ export class PlayOverlay {
 
   setLocked(locked: boolean): void {
     this.locked = locked;
-    if (locked) this.hideHint();
+    if (!locked) return;
+    this.hideHint();
+    // A focused button would swallow Space (jump) once the game has the mouse.
+    this.creditsToggle.blur();
   }
 
   set visible(visible: boolean) {
     this.node.hidden = !visible;
     if (!visible) this.hideHint();
+  }
+
+  /** Replaces the attribution lines (plain text). Rare, so the list is simply rebuilt. */
+  setCredits(lines: readonly string[]): void {
+    const items = lines.length > 0 ? lines : [CREDITS_PLACEHOLDER];
+    this.creditsList.replaceChildren();
+    for (const line of items) el("li", "tb-credits__line", line, this.creditsList);
+    this.creditsList.toggleAttribute("data-empty", lines.length === 0);
   }
 
   private hideHint(): void {

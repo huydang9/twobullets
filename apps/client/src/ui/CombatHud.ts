@@ -1,35 +1,58 @@
-import { Camera, type IObserver, type Scene } from "@babylonjs/core";
+import { Camera, Vector3, type IObserver, type Scene } from "@babylonjs/core";
 import type { WeaponEvent } from "@twobullets/shared";
 import type { CombatView, DamageEvent, ShotEvent } from "../combat/types";
 import { AmmoPanel } from "./AmmoPanel";
+import { Compass } from "./Compass";
 import type { Crosshair } from "./Crosshair";
 import { DamageNumbers, type DamageHit } from "./DamageNumbers";
 import { el } from "./dom";
 import { HealthPanel } from "./HealthPanel";
 import { HitMarker } from "./HitMarker";
+import { KillFeed } from "./KillFeed";
 import { KillNotice } from "./KillNotice";
+import { ReloadIndicator } from "./ReloadIndicator";
 import { ScopeOverlay } from "./ScopeOverlay";
+import { WeaponSlots } from "./WeaponSlots";
+
+/** Floating world-space damage numbers. Off for the realistic HUD; the component is kept for debugging/modes. */
+export const SHOW_DAMAGE_NUMBERS = false;
 
 const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
 /** Scope overlay replaces the view once ADS is nearly complete. */
 const SCOPE_ADS_THRESHOLD = 0.9;
-/** Crosshair is fully faded by this ADS blend. */
-const CROSSHAIR_FADE_END = 0.6;
+/** Crosshair is fully faded by this ADS blend (sights/optics on the 3D model take over). */
+const CROSSHAIR_FADE_END = 0.35;
+
+/** DEV preview of a reload with no real weapon state behind it. */
+interface ReloadPreview {
+  readonly startedAt: number;
+  readonly seconds: number;
+}
 
 /** Every combat-driven HUD element, wired to a {@link CombatView}. Lives in one layer that the Hud shows/hides. */
 export class CombatHud {
   private readonly layer: HTMLDivElement;
   private readonly scope: ScopeOverlay;
+  private readonly compass: Compass;
   private readonly hitMarker: HitMarker;
-  private readonly damageNumbers: DamageNumbers;
+  private readonly damageNumbers: DamageNumbers | undefined;
+  private readonly reload: ReloadIndicator;
+  private readonly killFeed: KillFeed;
   private readonly killNotice: KillNotice;
   private readonly health: HealthPanel;
+  private readonly slots: WeaponSlots;
   private readonly ammo: AmmoPanel;
   private readonly observers: IObserver[];
+  private readonly forwardAxis: Vector3;
+  private readonly forward = new Vector3();
+  private bearing = 0;
 
   /** DEV preview overrides (see Hud.debugPreview). */
   healthOverride: number | null = null;
   scopeOverride = false;
+  bearingOverride: number | null = null;
+  reloadPreview: ReloadPreview | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -37,14 +60,22 @@ export class CombatHud {
     private readonly scene: Scene,
     private readonly crosshair: Crosshair,
   ) {
+    this.forwardAxis = Vector3.Forward(scene.useRightHandedSystem);
+    // DOM order is stacking order: scope and vignettes at the back, readouts on top.
     this.layer = el("div", "tb-combat", undefined, parent);
     this.scope = new ScopeOverlay(this.layer);
-    const hurt = el("div", "tb-hurt", undefined, this.layer);
-    this.damageNumbers = new DamageNumbers(this.layer);
+    const vignettes = el("div", "tb-vignettes", undefined, this.layer);
+    this.damageNumbers = SHOW_DAMAGE_NUMBERS ? new DamageNumbers(this.layer) : undefined;
     this.hitMarker = new HitMarker(this.layer);
+    this.reload = new ReloadIndicator(this.layer);
+    this.compass = new Compass(this.layer);
+    this.killFeed = new KillFeed(this.layer);
     this.killNotice = new KillNotice(this.layer);
-    this.health = new HealthPanel(this.layer, hurt);
-    this.ammo = new AmmoPanel(this.layer);
+
+    const dock = el("div", "tb-dock", undefined, this.layer);
+    this.slots = new WeaponSlots(dock);
+    this.health = new HealthPanel(dock, vignettes);
+    this.ammo = new AmmoPanel(dock);
 
     this.observers = [
       combat.onShot.add(this.handleShot),
@@ -83,9 +114,24 @@ export class CombatHud {
 
     if (this.layer.hidden) return;
     this.scope.setActive(scoped);
-    this.ammo.update(state, weapon, combat.phaseProgress);
+    this.compass.update(this.bearingOverride ?? this.cameraBearing(camera));
+
+    const active = state.slots[state.activeIndex];
+    if (active) this.ammo.update(active, weapon, state.phase);
+    this.slots.update(state);
     this.health.update(this.healthOverride ?? combat.health, combat.maxHealth);
-    this.damageNumbers.update(now, camera, renderWidth, renderHeight, cssPerRenderPixel);
+
+    const preview = this.reloadPreview;
+    if (preview) {
+      const elapsed = (now - preview.startedAt) / 1000;
+      if (elapsed >= preview.seconds) this.reloadPreview = null;
+      this.reload.update(elapsed >= preview.seconds ? null : elapsed / preview.seconds, preview.seconds - elapsed);
+    } else {
+      const reloading = state.phase === "reloading";
+      this.reload.update(reloading ? (combat.phaseProgress ?? 0) : null, state.phaseTimer);
+    }
+
+    this.damageNumbers?.update(now, camera, renderWidth, renderHeight, cssPerRenderPixel);
   }
 
   dispose(): void {
@@ -97,11 +143,26 @@ export class CombatHud {
   /** Shows a hit exactly as a real `onDamage` event would. */
   showHit(hit: DamageHit, weaponName: string, distance: number): void {
     const now = performance.now();
-    this.hitMarker.show(hit.zone, hit.killed, now);
-    this.damageNumbers.add(hit, now);
+    this.hitMarker.show(hit.killed, now);
+    this.damageNumbers?.add(hit, now);
     if (hit.killed) {
-      this.killNotice.notify({ targetId: hit.targetId, headshot: hit.zone === "head", weaponName, distance });
+      const kill = { targetId: hit.targetId, headshot: hit.zone === "head", weaponName, distance };
+      this.killFeed.push(kill, now);
+      this.killNotice.notify(kill);
     }
+  }
+
+  /**
+   * Compass bearing of the camera's view direction, degrees: atan2(x, z), so +Z = 0 (north) and +X = 90 (east).
+   * Keeps the last bearing when looking straight up/down, where the horizontal direction is undefined.
+   */
+  private cameraBearing(camera: Camera | null): number {
+    if (camera) {
+      const f = this.forward;
+      camera.getDirectionToRef(this.forwardAxis, f);
+      if (f.x * f.x + f.z * f.z > 1e-6) this.bearing = Math.atan2(f.x, f.z) * RAD_TO_DEG;
+    }
+    return this.bearing;
   }
 
   private readonly handleShot = (_event: ShotEvent): void => {
@@ -121,7 +182,7 @@ export class CombatHud {
         break;
       case "reloadStarted":
       case "reloadCancelled":
-        // Prompt and progress bar follow weaponState.phase each frame.
+        // The reload ring and hints follow weaponState.phase each frame.
         break;
     }
   };

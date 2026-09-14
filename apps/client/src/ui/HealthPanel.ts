@@ -1,48 +1,44 @@
 import { clamp01, prepareAnimation, replay, setText } from "./anim";
 import { el, textNode } from "./dom";
 
-type HealthTier = "high" | "mid" | "low";
+type HealthTier = "ok" | "low" | "critical";
 
-const FLASH_KEYFRAMES: Keyframe[] = [{ opacity: 1, easing: "ease-out" }, { opacity: 0 }];
-const SHAKE_KEYFRAMES: Keyframe[] = [
-  { transform: "translate3d(-5px,2px,0) scale(1.12)" },
-  { transform: "translate3d(4px,-1px,0)", offset: 0.3 },
-  { transform: "translate3d(-2px,0,0)", offset: 0.6 },
-  { transform: "none" },
-];
+const LOW_FRACTION = 0.3;
+const CRITICAL_FRACTION = 0.12;
+const BOOST_SEGMENTS = 4;
+
+const HURT_KEYFRAMES: Keyframe[] = [{ opacity: 1, easing: "ease-out" }, { opacity: 0 }];
 
 /**
- * Bottom-left skewed health bar with number. Colour tier changes at 50% / 25%; a drop flashes the panel and
- * screen edges while a trailing "ghost" bar eases down behind the fill (CSS transition with a delay).
+ * Bottom-centre thin health bar. White fill that turns red when low; a pale trail eases down behind the fill after
+ * damage (CSS transition with a delay). A persistent edge vignette pulses while health is low.
  */
 export class HealthPanel {
   private readonly root: HTMLDivElement;
   private readonly value: Text;
-  private readonly valueNode: HTMLSpanElement;
   private readonly fill: HTMLDivElement;
   private readonly trail: HTMLDivElement;
-  private readonly flashAnim: Animation;
-  private readonly shakeAnim: Animation;
+  private readonly lowVignette: HTMLDivElement;
   private readonly hurtAnim: Animation;
   private health = Number.NaN;
   private tier: HealthTier | undefined;
 
-  /** @param hurtOverlay full-screen element flashed when health drops. */
-  constructor(parent: HTMLElement, hurtOverlay: HTMLElement) {
+  /** @param vignetteParent full-screen layer that receives the hurt flash and low-health vignette. */
+  constructor(parent: HTMLElement, vignetteParent: HTMLElement) {
     this.root = el("div", "tb-health", undefined, parent);
-    this.valueNode = el("span", "tb-health__value", undefined, this.root);
-    this.value = textNode(this.valueNode);
-    const column = el("div", "tb-health__column", undefined, this.root);
-    el("div", "tb-health__label", "HEALTH", column);
-    const bar = el("div", "tb-health__bar", undefined, column);
+    // Boost/energy placeholder (segmented, PUBG-style); hidden until boosts exist.
+    const boost = el("div", "tb-boost", undefined, this.root);
+    for (let i = 0; i < BOOST_SEGMENTS; i++) el("div", "tb-boost__segment", undefined, boost);
+    boost.hidden = true;
+
+    const bar = el("div", "tb-health__bar", undefined, this.root);
     this.trail = el("div", "tb-health__trail", undefined, bar);
     this.fill = el("div", "tb-health__fill", undefined, bar);
-    el("div", "tb-health__ticks", undefined, bar);
-    const flash = el("div", "tb-health__flash", undefined, this.root);
+    this.value = textNode(el("span", "tb-health__value", undefined, bar));
 
-    this.flashAnim = prepareAnimation(flash, FLASH_KEYFRAMES, { duration: 360 });
-    this.shakeAnim = prepareAnimation(this.valueNode, SHAKE_KEYFRAMES, { duration: 280 });
-    this.hurtAnim = prepareAnimation(hurtOverlay, FLASH_KEYFRAMES, { duration: 520 });
+    const hurt = el("div", "tb-vignette tb-vignette--hurt", undefined, vignetteParent);
+    this.lowVignette = el("div", "tb-vignette tb-vignette--low", undefined, vignetteParent);
+    this.hurtAnim = prepareAnimation(hurt, HURT_KEYFRAMES, { duration: 420 });
   }
 
   update(health: number, maxHealth: number): void {
@@ -54,19 +50,16 @@ export class HealthPanel {
     setText(this.value, Math.max(0, Math.ceil(health)).toString());
     this.fill.style.transform = `scaleX(${fraction})`;
     this.trail.style.transform = `scaleX(${fraction})`;
-    // Healing shouldn't show a lagging ghost bar.
+    // Healing shouldn't show a lagging trail.
     this.trail.classList.toggle("tb-health__trail--instant", !dropped);
 
-    const tier: HealthTier = fraction > 0.5 ? "high" : fraction > 0.25 ? "mid" : "low";
+    const tier: HealthTier = fraction > LOW_FRACTION ? "ok" : fraction > CRITICAL_FRACTION ? "low" : "critical";
     if (tier !== this.tier) {
       this.tier = tier;
       this.root.dataset.tier = tier;
+      this.lowVignette.dataset.tier = tier;
     }
 
-    if (dropped) {
-      replay(this.flashAnim);
-      replay(this.shakeAnim);
-      replay(this.hurtAnim);
-    }
+    if (dropped) replay(this.hurtAnim);
   }
 }

@@ -1,22 +1,25 @@
 import { snapToDevicePixel } from "./anim";
 import { el } from "./dom";
 
-// Geometry in CSS px. THICKNESS is even so the arms straddle the exact screen centre.
-const LENGTH = 8;
-const THICKNESS = 2;
+// Geometry in CSS px.
+const LENGTH = 6;
+const THICKNESS = 1;
 const HALF = THICKNESS / 2;
 /** Gap between the centre dot and the arms when spread is (near) zero. */
-const MIN_GAP = 5;
-const MAX_GAP = 160;
+const MIN_GAP = 3;
+const MAX_GAP = 120;
+/** How much of the real spread cone the arms show; a full-size cone reads as noisy on a minimal HUD. */
+const SPREAD_SCALE = 0.8;
 /** Exponential follow rate toward the target gap, 1/s. */
-const FOLLOW_RATE = 20;
-const KICK_PX = 5;
-const MAX_KICK_PX = 14;
-const KICK_DECAY_RATE = 12;
+const FOLLOW_RATE = 18;
+const KICK_PX = 2.5;
+const MAX_KICK_PX = 7;
+const KICK_DECAY_RATE = 14;
 
 /**
- * DOM crosshair whose arms open with weapon spread. The node sits on the device-pixel-snapped screen centre; the arms
- * are offset by a single `--tb-gap` custom property, so a spread change is one style write and a transform-only update.
+ * Thin DOM crosshair whose arms open with weapon spread. The node sits on the screen centre, snapped so a 1px line
+ * lands on whole device pixels; the arms are offset by a single `--tb-gap` custom property, so a spread change is one
+ * style write and a transform-only update.
  */
 export class Crosshair {
   private readonly node: HTMLDivElement;
@@ -46,7 +49,7 @@ export class Crosshair {
 
   /** Distance from the screen centre to the edge of the spread cone, CSS px. */
   setSpreadPx(px: number): void {
-    this.targetGap = Math.min(MAX_GAP, Math.max(MIN_GAP, px - HALF));
+    this.targetGap = Math.min(MAX_GAP, Math.max(MIN_GAP, px * SPREAD_SCALE - HALF));
   }
 
   /** Brief outward kick (on shot); decays on its own. */
@@ -84,7 +87,10 @@ export class Crosshair {
   }
 
   private readonly layout = (): void => {
-    this.node.style.left = `${snapToDevicePixel(window.innerWidth / 2)}px`;
-    this.node.style.top = `${snapToDevicePixel(window.innerHeight / 2)}px`;
+    const dpr = window.devicePixelRatio || 1;
+    // A line an odd number of device pixels thick must be centred on a half pixel to render crisp.
+    const halfPixel = Math.round(THICKNESS * dpr) % 2 === 1 ? 0.5 / dpr : 0;
+    this.node.style.left = `${snapToDevicePixel(window.innerWidth / 2) + halfPixel}px`;
+    this.node.style.top = `${snapToDevicePixel(window.innerHeight / 2) + halfPixel}px`;
   };
 }

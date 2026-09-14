@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2024", "DOM"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    // verify.ts runs the client asset code; resolve Babylon from the client like the runtime hook does.
+    "paths": { "@babylonjs/*": ["../../apps/client/node_modules/@babylonjs/*"] }
+  },
+  "include": ["**/*.ts"]
+}

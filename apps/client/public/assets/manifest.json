@@ -1,0 +1,382 @@
+{
+  "version": 1,
+  "weapons": {
+    "rifle": {
+      "url": "weapons/rifle.glb",
+      "hash": "22843c8853d94dce",
+      "bytes": 3767736,
+      "fps": 30,
+      "animation": "all",
+      "lastFrame": 222,
+      "clips": {
+        "fire": [0, 8],
+        "reloadEmpty": [9, 68],
+        "reload": [69, 134],
+        "hide": [135, 144],
+        "ready": [144, 177],
+        "idle": [178, 204],
+        "melee": [205, 222]
+      },
+      "nodes": {
+        "body": "carbine",
+        "mag": "clip",
+        "bolt": "bolt",
+        "chargingHandle": "handle",
+        "shell": "bullet",
+        "trigger": "trigger",
+        "scope": "scope",
+        "scopeLens": "lens",
+        "arms": "arms",
+        "muzzle": "muzzle",
+        "ejection": "ejection"
+      },
+      "anchors": {
+        "muzzle": [0, 0.153, 0.6672],
+        "ejection": [0.0011, 0.153, 0.137],
+        "scopeLens": [0, 0.221, 0.0476]
+      },
+      "bounds": {
+        "min": [-0.3014, -0.1685, -0.5553],
+        "max": [0.1518, 0.2493, 0.6672]
+      },
+      "stats": {
+        "vertices": 19562,
+        "triangles": 25103,
+        "textures": 7,
+        "textureFormat": "ktx2"
+      },
+      "credit": "djmaesen-carbine"
+    },
+    "shotgun": {
+      "url": "weapons/shotgun.glb",
+      "hash": "e4ce464a891109cd",
+      "bytes": 4145520,
+      "fps": 30,
+      "animation": "all",
+      "lastFrame": 140,
+      "clips": {
+        "fire": [0, 12],
+        "pump": [13, 25],
+        "reload": [26, 71],
+        "reloadStart": [26, 34],
+        "reloadInsert": [35, 60],
+        "reloadEnd": [60, 71],
+        "hide": [72, 82],
+        "ready": [82, 102],
+        "idle": [103, 123],
+        "melee": [124, 140]
+      },
+      "nodes": {
+        "body": "shotgun",
+        "pump": "pump",
+        "shell": "slug",
+        "trigger": "trigger",
+        "arms": "arms",
+        "muzzle": "muzzle",
+        "ejection": "ejection"
+      },
+      "anchors": {
+        "muzzle": [0, 0.0465, 0.8958],
+        "ejection": [0, 0.0121, 0.205]
+      },
+      "bounds": {
+        "min": [-0.2257, -0.2855, -0.6156],
+        "max": [0.2106, 0.1059, 0.8958]
+      },
+      "stats": {
+        "vertices": 12569,
+        "triangles": 16725,
+        "textures": 6,
+        "textureFormat": "ktx2"
+      },
+      "credit": "djmaesen-shotgun"
+    },
+    "pistol": {
+      "url": "weapons/pistol.glb",
+      "hash": "4385c324ea2c3dbd",
+      "bytes": 4087788,
+      "fps": 30,
+      "animation": "all",
+      "lastFrame": 264,
+      "clips": {
+        "fire": [0, 11],
+        "reload": [12, 82],
+        "fireLast": [83, 94],
+        "reloadEmpty": [95, 175],
+        "hide": [176, 187],
+        "ready": [187, 233],
+        "idle": [234, 264]
+      },
+      "nodes": {
+        "body": "pistol",
+        "mag": "mag",
+        "slide": "slide",
+        "shell": "shell_1",
+        "trigger": "trigger",
+        "arms": "arms",
+        "muzzle": "muzzle",
+        "ejection": "ejection"
+      },
+      "anchors": {
+        "muzzle": [0, 0.1085, 0.3703],
+        "ejection": [0, 0.1186, 0.239]
+      },
+      "bounds": {
+        "min": [-0.2291, -0.2106, -0.4712],
+        "max": [0.1898, 0.1337, 0.3703]
+      },
+      "stats": {
+        "vertices": 14963,
+        "triangles": 21299,
+        "textures": 6,
+        "textureFormat": "ktx2"
+      },
+      "credit": "djmaesen-pistol"
+    },
+    "sniper": {
+      "url": "weapons/sniper.glb",
+      "hash": "b47cf2860bdcefaf",
+      "bytes": 4142464,
+      "fps": 30,
+      "animation": "all",
+      "lastFrame": 195,
+      "clips": {
+        "fire": [0, 11],
+        "bolt": [12, 60],
+        "reload": [61, 115],
+        "hide": [116, 127],
+        "ready": [127, 142],
+        "idle": [143, 165],
+        "melee": [166, 195]
+      },
+      "nodes": {
+        "body": "sniper",
+        "mag": "mag",
+        "bolt": "bolt",
+        "shell": "bullet",
+        "trigger": "trigger",
+        "scope": "scope",
+        "scopeLens": "lens",
+        "reticle": "reticle",
+        "arms": "arms",
+        "muzzle": "muzzle",
+        "ejection": "ejection"
+      },
+      "anchors": {
+        "muzzle": [0, 0.1016, 1.0255],
+        "ejection": [0, 0.076, 0.0494],
+        "scopeLens": [0, 0.172, -0.1399]
+      },
+      "bounds": {
+        "min": [-0.2235, -0.1934, -0.7197],
+        "max": [0.1995, 0.219, 1.0255]
+      },
+      "stats": {
+        "vertices": 18228,
+        "triangles": 20747,
+        "textures": 7,
+        "textureFormat": "ktx2"
+      },
+      "credit": "djmaesen-sniper"
+    }
+  },
+  "characters": {
+    "swat": {
+      "url": "characters/swat.glb",
+      "hash": "8d4a5f647d134e3c",
+      "bytes": 1579044,
+      "height": 1.78,
+      "bounds": {
+        "min": [-0.9615, -0.001, -0.195],
+        "max": [0.9614, 1.779, 0.1903]
+      },
+      "clips": {
+        "rifle_idle": {
+          "duration": 3.1,
+          "loop": true
+        },
+        "walk_fwd": {
+          "duration": 1,
+          "loop": true,
+          "rootMotion": [0, 0, 1.843]
+        },
+        "walk_back": {
+          "duration": 1,
+          "loop": true,
+          "rootMotion": [0, 0, -1.843]
+        },
+        "walk_left": {
+          "duration": 1,
+          "loop": true,
+          "rootMotion": [-1.843, 0, 0]
+        },
+        "walk_right": {
+          "duration": 1,
+          "loop": true,
+          "rootMotion": [1.843, 0, 0]
+        },
+        "crouch_walk_fwd": {
+          "duration": 1,
+          "loop": true,
+          "rootMotion": [0, 0, 1.956]
+        },
+        "run_fwd": {
+          "duration": 0.5,
+          "loop": true,
+          "rootMotion": [0, 0, 4.607]
+        },
+        "run_back": {
+          "duration": 0.5,
+          "loop": true,
+          "rootMotion": [0, 0, -4.607]
+        },
+        "run_left": {
+          "duration": 0.5,
+          "loop": true,
+          "rootMotion": [-4.607, 0, 0]
+        },
+        "run_right": {
+          "duration": 0.5,
+          "loop": true,
+          "rootMotion": [4.607, 0, 0]
+        },
+        "sprint_fwd": {
+          "duration": 0.5,
+          "loop": true,
+          "rootMotion": [0, 0, 6.91]
+        },
+        "crouch_idle": {
+          "duration": 2.1,
+          "loop": true
+        },
+        "jump_up": {
+          "duration": 0.533,
+          "loop": false
+        },
+        "jump_loop": {
+          "duration": 1,
+          "loop": true
+        },
+        "jump_down": {
+          "duration": 0.667,
+          "loop": false
+        },
+        "fire": {
+          "duration": 0.267,
+          "loop": false
+        },
+        "reload": {
+          "duration": 3.3,
+          "loop": false
+        },
+        "hit": {
+          "duration": 2.3,
+          "loop": false
+        },
+        "death_front": {
+          "duration": 3.433,
+          "loop": false
+        },
+        "death_back": {
+          "duration": 2.967,
+          "loop": false
+        }
+      },
+      "bones": {
+        "hips": "mixamorig:Hips",
+        "spine": "mixamorig:Spine",
+        "chest": "mixamorig:Spine2",
+        "neck": "mixamorig:Neck",
+        "head": "mixamorig:Head",
+        "leftUpperArm": "mixamorig:LeftArm",
+        "leftForeArm": "mixamorig:LeftForeArm",
+        "leftHand": "mixamorig:LeftHand",
+        "rightUpperArm": "mixamorig:RightArm",
+        "rightForeArm": "mixamorig:RightForeArm",
+        "rightHand": "mixamorig:RightHand",
+        "leftUpLeg": "mixamorig:LeftUpLeg",
+        "leftLeg": "mixamorig:LeftLeg",
+        "leftFoot": "mixamorig:LeftFoot",
+        "rightUpLeg": "mixamorig:RightUpLeg",
+        "rightLeg": "mixamorig:RightLeg",
+        "rightFoot": "mixamorig:RightFoot"
+      },
+      "stats": {
+        "vertices": 12584,
+        "triangles": 19450,
+        "textures": 6,
+        "textureFormat": "ktx2"
+      },
+      "credit": "mixamo-swat"
+    }
+  },
+  "credits": [
+    {
+      "id": "djmaesen-carbine",
+      "title": "fps animated carbine",
+      "url": "https://sketchfab.com/3d-models/fps-animated-carbine-62977bb4c53047a185b9f3a0cdf56b87",
+      "author": "DJMaesen",
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, compressed and split into clips for twobullets."
+    },
+    {
+      "id": "djmaesen-shotgun",
+      "title": "shotgun animated",
+      "url": "https://sketchfab.com/3d-models/shotgun-animated-c3d3cf425869463a84d650c15e3af0d2",
+      "author": "DJMaesen",
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, compressed and split into clips for twobullets."
+    },
+    {
+      "id": "djmaesen-pistol",
+      "title": "animated pistol",
+      "url": "https://sketchfab.com/3d-models/animated-pistol-bd896167e7ca44f19597d3afe6a8d83f",
+      "author": "DJMaesen",
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, compressed and split into clips for twobullets."
+    },
+    {
+      "id": "djmaesen-sniper",
+      "title": "sniper animated",
+      "url": "https://sketchfab.com/3d-models/sniper-animated-eae1ba5b43ae4bc89b0647fb5d8a2d27",
+      "author": "DJMaesen",
+      "authorUrl": "https://sketchfab.com/bumstrum",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attributionRequired": true,
+      "notes": "Converted, compressed and split into clips for twobullets."
+    },
+    {
+      "id": "mixamo-swat",
+      "title": "Swat (character and animations)",
+      "author": "Adobe Mixamo",
+      "url": "https://www.mixamo.com",
+      "license": "Mixamo terms (royalty-free, no attribution required)",
+      "attributionRequired": false
+    }
+  ],
+  "decoders": {
+    "meshopt": "decoders/meshopt_decoder.js",
+    "ktx2": {
+      "jsDecoderModule": "decoders/babylon.ktx2Decoder.js",
+      "jsMSCTranscoder": "decoders/msc_basis_transcoder.js",
+      "wasmMSCTranscoder": "decoders/msc_basis_transcoder.wasm",
+      "wasmUASTCToASTC": "decoders/uastc_astc.wasm",
+      "wasmUASTCToBC7": "decoders/uastc_bc7.wasm",
+      "wasmUASTCToRGBA_UNORM": "decoders/uastc_rgba8_unorm_v2.wasm",
+      "wasmUASTCToRGBA_SRGB": "decoders/uastc_rgba8_srgb_v2.wasm",
+      "wasmUASTCToR8_UNORM": "decoders/uastc_r8_unorm.wasm",
+      "wasmUASTCToRG8_UNORM": "decoders/uastc_rg8_unorm.wasm",
+      "wasmZSTDDecoder": "decoders/zstddec.wasm"
+    }
+  }
+}

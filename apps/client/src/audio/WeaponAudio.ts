@@ -1,5 +1,6 @@
 import type { HitZone, WeaponId } from "@twobullets/shared";
-import { RELOAD_CUES, type ActionCycle, type ReloadCueKind } from "../viewmodel/timelines";
+import type { ClipPlan } from "../viewmodel/clipPlans";
+import type { MechanicalCueKind } from "../viewmodel/timelines";
 import type { AudioEngine, Voice } from "./AudioEngine";
 
 const RELOAD_TAG = "reload";
@@ -128,33 +129,18 @@ export class WeaponAudio {
     });
   }
 
-  reloadStarted(id: WeaponId, seconds: number): void {
-    const ctx = this.engine.live;
-    if (!ctx) return;
-    this.engine.stopTag(RELOAD_TAG);
-    const start = ctx.currentTime;
-    for (const cue of RELOAD_CUES[id]) {
-      this.cue(cue.kind, start + cue.at * seconds, RELOAD_TAG, (cue.span ?? 0.1) * seconds);
-    }
+  /** Schedules the mechanical sounds of a reload plan, timed to its clips. */
+  reloadStarted(plan: ClipPlan): void {
+    this.schedule(plan, RELOAD_TAG);
   }
 
   reloadCancelled(): void {
     this.engine.stopTag(RELOAD_TAG);
   }
 
-  /** Schedules the bolt or pump sounds of a post-shot action cycle. */
-  actionCycle(cycle: ActionCycle): void {
-    const ctx = this.engine.live;
-    if (!ctx) return;
-    this.engine.stopTag(CYCLE_TAG);
-    const start = ctx.currentTime + cycle.delay;
-    // Fractions mirror the bolt/pump curves in Viewmodel.animateParts.
-    if (cycle.kind === "bolt") {
-      this.cue("boltOpen", start, CYCLE_TAG, cycle.duration * 0.42);
-      this.cue("boltClose", start + cycle.duration * 0.5, CYCLE_TAG, cycle.duration * 0.45);
-    } else {
-      this.cue("pump", start, CYCLE_TAG, cycle.duration * 0.85);
-    }
+  /** Schedules the bolt or pump sounds that follow a shot; a new shot cuts off the previous cycle. */
+  actionCycle(plan: ClipPlan): void {
+    this.schedule(plan, CYCLE_TAG);
   }
 
   /** One confirm per frame: headshot ding beats a body tick; a kill adds its own chime. */
@@ -225,8 +211,16 @@ export class WeaponAudio {
     this.engine.tone(voice, now + 0.05, { gain: 0.06, frequency: f * 1.07, decay: 0.02 });
   }
 
+  private schedule(plan: ClipPlan, tag: string): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    this.engine.stopTag(tag);
+    const start = ctx.currentTime;
+    for (const cue of plan.cues) this.cue(cue.kind, start + cue.at, tag, cue.span);
+  }
+
   /** `span` is the duration of multi-part motions (pump, bolt) in seconds. */
-  private cue(kind: ReloadCueKind, t: number, tag: string, span: number): void {
+  private cue(kind: MechanicalCueKind, t: number, tag: string, span: number): void {
     const voice = this.engine.voice("mechanical", t, span + 0.3, { tag, reverb: 0.08 });
     if (!voice) return;
     switch (kind) {
@@ -245,12 +239,12 @@ export class WeaponAudio {
         this.click(voice, t + 0.03, 600, 0.22);
         break;
       case "pump":
-        // "Chk" back, "chk" forward.
-        this.scrape(voice, t, 0.2, 1400, 800, span * 0.35, 0.03);
-        this.click(voice, t + span * 0.4, 1100, 0.45);
-        this.scrape(voice, t + span * 0.5, 0.2, 900, 1500, span * 0.35, 0.025);
-        this.click(voice, t + span * 0.95, 1700, 0.5);
-        this.click(voice, t + span * 0.95 + 0.005, 500, 0.3);
+        // "Chk" back (the clip snaps the pump back in two frames), "chk" forward home at the end of the span.
+        this.scrape(voice, t, 0.2, 1400, 800, span * 0.12, 0.03);
+        this.click(voice, t + span * 0.12, 1100, 0.45);
+        this.scrape(voice, t + span * 0.6, 0.2, 900, 1500, span * 0.35, 0.025);
+        this.click(voice, t + span, 1700, 0.5);
+        this.click(voice, t + span + 0.005, 500, 0.3);
         break;
       case "boltOpen":
         this.click(voice, t, 2200, 0.3);

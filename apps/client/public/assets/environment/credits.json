@@ -1,0 +1,186 @@
+{
+  "source": "Poly Haven (https://polyhaven.com)",
+  "license": "CC0 1.0 Universal (public domain). Attribution is not required but given here.",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "retrieved": "2026-09-14",
+  "assets": [
+    {
+      "id": "forrest_ground_01",
+      "name": "Forest Ground 01",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/forrest_ground_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forrest_ground_01/forrest_ground_01_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forrest_ground_01/forrest_ground_01_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forrest_ground_01/forrest_ground_01_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "aerial_grass_rock",
+      "name": "Aerial Grass Rock",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/aerial_grass_rock",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/aerial_grass_rock/aerial_grass_rock_diff_2k.jpg"
+      ]
+    },
+    {
+      "id": "concrete_wall_008",
+      "name": "Concrete Wall 008",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Dario Barresi",
+          "role": "Processing"
+        },
+        {
+          "name": "Charlotte Baglioni",
+          "role": "Photography"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/concrete_wall_008",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_wall_008/concrete_wall_008_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_wall_008/concrete_wall_008_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_wall_008/concrete_wall_008_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "concrete_floor_worn_001",
+      "name": "Concrete Floor Worn 001",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Dimitrios Savva",
+          "role": "Photography"
+        },
+        {
+          "name": "Rico Cilliers",
+          "role": "Processing"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/concrete_floor_worn_001",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_worn_001/concrete_floor_worn_001_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_worn_001/concrete_floor_worn_001_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/concrete_floor_worn_001/concrete_floor_worn_001_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "asphalt_02",
+      "name": "Asphalt 02",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/asphalt_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/asphalt_02/asphalt_02_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/asphalt_02/asphalt_02_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/asphalt_02/asphalt_02_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "weathered_planks",
+      "name": "Weathered Planks",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Dario Barresi",
+          "role": "Processing"
+        },
+        {
+          "name": "Dimitrios Savva",
+          "role": "Photography"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/weathered_planks",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/weathered_planks/weathered_planks_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/weathered_planks/weathered_planks_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/weathered_planks/weathered_planks_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "corrugated_iron_02",
+      "name": "Corrugated Iron 02",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Jenelle van Heerden",
+          "role": "Processing"
+        },
+        {
+          "name": "Sergej Majboroda",
+          "role": "Photography"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/corrugated_iron_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/corrugated_iron_02/corrugated_iron_02_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/corrugated_iron_02/corrugated_iron_02_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/corrugated_iron_02/corrugated_iron_02_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "rusty_metal_02",
+      "name": "Rusty Metal 02",
+      "type": "texture",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rusty_metal_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rusty_metal_02/rusty_metal_02_diff_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rusty_metal_02/rusty_metal_02_nor_gl_2k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rusty_metal_02/rusty_metal_02_arm_2k.jpg"
+      ]
+    },
+    {
+      "id": "kloofendal_48d_partly_cloudy_puresky",
+      "name": "Kloofendal 48d Partly Cloudy (Pure Sky)",
+      "type": "hdri",
+      "authors": [
+        {
+          "name": "Greg Zaal",
+          "role": "Original"
+        },
+        {
+          "name": "Jarod Guest",
+          "role": "Sky edits"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/4k/kloofendal_48d_partly_cloudy_puresky_4k.hdr"
+      ]
+    }
+  ]
+}

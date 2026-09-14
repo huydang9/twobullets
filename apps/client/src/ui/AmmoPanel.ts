@@ -1,183 +1,123 @@
-import { getWeaponDef, type WeaponDef, type WeaponId, type WeaponState } from "@twobullets/shared";
+import type { FireMode, WeaponDef, WeaponPhase, WeaponSlotState } from "@twobullets/shared";
 import { prepareAnimation, replay, setText } from "./anim";
 import { el, textNode } from "./dom";
+import { FIRE_MODE_LABEL } from "./format";
 
-/** Magazine at or below this fraction counts as low (color change + reload prompt). */
+/** Magazine at or below this fraction counts as low (amber count + reload hint). */
 const LOW_AMMO_FRACTION = 0.25;
 
 type AmmoLevel = "ok" | "low" | "empty";
-type Prompt = "none" | "reload" | "reloading" | "noammo";
+type Hint = "none" | "reload" | "noammo";
 
-const POP_KEYFRAMES: Keyframe[] = [
-  { transform: "translate3d(0,10px,0) scale(1.14)", opacity: 0.3, easing: "cubic-bezier(.2,1.6,.4,1)" },
-  { transform: "none", opacity: 1 },
+const EQUIP_KEYFRAMES: Keyframe[] = [
+  { opacity: 0.35, transform: "translate3d(0,3px,0)", easing: "ease-out" },
+  { opacity: 1, transform: "none" },
 ];
-const FLASH_KEYFRAMES: Keyframe[] = [{ transform: "scale(1.18)", easing: "ease-out" }, { transform: "none" }];
-const SHAKE_KEYFRAMES: Keyframe[] = [
+const RELOADED_KEYFRAMES: Keyframe[] = [{ opacity: 0.4, easing: "ease-out" }, { opacity: 1 }];
+const DRY_KEYFRAMES: Keyframe[] = [
   { transform: "none" },
-  { transform: "translate3d(-6px,0,0)", offset: 0.2 },
-  { transform: "translate3d(5px,0,0)", offset: 0.45 },
-  { transform: "translate3d(-3px,0,0)", offset: 0.7 },
+  { transform: "translate3d(-3px,0,0)", offset: 0.25 },
+  { transform: "translate3d(2px,0,0)", offset: 0.6 },
   { transform: "none" },
 ];
 
-interface SlotView {
-  readonly node: HTMLDivElement;
-  active: boolean;
-  empty: boolean;
-}
-
-/** Bottom-right magazine/reserve readout, weapon name, reload prompt/progress and the 1–4 slot strip. */
+/** Magazine | reserve readout with weapon name, fire mode and a subtle reload / no-ammo hint. */
 export class AmmoPanel {
-  private readonly slotStrip: HTMLDivElement;
-  private readonly panel: HTMLDivElement;
+  private readonly root: HTMLDivElement;
   private readonly counts: HTMLDivElement;
   private readonly name: Text;
+  private readonly fireMode: Text;
   private readonly magazine: Text;
   private readonly reserve: Text;
-  private readonly bar: HTMLDivElement;
-  private readonly barFill: HTMLDivElement;
-  private readonly prompts: Readonly<Record<Exclude<Prompt, "none">, HTMLDivElement>>;
-  private readonly popAnim: Animation;
-  private readonly flashAnim: Animation;
-  private readonly shakeAnim: Animation;
+  private readonly hints: Readonly<Record<Exclude<Hint, "none">, HTMLDivElement>>;
+  private readonly equipAnim: Animation;
+  private readonly reloadedAnim: Animation;
+  private readonly dryAnim: Animation;
 
-  private slots: SlotView[] = [];
-  private readonly slotIds: WeaponId[] = [];
   private shownMagazine = -1;
   private shownReserve = -1;
+  private shownMode: FireMode | undefined;
   private level: AmmoLevel | undefined;
-  private prompt: Prompt = "none";
-  private phase = "";
-  private progress = -1;
+  private hint: Hint = "none";
+  private phase: WeaponPhase | undefined;
 
   constructor(parent: HTMLElement) {
-    const root = el("div", "tb-ammo", undefined, parent);
+    this.root = el("div", "tb-ammo", undefined, parent);
 
-    const promptRow = el("div", "tb-ammo__prompts", undefined, root);
-    const reload = el("div", "tb-prompt tb-prompt--reload", undefined, promptRow);
+    const hintRow = el("div", "tb-ammo__hints", undefined, this.root);
+    const reload = el("div", "tb-ammo__hint", undefined, hintRow);
     el("kbd", "tb-key", "R", reload);
     el("span", "", "RELOAD", reload);
-    this.prompts = {
-      reload,
-      reloading: el("div", "tb-prompt tb-prompt--reloading", "RELOADING", promptRow),
-      noammo: el("div", "tb-prompt tb-prompt--noammo", "NO AMMO", promptRow),
-    };
-    for (const node of Object.values(this.prompts)) node.hidden = true;
+    this.hints = { reload, noammo: el("div", "tb-ammo__hint tb-ammo__hint--noammo", "NO AMMO", hintRow) };
+    for (const node of Object.values(this.hints)) node.hidden = true;
 
-    this.panel = el("div", "tb-ammo__panel", undefined, root);
-    this.name = textNode(el("div", "tb-ammo__name", undefined, this.panel));
-    this.counts = el("div", "tb-ammo__counts", undefined, this.panel);
+    this.counts = el("div", "tb-ammo__counts", undefined, this.root);
     this.magazine = textNode(el("span", "tb-ammo__mag", undefined, this.counts));
+    el("span", "tb-ammo__divider", undefined, this.counts);
     this.reserve = textNode(el("span", "tb-ammo__reserve", undefined, this.counts));
-    this.bar = el("div", "tb-ammo__bar", undefined, this.panel);
-    this.barFill = el("div", "tb-ammo__bar-fill", undefined, this.bar);
-    this.bar.hidden = true;
 
-    this.slotStrip = el("div", "tb-slots", undefined, root);
+    const meta = el("div", "tb-ammo__meta", undefined, this.root);
+    this.name = textNode(el("span", "tb-ammo__name", undefined, meta));
+    this.fireMode = textNode(el("span", "tb-ammo__mode", undefined, meta));
 
-    this.popAnim = prepareAnimation(this.panel, POP_KEYFRAMES, { duration: 220 });
-    this.flashAnim = prepareAnimation(this.counts, FLASH_KEYFRAMES, { duration: 180 });
-    this.shakeAnim = prepareAnimation(this.counts, SHAKE_KEYFRAMES, { duration: 260 });
+    this.equipAnim = prepareAnimation(this.root, EQUIP_KEYFRAMES, { duration: 220 });
+    this.reloadedAnim = prepareAnimation(this.counts, RELOADED_KEYFRAMES, { duration: 200 });
+    this.dryAnim = prepareAnimation(this.counts, DRY_KEYFRAMES, { duration: 200 });
   }
 
-  update(state: WeaponState, weapon: WeaponDef, phaseProgress: number | null): void {
-    this.syncSlots(state);
-    const active = state.slots[state.activeIndex];
-    if (!active) return;
-
+  update(slot: WeaponSlotState, weapon: WeaponDef, phase: WeaponPhase): void {
     setText(this.name, weapon.name);
-    if (active.magazine !== this.shownMagazine) {
-      this.shownMagazine = active.magazine;
-      setText(this.magazine, active.magazine.toString());
+    if (weapon.fireMode !== this.shownMode) {
+      this.shownMode = weapon.fireMode;
+      setText(this.fireMode, FIRE_MODE_LABEL[weapon.fireMode]);
     }
-    if (active.reserve !== this.shownReserve) {
-      this.shownReserve = active.reserve;
-      setText(this.reserve, `/${active.reserve}`);
+    if (slot.magazine !== this.shownMagazine) {
+      this.shownMagazine = slot.magazine;
+      setText(this.magazine, slot.magazine.toString());
+    }
+    if (slot.reserve !== this.shownReserve) {
+      this.shownReserve = slot.reserve;
+      setText(this.reserve, slot.reserve.toString());
     }
 
-    const low = active.magazine <= Math.ceil(weapon.magazineSize * LOW_AMMO_FRACTION);
-    const level: AmmoLevel = active.magazine === 0 ? "empty" : low ? "low" : "ok";
+    const low = slot.magazine <= Math.ceil(weapon.magazineSize * LOW_AMMO_FRACTION);
+    const level: AmmoLevel = slot.magazine === 0 ? "empty" : low ? "low" : "ok";
     if (level !== this.level) {
       this.level = level;
       this.counts.dataset.level = level;
     }
 
-    const reloading = state.phase === "reloading";
-    const prompt: Prompt = reloading
-      ? "reloading"
-      : active.magazine === 0 && active.reserve === 0
-        ? "noammo"
-        : low && active.reserve > 0
-          ? "reload"
-          : "none";
-    if (prompt !== this.prompt) {
-      if (this.prompt !== "none") this.prompts[this.prompt].hidden = true;
-      if (prompt !== "none") this.prompts[prompt].hidden = false;
-      this.prompt = prompt;
+    const hint: Hint =
+      phase === "reloading"
+        ? "none" // The reload ring near the crosshair takes over.
+        : slot.magazine === 0 && slot.reserve === 0
+          ? "noammo"
+          : low && slot.reserve > 0
+            ? "reload"
+            : "none";
+    if (hint !== this.hint) {
+      if (this.hint !== "none") this.hints[this.hint].hidden = true;
+      if (hint !== "none") this.hints[hint].hidden = false;
+      this.hint = hint;
     }
 
-    if (state.phase !== this.phase) {
-      this.phase = state.phase;
-      this.panel.dataset.phase = state.phase;
-      this.bar.hidden = !reloading;
-      this.progress = -1;
-    }
-    if (reloading) {
-      const progress = Math.round((phaseProgress ?? 0) * 200) / 200;
-      if (progress !== this.progress) {
-        this.progress = progress;
-        this.barFill.style.transform = `scaleX(${progress})`;
-      }
-    }
-
-    for (let i = 0; i < this.slots.length; i++) {
-      const view = this.slots[i]!;
-      const slot = state.slots[i]!;
-      const isActive = i === state.activeIndex;
-      const empty = slot.magazine + slot.reserve === 0;
-      if (isActive !== view.active) {
-        view.active = isActive;
-        view.node.toggleAttribute("data-active", isActive);
-      }
-      if (empty !== view.empty) {
-        view.empty = empty;
-        view.node.toggleAttribute("data-empty", empty);
-      }
+    if (phase !== this.phase) {
+      this.phase = phase;
+      this.root.dataset.phase = phase;
     }
   }
 
-  /** Weapon switch started: pop the panel. */
   onEquip(): void {
-    replay(this.popAnim);
+    replay(this.equipAnim);
   }
 
   onReloadFinished(): void {
-    this.shakeAnim.cancel();
-    replay(this.flashAnim);
+    this.dryAnim.cancel();
+    replay(this.reloadedAnim);
   }
 
   onDryFire(): void {
-    this.flashAnim.cancel();
-    replay(this.shakeAnim);
-  }
-
-  /** Rebuilds the slot strip only when the loadout itself changes. */
-  private syncSlots(state: WeaponState): void {
-    const slots = state.slots;
-    let same = slots.length === this.slotIds.length;
-    for (let i = 0; same && i < slots.length; i++) same = slots[i]!.id === this.slotIds[i];
-    if (same) return;
-
-    this.slotStrip.replaceChildren();
-    this.slotIds.length = 0;
-    this.slots = slots.map((slot) => {
-      const def = getWeaponDef(slot.id);
-      this.slotIds.push(slot.id);
-      const node = el("div", "tb-slot", undefined, this.slotStrip);
-      el("span", "tb-slot__key", def.slot.toString(), node);
-      el("span", "tb-slot__name", def.name, node);
-      return { node, active: false, empty: false };
-    });
+    this.reloadedAnim.cancel();
+    replay(this.dryAnim);
   }
 }

@@ -29,11 +29,18 @@ export type HudPreview =
   | "shotgun"
   | "spray"
   | "hurt"
+  | "lowhealth"
   | "heal"
-  | "scope";
+  | "scope"
+  | "compass"
+  | "feed"
+  | "reload";
 
 /** Frame deltas above this (tab switch, breakpoint) are clamped so smoothing doesn't jump. */
 const MAX_DT = 0.1;
+
+/** Duration of the "compass" preview sweep, ms. */
+const COMPASS_SWEEP_MS = 4000;
 
 /** DOM overlay: click-to-play menu, crosshair, combat HUD and debug readout. */
 export class Hud {
@@ -75,7 +82,12 @@ export class Hud {
     this.refreshVisibility();
   }
 
-  /** Connects combat HUD elements (ammo, hit markers, damage numbers, crosshair spread, health, scope). */
+  /** Attribution lines listed under "Credits" in the play overlay (plain text). */
+  setCredits(lines: readonly string[]): void {
+    this.overlay.setCredits(lines);
+  }
+
+  /** Connects combat HUD elements (compass, ammo, slots, health, hit markers, kill feed, crosshair spread, scope). */
   attachCombat(combat: CombatView, scene: Scene): void {
     this.combat?.dispose();
     this.scene = scene;
@@ -98,7 +110,9 @@ export class Hud {
    * DEV only: fakes combat feedback so the HUD can be previewed before combat fires real events.
    * From the console: `__twobullets.hud.debugForceVisible(true)` to show the combat HUD without pointer lock, then
    * `__twobullets.hud.debugPreview("demo")` (or "body" | "limb" | "head" | "kill" | "headkill" | "shotgun" | "spray" |
-   * "hurt" | "heal" | "scope"). Pass `delaySeconds` to click back into the game before it plays.
+   * "hurt" | "lowhealth" | "heal" | "scope" | "compass" | "feed" | "reload"). "scope" toggles; "heal" clears health
+   * overrides. Pass `delaySeconds` to click back into the game before it plays.
+   * Credits: `__twobullets.hud.setCredits(["Rifle model by X (CC-BY 4.0)"])`.
    */
   debugPreview(kind: HudPreview = "demo", delaySeconds = 0): void {
     if (!import.meta.env.DEV) return;
@@ -114,6 +128,8 @@ export class Hud {
     }
 
     const later = (ms: number, fn: () => void): void => void setTimeout(fn, ms);
+    const kill = (targetId: string, weaponName: string, zone: HitZone, distance: number): void =>
+      combat.showHit({ targetId, zone, amount: 100, killed: true, point: camera.globalPosition }, weaponName, distance);
     const hit = (targetId: string, zone: HitZone, amount: number, killed = false, spreadMeters = 0.25): void => {
       const forward = camera.getDirection(Vector3.Forward());
       const right = camera.getDirection(Vector3.Right()).scaleInPlace((Math.random() * 2 - 1) * spreadMeters);
@@ -146,11 +162,32 @@ export class Hud {
         combat.healthOverride = Math.max(0, (combat.healthOverride ?? 100) - 30);
         if (combat.healthOverride === 0) later(1200, () => (combat.healthOverride = null));
         break;
+      case "lowhealth":
+        combat.healthOverride = 9;
+        break;
       case "heal":
         combat.healthOverride = null;
         break;
       case "scope":
         combat.scopeOverride = !combat.scopeOverride;
+        break;
+      case "compass": {
+        const start = performance.now();
+        const sweep = (): void => {
+          const t = (performance.now() - start) / COMPASS_SWEEP_MS;
+          combat.bearingOverride = t < 1 ? t * 360 : null;
+          if (t < 1) requestAnimationFrame(sweep);
+        };
+        sweep();
+        break;
+      }
+      case "feed":
+        kill("dummy-1", "AR-4", "head", 42);
+        later(600, () => kill("dummy-2", "P-9", "body", 12));
+        later(1200, () => kill("target_dummy-7", "K-98", "head", 186));
+        break;
+      case "reload":
+        combat.reloadPreview = { startedAt: performance.now(), seconds: 2.4 };
         break;
       case "demo":
         this.debugPreview("body");
@@ -159,6 +196,8 @@ export class Hud {
         later(2200, () => this.debugPreview("shotgun"));
         later(2900, () => this.debugPreview("headkill"));
         later(3600, () => this.debugPreview("hurt"));
+        later(4200, () => this.debugPreview("reload"));
+        later(4800, () => this.debugPreview("compass"));
         break;
     }
   }

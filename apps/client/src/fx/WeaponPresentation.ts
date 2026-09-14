@@ -9,15 +9,15 @@ import {
   type WeaponDef,
   type WeaponEvent,
   type WeaponId,
-  type WeaponPhase,
 } from "@twobullets/shared";
+import type { AssetLibrary } from "../assets";
 import { AudioEngine } from "../audio/AudioEngine";
 import { WeaponAudio } from "../audio/WeaponAudio";
 import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "../combat/types";
 import type { PlayerController } from "../player/PlayerController";
-import { actionCycleFor } from "../viewmodel/timelines";
 import { VIEWMODEL_RENDERING_GROUP, Viewmodel, type ViewmodelFrame } from "../viewmodel/Viewmodel";
 import { VIEWMODEL_PROFILES } from "../viewmodel/weaponProfiles";
+import type { Environment } from "../world/environment";
 import { createFxAtlas } from "./fxAtlas";
 import { FxBatch } from "./FxBatch";
 import { ImpactEffects } from "./ImpactEffects";
@@ -40,6 +40,10 @@ interface PendingEject {
 /**
  * Everything the local player sees and hears of their weapon: viewmodel, camera punch, muzzle flash, tracers,
  * impacts, shell casings and audio. Pure presentation; reads CombatView and never affects gameplay.
+ *
+ * Runs in two steps per frame: `update` (before scene.render) turns combat events into clips and sounds, and a
+ * scene.onBeforeRender step, after Babylon has applied this frame's animations, poses the viewmodel and places
+ * effects on the animated muzzle and ejection port.
  */
 export class WeaponPresentation {
   private readonly viewmodel: Viewmodel;
@@ -61,18 +65,18 @@ export class WeaponPresentation {
   private readonly weaponObserver: Observer<WeaponEvent>;
   private readonly impactObserver: Observer<ImpactEvent>;
   private readonly damageObserver: Observer<DamageEvent>;
+  private readonly renderObserver: Observer<Scene>;
 
   private readonly pendingShots: (FiredShot | null)[] = new Array<FiredShot | null>(MAX_SHOTS_PER_FRAME).fill(null);
+  private readonly pendingShotEmpty: boolean[] = new Array<boolean>(MAX_SHOTS_PER_FRAME).fill(false);
   private pendingShotCount = 0;
   private readonly ejects: PendingEject[] = Array.from({ length: MAX_PENDING_EJECTS }, (): PendingEject => ({ time: Infinity, weaponId: "rifle" }));
-  private pendingEquipSeconds: number | null = null;
   private impactSoundsThisFrame = 0;
   private hitZone: HitZone | null = null;
   private hitKilled = false;
 
   private time = 0;
-  private lastPhase: WeaponPhase = "ready";
-  private smoothedProgress = 0;
+  private dt = 0;
   private readonly lastPunch = new Vector3();
   private readonly frame: ViewmodelFrame;
 
@@ -86,8 +90,6 @@ export class WeaponPresentation {
   // DEV preview state (see debug* methods).
   private previewWeapon: WeaponId | null = null;
   private previewCombatWeapon: WeaponId | null = null;
-  private previewReloadStart = -Infinity;
-  private previewReloadSeconds = 0;
   private readonly debugProjectiles: DebugProjectile[] = [];
   private nextDebugId = -1;
 
@@ -95,14 +97,15 @@ export class WeaponPresentation {
     private readonly scene: Scene,
     private readonly player: PlayerController,
     private readonly combat: CombatView,
+    assets: AssetLibrary | null,
+    environment: Environment,
   ) {
     const initial = combat.activeWeapon;
-    this.viewmodel = new Viewmodel(scene, player.camera, initial.id);
+    this.viewmodel = new Viewmodel(scene, player.camera, environment, assets, initial.id);
     this.frame = {
       weaponId: initial.id,
       def: initial,
       phase: "ready",
-      phaseProgress: null,
       adsBlend: 0,
       yaw: 0,
       pitch: 0,
@@ -137,50 +140,21 @@ export class WeaponPresentation {
       this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone),
     );
     this.damageObserver = combat.onDamage.add((event) => this.handleDamage(event.zone, event.killed, event.point));
+    this.renderObserver = scene.onBeforeRenderObservable.add(() => this.afterAnimations());
   }
 
   /** Per render frame, after combat.update and before scene.render. */
   update(dt: number): void {
     this.time += dt;
-    const camera = this.player.camera;
-    const frame = this.fillFrame(dt);
-
-    if (frame.weaponId !== this.viewmodel.weaponId) this.viewmodel.setWeapon(frame.weaponId);
-    if (this.pendingEquipSeconds !== null) {
-      this.viewmodel.startEquip(this.pendingEquipSeconds);
-      this.pendingEquipSeconds = null;
-    }
-    for (let i = 0; i < this.pendingShotCount; i++) {
-      const shot = this.pendingShots[i] as FiredShot;
-      this.viewmodel.onShot(getWeaponDef(shot.weaponId), shot.recoilUp, shot.recoilRight, frame.adsBlend);
-    }
-
-    this.viewmodel.update(dt, frame);
-    this.viewmodel.getMuzzleToRef(this.muzzle, this.muzzleForward);
-    this.viewmodel.getCameraAxesToRef(this.right, this.up, this.forward);
-    const punch = this.viewmodel.punch;
-    this.player.setCameraPunch(punch.x, punch.y, punch.z);
-    this.lastPunch.copyFrom(punch);
+    this.dt = dt;
+    const frame = this.fillFrame();
+    this.viewmodel.advance(dt);
 
     for (let i = 0; i < this.pendingShotCount; i++) {
       const shot = this.pendingShots[i] as FiredShot;
-      this.pendingShots[i] = null;
-      const def = getWeaponDef(shot.weaponId);
-      this.tracers.recordShot(shot, this.muzzle);
-      this.flash.trigger(VIEWMODEL_PROFILES[shot.weaponId]);
-      const cycle = actionCycleFor(def);
-      if (cycle) {
-        this.scheduleEject(shot.weaponId, this.time + cycle.delay + cycle.duration * cycle.ejectAt);
-        this.audio.actionCycle(cycle);
-      } else {
-        this.ejectCasing(shot.weaponId);
-      }
-    }
-    this.pendingShotCount = 0;
-    for (const pending of this.ejects) {
-      if (pending.time > this.time) continue;
-      pending.time = Infinity;
-      this.ejectCasing(pending.weaponId);
+      const plan = this.viewmodel.fire(shot.recoilUp, shot.recoilRight, frame.adsBlend, this.pendingShotEmpty[i] === true);
+      if (plan.cues.length > 0) this.audio.actionCycle(plan);
+      if (plan.ejectAt !== null) this.scheduleEject(shot.weaponId, this.time + plan.ejectAt);
     }
 
     if (this.hitZone !== null) {
@@ -189,24 +163,6 @@ export class WeaponPresentation {
       this.hitKilled = false;
     }
     this.impactSoundsThisFrame = 0;
-
-    this.stepDebugProjectiles(dt);
-
-    this.worldAdditive.begin();
-    this.worldAlpha.begin();
-    this.decalBatch.begin();
-    this.viewmodelAdditive.begin();
-    this.flash.update(dt, this.muzzle, this.muzzleForward, this.viewmodel.visible);
-    this.tracers.update(dt, camera.position, this.combat.projectiles, this.debugProjectiles);
-    this.sparks.update(dt);
-    this.dust.update(dt);
-    this.impacts.update(dt);
-    this.worldAdditive.end();
-    this.worldAlpha.end();
-    this.decalBatch.end();
-    this.viewmodelAdditive.end();
-
-    this.casings.update(dt);
   }
 
   dispose(): void {
@@ -214,6 +170,7 @@ export class WeaponPresentation {
     this.combat.onWeaponEvent.remove(this.weaponObserver);
     this.combat.onImpact.remove(this.impactObserver);
     this.combat.onDamage.remove(this.damageObserver);
+    this.scene.onBeforeRenderObservable.remove(this.renderObserver);
     this.player.setCameraPunch(0, 0, 0);
     this.viewmodel.dispose();
     this.worldAdditive.dispose();
@@ -257,12 +214,10 @@ export class WeaponPresentation {
     }
   }
 
-  /** Plays the reload animation and sounds for the displayed weapon. */
-  debugReload(): void {
+  /** Plays the reload clips and sounds for the displayed weapon. */
+  debugReload(empty = false): void {
     const def = getWeaponDef(this.viewmodel.weaponId);
-    this.previewReloadStart = this.time;
-    this.previewReloadSeconds = def.reloadSeconds;
-    this.audio.reloadStarted(def.id, def.reloadSeconds);
+    this.audio.reloadStarted(this.viewmodel.startReload(def.reloadSeconds, empty));
   }
 
   /** Shows `weaponId` until the real active weapon changes. */
@@ -270,7 +225,10 @@ export class WeaponPresentation {
     if (this.previewWeapon === weaponId) return;
     this.previewWeapon = weaponId;
     this.previewCombatWeapon = this.combat.activeWeapon.id;
-    this.viewmodel.setWeapon(weaponId);
+    const def = getWeaponDef(weaponId);
+    this.frame.weaponId = weaponId;
+    this.frame.def = def;
+    this.viewmodel.equip(weaponId, def.equipSeconds);
     this.audio.equip();
   }
 
@@ -287,23 +245,73 @@ export class WeaponPresentation {
     this.handleDamage(zone, killed, point);
   }
 
+  // --- Frame steps --------------------------------------------------------------------------------------------------
+
+  /** scene.onBeforeRender: animations for this frame are applied, world matrices are not yet computed. */
+  private afterAnimations(): void {
+    const dt = this.dt;
+    const camera = this.player.camera;
+    this.viewmodel.update(this.frame);
+    this.viewmodel.getMuzzleToRef(this.muzzle, this.muzzleForward);
+    this.viewmodel.getCameraAxesToRef(this.right, this.up, this.forward);
+    const punch = this.viewmodel.punch;
+    this.player.setCameraPunch(punch.x, punch.y, punch.z);
+    this.lastPunch.copyFrom(punch);
+
+    for (let i = 0; i < this.pendingShotCount; i++) {
+      const shot = this.pendingShots[i] as FiredShot;
+      this.pendingShots[i] = null;
+      this.tracers.recordShot(shot, this.muzzle);
+      this.flash.trigger(VIEWMODEL_PROFILES[shot.weaponId]);
+    }
+    this.pendingShotCount = 0;
+    for (const pending of this.ejects) {
+      if (pending.time > this.time) continue;
+      pending.time = Infinity;
+      this.ejectCasing(pending.weaponId);
+    }
+
+    this.stepDebugProjectiles(dt);
+
+    this.worldAdditive.begin();
+    this.worldAlpha.begin();
+    this.decalBatch.begin();
+    this.viewmodelAdditive.begin();
+    this.flash.update(dt, this.muzzle, this.muzzleForward, this.viewmodel.visible);
+    this.tracers.update(dt, camera.position, this.combat.projectiles, this.debugProjectiles);
+    this.sparks.update(dt);
+    this.dust.update(dt);
+    this.impacts.update(dt);
+    this.worldAdditive.end();
+    this.worldAlpha.end();
+    this.decalBatch.end();
+    this.viewmodelAdditive.end();
+
+    this.casings.update(dt);
+  }
+
   // --- Event handling ----------------------------------------------------------------------------------------------
 
   private handleShot(shot: FiredShot): void {
     this.audio.shot(shot.weaponId);
-    if (this.pendingShotCount < MAX_SHOTS_PER_FRAME) this.pendingShots[this.pendingShotCount++] = shot;
+    if (this.pendingShotCount >= MAX_SHOTS_PER_FRAME) return;
+    // Shot events fire after the tick's state update, so the magazine already excludes this round.
+    this.pendingShotEmpty[this.pendingShotCount] = shot.weaponId === this.combat.activeWeapon.id && this.activeMagazine() === 0;
+    this.pendingShots[this.pendingShotCount++] = shot;
   }
 
   private handleWeaponEvent(event: WeaponEvent): void {
     switch (event.type) {
       case "equipStarted":
-        this.pendingEquipSeconds = event.seconds;
+        this.viewmodel.equip(event.weaponId, event.seconds);
         this.audio.equip();
         break;
       case "reloadStarted":
-        this.audio.reloadStarted(event.weaponId, event.seconds);
+        // The magazine is refilled when the reload finishes, so it still reads 0 for an empty reload.
+        this.audio.reloadStarted(this.viewmodel.startReload(event.seconds, this.activeMagazine() === 0));
         break;
       case "reloadCancelled":
+        this.viewmodel.cancelReload();
         this.audio.reloadCancelled();
         break;
       case "dryFire":
@@ -335,40 +343,18 @@ export class WeaponPresentation {
 
   // --- Helpers -----------------------------------------------------------------------------------------------------
 
-  private fillFrame(dt: number): ViewmodelFrame {
+  private fillFrame(): ViewmodelFrame {
     const combat = this.combat;
     const combatWeapon = combat.activeWeapon;
     if (this.previewWeapon !== null && combatWeapon.id !== this.previewCombatWeapon) this.previewWeapon = null;
     const def = this.previewWeapon !== null ? getWeaponDef(this.previewWeapon) : combatWeapon;
-
-    let phase = combat.weaponState.phase;
-    let progress = combat.phaseProgress;
-    const previewElapsed = this.time - this.previewReloadStart;
-    if (previewElapsed < this.previewReloadSeconds) {
-      phase = "reloading";
-      progress = previewElapsed / this.previewReloadSeconds;
-    } else if (this.previewWeapon !== null) {
-      phase = "ready";
-      progress = null;
-    }
-    // Combat progress advances in 60 Hz steps; run ahead of it by at most one tick so animation stays smooth.
-    if (progress === null || phase !== this.lastPhase) {
-      this.smoothedProgress = progress ?? 0;
-    } else {
-      const total = phase === "reloading" ? def.reloadSeconds : def.equipSeconds;
-      const tick = total > 0 ? TICK_SECONDS / total : 1;
-      const predicted = this.smoothedProgress + dt / Math.max(total, 1e-3);
-      this.smoothedProgress = Math.max(progress, Math.min(progress + tick, predicted, 1));
-    }
-    this.lastPhase = phase;
 
     const move = this.player.moveState;
     const rotation = this.player.camera.rotation;
     const frame = this.frame;
     frame.weaponId = def.id;
     frame.def = def;
-    frame.phase = phase;
-    frame.phaseProgress = progress === null ? null : this.smoothedProgress;
+    frame.phase = this.previewWeapon !== null ? "ready" : combat.weaponState.phase;
     frame.adsBlend = this.previewWeapon !== null ? 0 : combat.adsBlend;
     frame.yaw = rotation.y - this.lastPunch.y;
     frame.pitch = rotation.x - this.lastPunch.x;
@@ -376,6 +362,11 @@ export class WeaponPresentation {
     frame.grounded = move.grounded;
     frame.sprinting = move.sprinting;
     return frame;
+  }
+
+  private activeMagazine(): number {
+    const state = this.combat.weaponState;
+    return state.slots[state.activeIndex]?.magazine ?? -1;
   }
 
   private scheduleEject(weaponId: WeaponId, time: number): void {

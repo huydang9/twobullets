@@ -10,9 +10,24 @@
     "dev": "pnpm --filter @twobullets/client dev",
     "build": "pnpm --filter @twobullets/client build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "assets": "node tools/assets/build.ts",
+    "assets:analyze": "node tools/assets/analyze-clips.ts",
+    "assets:verify": "node tools/assets/verify.ts",
+    "assets:typecheck": "tsc -p tools/assets/tsconfig.json"
   },
   "devDependencies": {
+    "@babylonjs/ktx2decoder": "9.26.0",
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
+    "@types/node": "^24.13.4",
+    "@types/three": "^0.186.0",
+    "ktx2-encoder": "^0.6.0",
+    "meshoptimizer": "^1.2.0",
+    "rolldown": "1.2.8",
+    "sharp": "^0.35.4",
+    "three": "^0.186.0",
     "typescript": "^7.0.2"
   }
 }

@@ -1,38 +1,80 @@
-import { Color3, CreateSphere, Mesh, StandardMaterial, VertexBuffer, type Scene } from "@babylonjs/core";
+import {
+  BackgroundMaterial,
+  CreateBox,
+  CubeTexture,
+  HDRCubeTexture,
+  HDRFiltering,
+  Logger,
+  Texture,
+  type Mesh,
+  type Scene,
+} from "@babylonjs/core";
+import { SKY } from "./environmentManifest";
+import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "./materials";
 
-export interface SkyColors {
-  readonly zenith: Color3;
-  readonly horizon: Color3;
-  /** Below the horizon; normally hidden by walls, visible from out of bounds. */
-  readonly nadir: Color3;
+export interface SkySettings {
+  /** IBL cube face size. Level surfaces are rough, so 256 keeps reflections sharp enough. */
+  readonly iblCubeSize: number;
+  /** Importance samples per texel for GPU prefiltering (filtered importance sampling keeps 64 clean). */
+  readonly iblFilterSamples: number;
 }
 
-/** Unlit gradient dome following the camera. Colors are baked into vertex colors, so no textures or shaders. */
-export function createSkyDome(scene: Scene, colors: SkyColors): Mesh {
-  // Big enough to enclose the arena, small enough to survive a modest camera.maxZ.
-  const radius = 250;
-  const dome = CreateSphere("skyDome", { diameter: radius * 2, segments: 24, sideOrientation: Mesh.BACKSIDE }, scene);
-  dome.infiniteDistance = true;
-  dome.applyFog = false;
-  dome.isPickable = false;
+/**
+ * Visible sky: a camera-centered box sampling six LDR faces cut from the 4K HDRI. The faces are stored at
+ * 1/skyScale of the panorama, so the material's level restores scene-referred values before tone mapping.
+ */
+export function createSkybox(scene: Scene): { mesh: Mesh; ready: Promise<void> } {
+  const texture = new CubeTexture(
+    SKY.faces.join("|"),
+    scene,
+    null,
+    true,
+    SKY.faces.map((file) => ENVIRONMENT_ASSET_ROOT + file),
+  );
+  texture.coordinatesMode = Texture.SKYBOX_MODE;
+  texture.level = SKY.skyScale;
 
-  const positions = dome.getVerticesData(VertexBuffer.PositionKind) ?? [];
-  const vertexColors = new Float32Array((positions.length / 3) * 4);
-  const tmp = new Color3();
-  for (let v = 0; v < positions.length / 3; v++) {
-    const h = (positions[v * 3 + 1] ?? 0) / radius;
-    if (h >= 0) Color3.LerpToRef(colors.horizon, colors.zenith, Math.pow(h, 0.55), tmp);
-    else Color3.LerpToRef(colors.horizon, colors.nadir, Math.min(1, -h * 4), tmp);
-    vertexColors.set([tmp.r, tmp.g, tmp.b, 1], v * 4);
-  }
-  dome.setVerticesData(VertexBuffer.ColorKind, vertexColors, false, 4);
+  const material = new BackgroundMaterial("mat_sky", scene);
+  material.reflectionTexture = texture;
+  material.backFaceCulling = false;
+  // Dithering hides 8-bit banding in the smooth blue gradient.
+  material.enableNoise = true;
 
-  const material = new StandardMaterial("mat_sky", scene);
-  material.disableLighting = true;
-  material.emissiveColor = Color3.White();
-  material.diffuseColor = Color3.Black();
-  material.specularColor = Color3.Black();
-  dome.material = material;
+  const mesh = CreateBox("skybox", { size: 1000 }, scene);
+  mesh.material = material;
+  mesh.infiniteDistance = true;
+  mesh.applyFog = false;
+  mesh.isPickable = false;
+  mesh.receiveShadows = false;
 
-  return dome;
+  return { mesh, ready: waitForTexture(texture) };
+}
+
+/**
+ * Image-based lighting from the sun-less panorama: CPU cube conversion and spherical harmonics on load,
+ * then a short GPU prefilter pass. The texture is only assigned to the scene once filtered, so materials
+ * compile once against the final IBL.
+ */
+export function loadImageBasedLighting(scene: Scene, settings: SkySettings): Promise<HDRCubeTexture> {
+  return new Promise((resolve, reject) => {
+    const texture: HDRCubeTexture = new HDRCubeTexture(
+      ENVIRONMENT_ASSET_ROOT + SKY.iblPanorama,
+      scene,
+      settings.iblCubeSize,
+      false, // mipmaps
+      true, // spherical harmonics for diffuse irradiance
+      false, // linear
+      false, // prefiltered below with a lower sample count than the built-in 4096
+      () => {
+        new HDRFiltering(scene.getEngine(), { quality: settings.iblFilterSamples })
+          .prefilter(texture)
+          .catch((err: unknown) => Logger.Warn(`IBL prefiltering unavailable, using unfiltered reflections: ${String(err)}`))
+          .finally(() => {
+            scene.environmentTexture = texture;
+            resolve(texture);
+          });
+      },
+      (message) => reject(new Error(`Failed to load ${SKY.iblPanorama}: ${message ?? ""}`)),
+    );
+  });
 }

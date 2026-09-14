@@ -30,9 +30,11 @@ export interface DamageResult {
   readonly killed: boolean;
 }
 
-/** Anything bullets can hurt: target dummies now, remote players later. */
+/** Anything bullets can hurt: practice soldiers now, remote players later. */
 export interface Damageable {
   readonly id: string;
+  /** Human-readable name for kill feeds, e.g. "Soldier" or a player name. */
+  readonly displayName?: string;
   readonly alive: boolean;
   /** Returns null when the hit is ignored (e.g. already dead). */
   applyDamage(hit: DamageHit): DamageResult | null;
