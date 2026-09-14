@@ -1,0 +1,211 @@
+{
+  "benchmark": "havok-tick",
+  "date": "2026-09-14T13:12:58.300Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64",
+    "loadAvg": [
+      5.11,
+      7.56,
+      6.61
+    ]
+  },
+  "args": {
+    "mode": "babylon",
+    "ticks": 3600,
+    "warmup": 600,
+    "players": 10,
+    "projectiles": 50,
+    "hitboxes": 20,
+    "buildings": 300,
+    "samples": 513,
+    "seed": 1234,
+    "out": "tools/bench/runtime/results/havok-tick-babylon-deep.json"
+  },
+  "scenario": {
+    "seed": 1234,
+    "players": 10,
+    "hitboxesPerPlayer": 20,
+    "projectiles": 50,
+    "buildings": 300,
+    "heightfieldSamples": 513,
+    "mapSize": 1000
+  },
+  "setup": {
+    "processToReadyMs": 918.8,
+    "setupTotalMs": 320.1,
+    "phasesMs": {
+      "havokInit": 13.41,
+      "importBabylonCore": 199.06,
+      "importClientCode": 20.51,
+      "sceneAndPlugin": 5.84,
+      "terrain": 19.47,
+      "buildings": 45.92,
+      "playersAndHitboxes": 15.69
+    }
+  },
+  "tickMs": {
+    "n": 3600,
+    "mean": 0.726,
+    "p50": 0.6444,
+    "p95": 1.1847,
+    "p99": 1.8329,
+    "p999": 3.3668,
+    "max": 4.943,
+    "min": 0.4198
+  },
+  "phaseMs": {
+    "move": {
+      "n": 3600,
+      "mean": 0.3471,
+      "p50": 0.3105,
+      "p95": 0.606,
+      "p99": 0.9723,
+      "p999": 2.0917,
+      "max": 2.621,
+      "min": 0.1456
+    },
+    "weapons": {
+      "n": 3600,
+      "mean": 0.0046,
+      "p50": 0.0026,
+      "p95": 0.014,
+      "p99": 0.0329,
+      "p999": 0.0704,
+      "max": 0.1249,
+      "min": 0.001
+    },
+    "hitboxes": {
+      "n": 3600,
+      "mean": 0.0246,
+      "p50": 0.0161,
+      "p95": 0.0575,
+      "p99": 0.1158,
+      "p999": 0.2305,
+      "max": 0.3523,
+      "min": 0.0119
+    },
+    "worldStep": {
+      "n": 3600,
+      "mean": 0.2439,
+      "p50": 0.1996,
+      "p95": 0.4488,
+      "p99": 0.7002,
+      "p999": 1.253,
+      "max": 2.0375,
+      "min": 0.1677
+    },
+    "projectiles": {
+      "n": 3600,
+      "mean": 0.1055,
+      "p50": 0.0897,
+      "p95": 0.1898,
+      "p99": 0.3735,
+      "p999": 0.727,
+      "max": 0.9321,
+      "min": 0.0643
+    }
+  },
+  "ticksOver": {
+    "2ms": 27,
+    "4ms": 2,
+    "8ms": 0,
+    "16.67ms": 0
+  },
+  "throughput": {
+    "runWallMs": 2637.7,
+    "cpuUserMs": 2703.2,
+    "cpuSystemMs": 65.7,
+    "realtimeFactor": 21.67
+  },
+  "memoryMb": {
+    "baseline": {
+      "rss": 105.3,
+      "heapTotal": 14,
+      "heapUsed": 9.7,
+      "external": 9.2,
+      "arrayBuffers": 0.2
+    },
+    "afterSetup": {
+      "rss": 181.3,
+      "heapTotal": 67.6,
+      "heapUsed": 47.3,
+      "external": 29.4,
+      "arrayBuffers": 3.5
+    },
+    "afterWarmup": {
+      "rss": 243.1,
+      "heapTotal": 110.3,
+      "heapUsed": 65,
+      "external": 29.4,
+      "arrayBuffers": 3.5
+    },
+    "afterRun": {
+      "rss": 203.8,
+      "heapTotal": 109.5,
+      "heapUsed": 58.1,
+      "external": 28.3,
+      "arrayBuffers": 2.4
+    },
+    "series": [
+      {
+        "tick": 3600,
+        "rss": 203.8,
+        "heapTotal": 109.5,
+        "heapUsed": 58.1,
+        "external": 28.3,
+        "arrayBuffers": 2.4,
+        "havokHeap": 16.9
+      }
+    ]
+  },
+  "havokHeapMb": {
+    "afterSetup": 16.9,
+    "afterRun": 16.9
+  },
+  "gc": {
+    "count": {
+      "minor": 72,
+      "incremental": 1,
+      "major": 1
+    },
+    "totalMs": {
+      "minor": 18.65,
+      "incremental": 0.168,
+      "major": 5.271
+    },
+    "maxMs": {
+      "minor": 0.499,
+      "incremental": 0.168,
+      "major": 5.271
+    },
+    "pauses": {
+      "n": 74,
+      "mean": 0.3256,
+      "p50": 0.2429,
+      "p95": 0.384,
+      "p99": 5.2707,
+      "p999": 5.2707,
+      "max": 5.2707,
+      "min": 0.1675
+    }
+  },
+  "sanity": {
+    "hitboxImpacts": 2361,
+    "worldImpacts": 40121,
+    "expired": 880,
+    "spawned": 43404,
+    "belowTerrain": 0,
+    "groundedTicks": 35709,
+    "playerTicks": 42000,
+    "shots": 612,
+    "groundedRatio": 0.85,
+    "meanHorizontalSpeed": 6.75
+  }
+}

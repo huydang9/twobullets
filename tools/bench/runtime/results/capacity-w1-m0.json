@@ -1,0 +1,108 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:04:06.152Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "workers": 1,
+    "perWorker": 0,
+    "seconds": 5,
+    "rate": 60,
+    "sharedHavok": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w1-m0.json"
+  },
+  "havokCompileMs": 6.3,
+  "spawnAndSetupMs": 57.6,
+  "memoryMb": {
+    "baseline": {
+      "rss": 94.4,
+      "heapTotal": 14.3,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 110.2,
+      "heapTotal": 14.3,
+      "heapUsed": 9.9,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 83.4,
+      "heapTotal": 15.1,
+      "heapUsed": 10.6,
+      "external": 11.4,
+      "arrayBuffers": 2.3
+    },
+    "rssPerWorker": 15.8,
+    "rssPerMatch": null
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 0.0013749999999959073,
+      "heapUsedMb": 8.134976,
+      "wasmMb": 0,
+      "ticks": 300,
+      "lateness": {
+        "n": 300,
+        "mean": 0.1802,
+        "p50": 0.011,
+        "p95": 0.2913,
+        "p99": 8.1099,
+        "p999": 18.2439,
+        "max": 18.2439,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 300,
+        "mean": 0.003,
+        "p50": 0.0027,
+        "p95": 0.0073,
+        "p99": 0.011,
+        "p999": 0.0173,
+        "max": 0.0173,
+        "min": 0.0002
+      },
+      "overruns": 1,
+      "skipped": 0,
+      "threadCpuPercent": 4.3,
+      "inputLatencyMs": {
+        "n": 295,
+        "mean": 0.2103,
+        "p50": 0.0771,
+        "p95": 0.2163,
+        "p99": 1.3923,
+        "p999": 29.208,
+        "max": 29.208,
+        "min": 0.0203
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 300,
+    "mean": 0.4211,
+    "p50": 0.0984,
+    "p95": 0.259,
+    "p99": 23.7405,
+    "p999": 40.344,
+    "max": 40.344,
+    "min": 0.032
+  },
+  "totals": {
+    "matches": 0,
+    "players": 0,
+    "overruns": 1,
+    "skipped": 0
+  }
+}

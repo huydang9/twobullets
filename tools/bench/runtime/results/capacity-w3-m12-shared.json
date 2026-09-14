@@ -1,0 +1,194 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:21:16.040Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64",
+    "loadAvg": [
+      2.12,
+      3.79,
+      5.18
+    ]
+  },
+  "args": {
+    "workers": 3,
+    "perWorker": 12,
+    "seconds": 20,
+    "rate": 60,
+    "sharedHavok": true,
+    "shareStaticShapes": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w3-m12-shared.json"
+  },
+  "havokCompileMs": 3.2,
+  "spawnAndSetupMs": 111.1,
+  "memoryMb": {
+    "baseline": {
+      "rss": 96.4,
+      "heapTotal": 14.6,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 240.9,
+      "heapTotal": 14.6,
+      "heapUsed": 10,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 506.4,
+      "heapTotal": 12.5,
+      "heapUsed": 9.9,
+      "external": 9.4,
+      "arrayBuffers": 0.2
+    },
+    "rssPerWorker": 48.2,
+    "rssPerMatch": 4
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 67.25449999999995,
+      "heapUsedMb": 9.093616,
+      "wasmMb": 16.908288,
+      "ticks": 1200,
+      "lateness": {
+        "n": 1200,
+        "mean": 0.0538,
+        "p50": 0.009,
+        "p95": 0.0227,
+        "p99": 0.0679,
+        "p999": 15.4136,
+        "max": 21.5593,
+        "min": 0
+      },
+      "workMs": {
+        "n": 1200,
+        "mean": 5.5178,
+        "p50": 5.47,
+        "p95": 6.0886,
+        "p99": 6.5786,
+        "p999": 22.4873,
+        "max": 37.4822,
+        "min": 4.6182
+      },
+      "overruns": 4,
+      "skipped": 0,
+      "threadCpuPercent": 35.4,
+      "inputLatencyMs": {
+        "n": 14376,
+        "mean": 0.5374,
+        "p50": 0.3765,
+        "p95": 1.2075,
+        "p99": 2.3237,
+        "p999": 24.1716,
+        "max": 41.5366,
+        "min": 0.0029
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 69.92583300000001,
+      "heapUsedMb": 10.3206,
+      "wasmMb": 16.908288,
+      "ticks": 1200,
+      "lateness": {
+        "n": 1200,
+        "mean": 0.0521,
+        "p50": 0.0083,
+        "p95": 0.0227,
+        "p99": 0.0593,
+        "p999": 16.5928,
+        "max": 21.9258,
+        "min": 0
+      },
+      "workMs": {
+        "n": 1200,
+        "mean": 5.6281,
+        "p50": 5.5815,
+        "p95": 6.189,
+        "p99": 6.5879,
+        "p999": 20.7983,
+        "max": 38.1575,
+        "min": 4.6523
+      },
+      "overruns": 4,
+      "skipped": 0,
+      "threadCpuPercent": 36.1,
+      "inputLatencyMs": {
+        "n": 14376,
+        "mean": 0.6149,
+        "p50": 0.4753,
+        "p95": 1.3025,
+        "p99": 2.1821,
+        "p999": 24.6128,
+        "max": 41.8262,
+        "min": 0.0032
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 66.50004200000001,
+      "heapUsedMb": 10.407096,
+      "wasmMb": 16.908288,
+      "ticks": 1200,
+      "lateness": {
+        "n": 1200,
+        "mean": 0.0514,
+        "p50": 0.0083,
+        "p95": 0.0229,
+        "p99": 0.0784,
+        "p999": 15.4575,
+        "max": 21.6321,
+        "min": 0
+      },
+      "workMs": {
+        "n": 1200,
+        "mean": 5.3089,
+        "p50": 5.2007,
+        "p95": 5.8279,
+        "p99": 6.5464,
+        "p999": 22.1162,
+        "max": 37.5627,
+        "min": 4.438
+      },
+      "overruns": 4,
+      "skipped": 0,
+      "threadCpuPercent": 34.2,
+      "inputLatencyMs": {
+        "n": 14376,
+        "mean": 0.325,
+        "p50": 0.0999,
+        "p95": 0.9651,
+        "p99": 2.1741,
+        "p999": 23.2427,
+        "max": 40.5034,
+        "min": 0.0037
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 3600,
+    "mean": 0.0258,
+    "p50": 0.0227,
+    "p95": 0.0449,
+    "p99": 0.0789,
+    "p999": 0.1667,
+    "max": 0.3469,
+    "min": 0.0063
+  },
+  "totals": {
+    "matches": 36,
+    "players": 360,
+    "overruns": 12,
+    "skipped": 0
+  }
+}

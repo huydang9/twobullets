@@ -1,0 +1,108 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:06:15.252Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "workers": 1,
+    "perWorker": 40,
+    "seconds": 20,
+    "rate": 30,
+    "sharedHavok": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w1-m40-30hz.json"
+  },
+  "havokCompileMs": 4.6,
+  "spawnAndSetupMs": 701.6,
+  "memoryMb": {
+    "baseline": {
+      "rss": 95.8,
+      "heapTotal": 14,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 246.4,
+      "heapTotal": 14.6,
+      "heapUsed": 9.9,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 312.9,
+      "heapTotal": 12.2,
+      "heapUsed": 10.2,
+      "external": 9.3,
+      "arrayBuffers": 0.2
+    },
+    "rssPerWorker": 150.6,
+    "rssPerMatch": 3.8
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 668.1756670000001,
+      "heapUsedMb": 15.934544,
+      "wasmMb": 105.250816,
+      "ticks": 600,
+      "lateness": {
+        "n": 600,
+        "mean": 0.5502,
+        "p50": 0.009,
+        "p95": 0.3162,
+        "p99": 20.9316,
+        "p999": 46.8645,
+        "max": 46.8645,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 600,
+        "mean": 22.706,
+        "p50": 21.595,
+        "p95": 29.4019,
+        "p99": 39.6316,
+        "p999": 79.8606,
+        "max": 79.8606,
+        "min": 17.0859
+      },
+      "overruns": 28,
+      "skipped": 0,
+      "threadCpuPercent": 67.7,
+      "inputLatencyMs": {
+        "n": 23720,
+        "mean": 9.4443,
+        "p50": 1.7546,
+        "p95": 26.7969,
+        "p99": 103.1143,
+        "p999": 165.1995,
+        "max": 165.2261,
+        "min": 0.0032
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 600,
+    "mean": 0.113,
+    "p50": 0.1023,
+    "p95": 0.1824,
+    "p99": 0.2649,
+    "p999": 0.6086,
+    "max": 0.6086,
+    "min": 0.0583
+  },
+  "totals": {
+    "matches": 40,
+    "players": 400,
+    "overruns": 28,
+    "skipped": 0
+  }
+}

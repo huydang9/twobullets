@@ -1,0 +1,114 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:20:12.881Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64",
+    "loadAvg": [
+      1.76,
+      4.19,
+      5.42
+    ]
+  },
+  "args": {
+    "workers": 1,
+    "perWorker": 10,
+    "seconds": 20,
+    "rate": 60,
+    "sharedHavok": true,
+    "shareStaticShapes": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w1-m10-shared.json"
+  },
+  "havokCompileMs": 3.2,
+  "spawnAndSetupMs": 119.5,
+  "memoryMb": {
+    "baseline": {
+      "rss": 96.1,
+      "heapTotal": 14.3,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 146,
+      "heapTotal": 14.3,
+      "heapUsed": 9.9,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 163,
+      "heapTotal": 12.5,
+      "heapUsed": 10.3,
+      "external": 9.4,
+      "arrayBuffers": 0.2
+    },
+    "rssPerWorker": 49.9,
+    "rssPerMatch": 5
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 58.91662500000001,
+      "heapUsedMb": 10.960752,
+      "wasmMb": 16.908288,
+      "ticks": 1200,
+      "lateness": {
+        "n": 1200,
+        "mean": 0.045,
+        "p50": 0.0076,
+        "p95": 0.0139,
+        "p99": 0.0339,
+        "p999": 15.2563,
+        "max": 19.5686,
+        "min": 0
+      },
+      "workMs": {
+        "n": 1200,
+        "mean": 5.2005,
+        "p50": 5.1086,
+        "p95": 6.585,
+        "p99": 8.4006,
+        "p999": 17.8369,
+        "max": 34.9292,
+        "min": 3.4358
+      },
+      "overruns": 4,
+      "skipped": 0,
+      "threadCpuPercent": 33.4,
+      "inputLatencyMs": {
+        "n": 11980,
+        "mean": 0.3778,
+        "p50": 0.0181,
+        "p95": 1.2761,
+        "p99": 4.9536,
+        "p999": 29.3975,
+        "max": 45.2998,
+        "min": 0.0017
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 1200,
+    "mean": 0.0332,
+    "p50": 0.0288,
+    "p95": 0.0593,
+    "p99": 0.1006,
+    "p999": 0.1892,
+    "max": 0.2419,
+    "min": 0.0129
+  },
+  "totals": {
+    "matches": 10,
+    "players": 100,
+    "overruns": 4,
+    "skipped": 0
+  }
+}

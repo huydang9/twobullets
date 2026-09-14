@@ -1,0 +1,120 @@
+{
+  "benchmark": "scheduler",
+  "date": "2026-09-14T12:59:55.304Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "seconds": 8,
+    "rate": 60,
+    "workMs": 1,
+    "out": "tools/bench/runtime/results/scheduler.json"
+  },
+  "results": {
+    "setInterval": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 210.2309,
+        "p50": 208.1791,
+        "p95": 407.8672,
+        "p99": 426.3998,
+        "p999": 430.029,
+        "max": 430.029,
+        "min": 1.5424
+      },
+      "driftMsAfterRun": 430.03,
+      "threadCpuPercent": 6.4
+    },
+    "setTimeoutRelative": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 458.599,
+        "p50": 460.5539,
+        "p95": 869.4588,
+        "p99": 908.8148,
+        "p999": 913.6235,
+        "max": 913.6235,
+        "min": 0.906
+      },
+      "driftMsAfterRun": 913.62,
+      "threadCpuPercent": 6.2
+    },
+    "driftFree": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 1.4659,
+        "p50": 1.1683,
+        "p95": 2.4902,
+        "p99": 8.3492,
+        "p999": 58.6549,
+        "max": 58.6549,
+        "min": -1.7985
+      },
+      "driftMsAfterRun": 1.22,
+      "threadCpuPercent": 6.3
+    },
+    "hybrid-1ms": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 0.4263,
+        "p50": 0.3861,
+        "p95": 1.1365,
+        "p99": 1.3459,
+        "p999": 2.0771,
+        "max": 2.0771,
+        "min": 0.0008
+      },
+      "driftMsAfterRun": 0.07,
+      "threadCpuPercent": 7.5
+    },
+    "hybrid-2ms": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 0.0437,
+        "p50": 0.0107,
+        "p95": 0.058,
+        "p99": 0.3798,
+        "p999": 10.7181,
+        "max": 10.7181,
+        "min": 0.0006
+      },
+      "driftMsAfterRun": 0.01,
+      "threadCpuPercent": 8.4
+    },
+    "hybrid-4ms": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 0.0452,
+        "p50": 0.0108,
+        "p95": 0.0331,
+        "p99": 0.3283,
+        "p999": 7.3455,
+        "max": 7.3455,
+        "min": 0.0022
+      },
+      "driftMsAfterRun": 0.01,
+      "threadCpuPercent": 10.9
+    },
+    "spin": {
+      "latenessMs": {
+        "n": 480,
+        "mean": 0.0158,
+        "p50": 0.0101,
+        "p95": 0.023,
+        "p99": 0.1153,
+        "p999": 1.1788,
+        "max": 1.1788,
+        "min": 0.001
+      },
+      "driftMsAfterRun": 0.01,
+      "threadCpuPercent": 23.7
+    }
+  }
+}

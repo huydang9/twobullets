@@ -1,0 +1,184 @@
+{
+  "benchmark": "serialization",
+  "date": "2026-09-14T13:16:36.429Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64",
+    "loadAvg": [
+      5.07,
+      6.61,
+      6.43
+    ]
+  },
+  "args": {
+    "batches": 30,
+    "out": "tools/bench/runtime/results/serialization.json"
+  },
+  "snapshotShape": {
+    "players": 10,
+    "eventsPerSnapshot": "0-6",
+    "playerFields": [
+      "id",
+      "team",
+      "x",
+      "y",
+      "z",
+      "vx",
+      "vy",
+      "vz",
+      "yaw",
+      "pitch",
+      "health",
+      "armor",
+      "flags",
+      "weapon",
+      "magazine",
+      "reserve",
+      "anim",
+      "animTime"
+    ],
+    "headerFloatBytes": 30
+  },
+  "results": {
+    "sizesBytes": {
+      "json": 3364.7,
+      "binaryFloat": 494.5,
+      "binaryQuant": 316.6,
+      "binaryDelta": 188.2
+    },
+    "jsonStringify": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 11537.8932,
+        "p50": 11165.7688,
+        "p95": 11612.6041,
+        "p99": 23146.6,
+        "p999": 23146.6,
+        "max": 23146.6,
+        "min": 10880.0521
+      },
+      "bytes": 3338
+    },
+    "jsonStringifyUtf8": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 13504.8784,
+        "p50": 12763.6792,
+        "p95": 19003.675,
+        "p99": 19660.7959,
+        "p999": 19660.7959,
+        "max": 19660.7959,
+        "min": 12310.6688
+      },
+      "bytes": 3338
+    },
+    "jsonParse": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 8651.4513,
+        "p50": 8254.1229,
+        "p95": 9659.3604,
+        "p99": 16868.1646,
+        "p999": 16868.1646,
+        "max": 16868.1646,
+        "min": 7835.8604
+      },
+      "bytes": 10
+    },
+    "floatEncode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 97.1165,
+        "p50": 96.5208,
+        "p95": 102.7042,
+        "p99": 104.1292,
+        "p999": 104.1292,
+        "max": 104.1292,
+        "min": 95.0542
+      },
+      "bytes": 490
+    },
+    "floatDecode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 228.1001,
+        "p50": 222.7959,
+        "p95": 271.6521,
+        "p99": 292.5063,
+        "p999": 292.5063,
+        "max": 292.5063,
+        "min": 214.6063
+      },
+      "bytes": 10
+    },
+    "quantEncode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 315.0744,
+        "p50": 293.4396,
+        "p95": 497.1563,
+        "p99": 520.1917,
+        "p999": 520.1917,
+        "max": 520.1917,
+        "min": 266.95
+      },
+      "bytes": 314
+    },
+    "quantDecode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 230.3113,
+        "p50": 230.2333,
+        "p95": 237.1729,
+        "p99": 238.1917,
+        "p999": 238.1917,
+        "max": 238.1917,
+        "min": 224.6209
+      },
+      "bytes": 10
+    },
+    "deltaEncode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 922.6698,
+        "p50": 886.3313,
+        "p95": 1324.1521,
+        "p99": 1451.4229,
+        "p999": 1451.4229,
+        "max": 1451.4229,
+        "min": 748.5729
+      },
+      "bytes": 190
+    },
+    "deltaDecode": {
+      "nsPerOp": {
+        "n": 30,
+        "mean": 590.5153,
+        "p50": 573.4688,
+        "p95": 749.4292,
+        "p99": 883.8188,
+        "p999": 883.8188,
+        "max": 883.8188,
+        "min": 501.4917
+      },
+      "bytes": 10
+    }
+  },
+  "perTick": {
+    "note": "Per-recipient delta encode ×10 clients, per server send",
+    "deltaEncodeFor10ClientsMs": 0.0089,
+    "jsonEncodeFor10ClientsMs": 0.1276,
+    "bandwidthPerClientKbps30Hz": {
+      "json": 807.5,
+      "binaryFloat": 118.7,
+      "binaryQuant": 76,
+      "binaryDelta": 45.2
+    }
+  }
+}

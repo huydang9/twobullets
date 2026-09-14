@@ -1,0 +1,285 @@
+{
+  "benchmark": "havok-tick",
+  "date": "2026-09-14T13:00:51.021Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "mode": "direct",
+    "ticks": 36000,
+    "warmup": 600,
+    "players": 10,
+    "projectiles": 50,
+    "hitboxes": 20,
+    "buildings": 300,
+    "samples": 513,
+    "seed": 1234,
+    "out": "tools/bench/runtime/results/havok-tick-direct-2.json"
+  },
+  "scenario": {
+    "seed": 1234,
+    "players": 10,
+    "hitboxesPerPlayer": 20,
+    "projectiles": 50,
+    "buildings": 300,
+    "heightfieldSamples": 513,
+    "mapSize": 1000
+  },
+  "setup": {
+    "processToReadyMs": 401.7,
+    "setupTotalMs": 46.5,
+    "phasesMs": {
+      "havokInit": 11.39,
+      "terrain": 18.45,
+      "buildings": 7.94,
+      "playersAndHitboxes": 8.54
+    }
+  },
+  "tickMs": {
+    "n": 36000,
+    "mean": 0.4242,
+    "p50": 0.3807,
+    "p95": 0.602,
+    "p99": 1.1496,
+    "p999": 3.3394,
+    "max": 18.8337,
+    "min": 0.3017
+  },
+  "phaseMs": {
+    "move": {
+      "n": 36000,
+      "mean": 0.1582,
+      "p50": 0.1433,
+      "p95": 0.2244,
+      "p99": 0.459,
+      "p999": 1.0857,
+      "max": 12.4698,
+      "min": 0.092
+    },
+    "weapons": {
+      "n": 36000,
+      "mean": 0.0028,
+      "p50": 0.0015,
+      "p95": 0.0065,
+      "p99": 0.0165,
+      "p999": 0.1315,
+      "max": 6.283,
+      "min": 0.0009
+    },
+    "hitboxes": {
+      "n": 36000,
+      "mean": 0.1211,
+      "p50": 0.1093,
+      "p95": 0.1633,
+      "p99": 0.3345,
+      "p999": 0.6879,
+      "max": 10.4288,
+      "min": 0.1011
+    },
+    "worldStep": {
+      "n": 36000,
+      "mean": 0.0609,
+      "p50": 0.0513,
+      "p95": 0.1029,
+      "p99": 0.2172,
+      "p999": 0.5282,
+      "max": 6.7242,
+      "min": 0.0383
+    },
+    "projectiles": {
+      "n": 36000,
+      "mean": 0.081,
+      "p50": 0.0712,
+      "p95": 0.1186,
+      "p99": 0.2692,
+      "p999": 0.6367,
+      "max": 12.6633,
+      "min": 0.051
+    }
+  },
+  "ticksOver": {
+    "2ms": 77,
+    "4ms": 26,
+    "8ms": 8,
+    "16.67ms": 1
+  },
+  "throughput": {
+    "runWallMs": 15417.3,
+    "cpuUserMs": 14785.6,
+    "cpuSystemMs": 257.4,
+    "realtimeFactor": 39.89
+  },
+  "memoryMb": {
+    "baseline": {
+      "rss": 84.3,
+      "heapTotal": 11.9,
+      "heapUsed": 9.4,
+      "external": 8.9,
+      "arrayBuffers": 0.1
+    },
+    "afterSetup": {
+      "rss": 108.8,
+      "heapTotal": 16.4,
+      "heapUsed": 11.2,
+      "external": 28.3,
+      "arrayBuffers": 2.2
+    },
+    "afterWarmup": {
+      "rss": 139.9,
+      "heapTotal": 20.6,
+      "heapUsed": 12.4,
+      "external": 28.2,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 142.3,
+      "heapTotal": 85.1,
+      "heapUsed": 12,
+      "external": 29.9,
+      "arrayBuffers": 4
+    },
+    "series": [
+      {
+        "tick": 3600,
+        "rss": 88.2,
+        "heapTotal": 30.8,
+        "heapUsed": 18.7,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 7200,
+        "rss": 107,
+        "heapTotal": 48.4,
+        "heapUsed": 19.4,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 10800,
+        "rss": 108.2,
+        "heapTotal": 49.4,
+        "heapUsed": 16.7,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 14400,
+        "rss": 109.1,
+        "heapTotal": 49.4,
+        "heapUsed": 24.9,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 18000,
+        "rss": 110,
+        "heapTotal": 50,
+        "heapUsed": 21.2,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 21600,
+        "rss": 103.5,
+        "heapTotal": 50.2,
+        "heapUsed": 21.6,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 25200,
+        "rss": 102.4,
+        "heapTotal": 51,
+        "heapUsed": 21.4,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 28800,
+        "rss": 101.5,
+        "heapTotal": 51.5,
+        "heapUsed": 22.8,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 32400,
+        "rss": 139.4,
+        "heapTotal": 85.1,
+        "heapUsed": 11.7,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      },
+      {
+        "tick": 36000,
+        "rss": 142.2,
+        "heapTotal": 85.1,
+        "heapUsed": 11.9,
+        "external": 29.9,
+        "arrayBuffers": 4,
+        "havokHeap": 16.9
+      }
+    ]
+  },
+  "havokHeapMb": {
+    "afterSetup": 16.9,
+    "afterRun": 16.9
+  },
+  "gc": {
+    "count": {
+      "minor": 937,
+      "incremental": 1,
+      "major": 1
+    },
+    "totalMs": {
+      "minor": 157.413,
+      "incremental": 0.393,
+      "major": 1.18
+    },
+    "maxMs": {
+      "minor": 2.153,
+      "incremental": 0.393,
+      "major": 1.18
+    },
+    "pauses": {
+      "n": 939,
+      "mean": 0.1693,
+      "p50": 0.1547,
+      "p95": 0.2587,
+      "p99": 0.4659,
+      "p999": 2.153,
+      "max": 2.153,
+      "min": 0.0598
+    }
+  },
+  "sanity": {
+    "hitboxImpacts": 17071,
+    "worldImpacts": 286825,
+    "expired": 11493,
+    "spawned": 315432,
+    "belowTerrain": 0,
+    "groundedTicks": 315884,
+    "playerTicks": 366000,
+    "shots": 2136,
+    "groundedRatio": 0.863,
+    "stepUps": 55,
+    "meanHorizontalSpeed": 5.53
+  }
+}

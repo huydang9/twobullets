@@ -1,0 +1,245 @@
+{
+  "benchmark": "shared-code",
+  "date": "2026-09-14T13:16:12.432Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v26.3.0",
+    "v8": "14.6.202.34-node.20",
+    "platform": "darwin-arm64",
+    "loadAvg": [
+      5.03,
+      6.73,
+      6.46
+    ]
+  },
+  "args": {
+    "batches": 40,
+    "out": "tools/bench/runtime/results/shared-code-bun.json"
+  },
+  "results": {
+    "computeDesiredVelocity": {
+      "unit": "player",
+      "opsPerTick": 10,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 104.3687,
+        "p50": 104.2579,
+        "p95": 112.1983,
+        "p99": 112.3379,
+        "p999": 112.3379,
+        "max": 112.3379,
+        "min": 99.0371
+      },
+      "msPerTickP50": 0.00104,
+      "bytesPerOp": 0,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "stepWeapon": {
+      "unit": "player",
+      "opsPerTick": 10,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 66.1622,
+        "p50": 66.5292,
+        "p95": 70.0013,
+        "p99": 72.5654,
+        "p999": 72.5654,
+        "max": 72.5654,
+        "min": 60.5596
+      },
+      "msPerTickP50": 0.00067,
+      "bytesPerOp": 0.1,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "stepProjectiles50": {
+      "unit": "tick",
+      "opsPerTick": 1,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 2420.3047,
+        "p50": 2384.6665,
+        "p95": 2818.7915,
+        "p99": 2852.271,
+        "p999": 2852.271,
+        "max": 2852.271,
+        "min": 2121.75
+      },
+      "msPerTickP50": 0.00238,
+      "bytesPerOp": 32.6,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "stepProjectiles50SoA": {
+      "unit": "tick",
+      "opsPerTick": 1,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 123.0863,
+        "p50": 122.4563,
+        "p95": 133.9021,
+        "p99": 136.5209,
+        "p999": 136.5209,
+        "max": 136.5209,
+        "min": 116.6021
+      },
+      "msPerTickP50": 0.00012,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "skeleton69": {
+      "unit": "player",
+      "opsPerTick": 10,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 1933.4058,
+        "p50": 1926.6082,
+        "p95": 2010.625,
+        "p99": 2013.6,
+        "p999": 2013.6,
+        "max": 2013.6,
+        "min": 1880.2918
+      },
+      "msPerTickP50": 0.01927,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "lagCompRaysVsCapsules": {
+      "unit": "tick",
+      "opsPerTick": 1,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 131652.8468,
+        "p50": 130795.958,
+        "p95": 138900.833,
+        "p99": 147213.0415,
+        "p999": 147213.0415,
+        "max": 147213.0415,
+        "min": 129749.1665
+      },
+      "msPerTickP50": 0.1308,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "mathHypot3x1000": {
+      "unit": "1000 calls",
+      "opsPerTick": 0,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 12739.7234,
+        "p50": 12716.896,
+        "p95": 12969.375,
+        "p99": 13117.271,
+        "p999": 13117.271,
+        "max": 13117.271,
+        "min": 12486.729
+      },
+      "msPerTickP50": 0,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "mathSqrt3x1000": {
+      "unit": "1000 calls",
+      "opsPerTick": 0,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 955.899,
+        "p50": 948.5415,
+        "p95": 1007.3335,
+        "p99": 1017.2295,
+        "p999": 1017.2295,
+        "max": 1017.2295,
+        "min": 925.396
+      },
+      "msPerTickP50": 0,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "mathHypot2x1000": {
+      "unit": "1000 calls",
+      "opsPerTick": 0,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 12873.726,
+        "p50": 12822.3545,
+        "p95": 13233.1875,
+        "p99": 13309.3125,
+        "p999": 13309.3125,
+        "max": 13309.3125,
+        "min": 12674.3335
+      },
+      "msPerTickP50": 0,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    },
+    "historyRingWrite": {
+      "unit": "tick",
+      "opsPerTick": 1,
+      "nsPerOp": {
+        "n": 40,
+        "mean": 132.7665,
+        "p50": 132.5125,
+        "p95": 137.7017,
+        "p99": 142.1875,
+        "p999": 142.1875,
+        "max": 142.1875,
+        "min": 125.7242
+      },
+      "msPerTickP50": 0.00013,
+      "bytesPerOp": null,
+      "gc": {
+        "count": {},
+        "totalMs": {},
+        "maxMs": {},
+        "pauses": null
+      }
+    }
+  }
+}

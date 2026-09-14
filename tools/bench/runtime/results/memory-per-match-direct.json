@@ -1,0 +1,179 @@
+{
+  "benchmark": "memory-per-match",
+  "date": "2026-09-14T13:07:38.592Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "mode": "direct",
+    "matches": 16,
+    "out": "tools/bench/runtime/results/memory-per-match-direct.json"
+  },
+  "rows": [
+    {
+      "matches": 0,
+      "rss": 87.6,
+      "heapTotal": 14,
+      "heapUsed": 8.8,
+      "external": 8.9,
+      "arrayBuffers": 0.1,
+      "wasmMb": 0
+    },
+    {
+      "matches": 1,
+      "rss": 133.2,
+      "heapTotal": 15.9,
+      "heapUsed": 10.4,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 2,
+      "rss": 136.3,
+      "heapTotal": 20.3,
+      "heapUsed": 10.6,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 3,
+      "rss": 144.8,
+      "heapTotal": 20.3,
+      "heapUsed": 10.8,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 4,
+      "rss": 147.2,
+      "heapTotal": 20.6,
+      "heapUsed": 11.2,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 5,
+      "rss": 149.7,
+      "heapTotal": 20.6,
+      "heapUsed": 11,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 6,
+      "rss": 148.4,
+      "heapTotal": 20.6,
+      "heapUsed": 11,
+      "external": 28.2,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 7,
+      "rss": 152.1,
+      "heapTotal": 20.9,
+      "heapUsed": 11.1,
+      "external": 31.6,
+      "arrayBuffers": 2.2,
+      "wasmMb": 20.3
+    },
+    {
+      "matches": 8,
+      "rss": 154.5,
+      "heapTotal": 20.9,
+      "heapUsed": 11.2,
+      "external": 35.7,
+      "arrayBuffers": 2.2,
+      "wasmMb": 24.4
+    },
+    {
+      "matches": 9,
+      "rss": 156.9,
+      "heapTotal": 20.9,
+      "heapUsed": 11.3,
+      "external": 35.7,
+      "arrayBuffers": 2.2,
+      "wasmMb": 24.4
+    },
+    {
+      "matches": 10,
+      "rss": 160.4,
+      "heapTotal": 21.1,
+      "heapUsed": 11.4,
+      "external": 40.6,
+      "arrayBuffers": 2.2,
+      "wasmMb": 29.3
+    },
+    {
+      "matches": 11,
+      "rss": 162.8,
+      "heapTotal": 21.1,
+      "heapUsed": 11.5,
+      "external": 40.6,
+      "arrayBuffers": 2.2,
+      "wasmMb": 29.3
+    },
+    {
+      "matches": 12,
+      "rss": 179.4,
+      "heapTotal": 29.5,
+      "heapUsed": 11.6,
+      "external": 46.5,
+      "arrayBuffers": 2.2,
+      "wasmMb": 35.2
+    },
+    {
+      "matches": 13,
+      "rss": 182.3,
+      "heapTotal": 29.8,
+      "heapUsed": 11.7,
+      "external": 46.5,
+      "arrayBuffers": 2.2,
+      "wasmMb": 35.2
+    },
+    {
+      "matches": 14,
+      "rss": 183.5,
+      "heapTotal": 26.2,
+      "heapUsed": 7,
+      "external": 53.6,
+      "arrayBuffers": 2.2,
+      "wasmMb": 42.3
+    },
+    {
+      "matches": 15,
+      "rss": 185.9,
+      "heapTotal": 26.2,
+      "heapUsed": 7.1,
+      "external": 53.6,
+      "arrayBuffers": 2.2,
+      "wasmMb": 42.3
+    },
+    {
+      "matches": 16,
+      "rss": 188.2,
+      "heapTotal": 26.2,
+      "heapUsed": 7.2,
+      "external": 62,
+      "arrayBuffers": 2.2,
+      "wasmMb": 50.7
+    }
+  ],
+  "marginalPerMatchMb": {
+    "rss": 3.7,
+    "heapUsed": -0.2,
+    "wasm": 2.3
+  }
+}

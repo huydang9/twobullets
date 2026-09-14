@@ -1,0 +1,273 @@
+{
+  "benchmark": "startup",
+  "date": "2026-09-14T12:58:30.919Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "probe": "",
+    "repeat": 3,
+    "out": "tools/bench/runtime/results/startup.json"
+  },
+  "results": {
+    "bareNode": {
+      "description": "node -e (no TypeScript)",
+      "runs": [
+        {
+          "wallMs": 41.3,
+          "rssMb": 43.728896,
+          "heapUsedMb": 3.7824
+        },
+        {
+          "wallMs": 36.3,
+          "rssMb": 43.728896,
+          "heapUsedMb": 3.7824
+        },
+        {
+          "wallMs": 36.9,
+          "rssMb": 43.597824,
+          "heapUsedMb": 3.7824
+        }
+      ]
+    },
+    "tsBaseline": {
+      "description": "Node + this probe (TypeScript stripping loaded), nothing else",
+      "runs": [
+        {
+          "wallMs": 73.3,
+          "ms": 0,
+          "processUptimeMs": 49.4,
+          "rssMb": 82.5,
+          "heapUsedMb": 9,
+          "externalMb": 11.6
+        },
+        {
+          "wallMs": 73,
+          "ms": 0,
+          "processUptimeMs": 45.2,
+          "rssMb": 83.2,
+          "heapUsedMb": 9,
+          "externalMb": 11.6
+        },
+        {
+          "wallMs": 70,
+          "ms": 0,
+          "processUptimeMs": 46.8,
+          "rssMb": 83.2,
+          "heapUsedMb": 9.1,
+          "externalMb": 11.6
+        }
+      ]
+    },
+    "havok": {
+      "description": "import @babylonjs/havok + instantiate WASM (from bytes)",
+      "runs": [
+        {
+          "wallMs": 85.2,
+          "ms": 14.9,
+          "processUptimeMs": 63.2,
+          "rssMb": 92.9,
+          "heapUsedMb": 10.8,
+          "externalMb": 27.8
+        },
+        {
+          "wallMs": 85,
+          "ms": 12,
+          "processUptimeMs": 59.2,
+          "rssMb": 92.5,
+          "heapUsedMb": 10.7,
+          "externalMb": 27.8
+        },
+        {
+          "wallMs": 78.8,
+          "ms": 11.6,
+          "processUptimeMs": 57.7,
+          "rssMb": 92.4,
+          "heapUsedMb": 10.8,
+          "externalMb": 27.8
+        }
+      ]
+    },
+    "babylonBarrel": {
+      "description": "import(\"@babylonjs/core\") barrel",
+      "runs": [
+        {
+          "wallMs": 1442.7,
+          "ms": 1364.6,
+          "processUptimeMs": 1412,
+          "rssMb": 203.6,
+          "heapUsedMb": 85.9,
+          "externalMb": 10.3
+        },
+        {
+          "wallMs": 861.8,
+          "ms": 782.3,
+          "processUptimeMs": 829.3,
+          "rssMb": 207.2,
+          "heapUsedMb": 85.9,
+          "externalMb": 10.3
+        },
+        {
+          "wallMs": 776.7,
+          "ms": 695,
+          "processUptimeMs": 744.1,
+          "rssMb": 233.9,
+          "heapUsedMb": 86.4,
+          "externalMb": 9
+        }
+      ]
+    },
+    "babylonDeep": {
+      "description": "deep imports: NullEngine, Scene, HavokPlugin, physics v2 body/shape/aggregate/character controller, Mesh",
+      "runs": [
+        {
+          "wallMs": 147,
+          "ms": 70,
+          "processUptimeMs": 121.7,
+          "rssMb": 104.2,
+          "heapUsedMb": 19.1,
+          "externalMb": 8.8
+        },
+        {
+          "wallMs": 145.8,
+          "ms": 69.6,
+          "processUptimeMs": 122.2,
+          "rssMb": 105.3,
+          "heapUsedMb": 19.2,
+          "externalMb": 8.8
+        },
+        {
+          "wallMs": 141.2,
+          "ms": 68.9,
+          "processUptimeMs": 118.6,
+          "rssMb": 104.2,
+          "heapUsedMb": 19,
+          "externalMb": 8.8
+        }
+      ]
+    },
+    "sharedIndex": {
+      "description": "import packages/shared/src/index.ts (re-exports buildLevel → Babylon barrel)",
+      "runs": [
+        {
+          "wallMs": 762,
+          "ms": 679.7,
+          "processUptimeMs": 731.3,
+          "rssMb": 242.5,
+          "heapUsedMb": 84.8,
+          "externalMb": 10.2
+        },
+        {
+          "wallMs": 922.8,
+          "ms": 836.7,
+          "processUptimeMs": 883.6,
+          "rssMb": 221.1,
+          "heapUsedMb": 84.4,
+          "externalMb": 10.3
+        },
+        {
+          "wallMs": 866.3,
+          "ms": 723.6,
+          "processUptimeMs": 827,
+          "rssMb": 241.5,
+          "heapUsedMb": 96.7,
+          "externalMb": 9.7
+        }
+      ]
+    },
+    "sharedSimOnly": {
+      "description": "import shared movement + weapons modules only",
+      "runs": [
+        {
+          "wallMs": 77.8,
+          "ms": 4.4,
+          "processUptimeMs": 50.5,
+          "rssMb": 86,
+          "heapUsedMb": 9.9,
+          "externalMb": 11.6
+        },
+        {
+          "wallMs": 78.5,
+          "ms": 5.3,
+          "processUptimeMs": 52,
+          "rssMb": 87.8,
+          "heapUsedMb": 9.5,
+          "externalMb": 11.6
+        },
+        {
+          "wallMs": 78.4,
+          "ms": 6.2,
+          "processUptimeMs": 52.2,
+          "rssMb": 86.6,
+          "heapUsedMb": 9.5,
+          "externalMb": 11.6
+        }
+      ]
+    },
+    "directMatchReady": {
+      "description": "direct match fully built (Havok + heightfield + 300 buildings + 10 players + 200 hitboxes)",
+      "runs": [
+        {
+          "wallMs": 153.3,
+          "ms": 65.2,
+          "processUptimeMs": 111.7,
+          "rssMb": 110.7,
+          "heapUsedMb": 12,
+          "externalMb": 28.3
+        },
+        {
+          "wallMs": 151,
+          "ms": 64.3,
+          "processUptimeMs": 110.4,
+          "rssMb": 112.9,
+          "heapUsedMb": 12,
+          "externalMb": 28.3
+        },
+        {
+          "wallMs": 150.7,
+          "ms": 60.1,
+          "processUptimeMs": 108.6,
+          "rssMb": 113.1,
+          "heapUsedMb": 12,
+          "externalMb": 28.3
+        }
+      ]
+    },
+    "babylonMatchReady": {
+      "description": "babylon match fully built (barrel + NullEngine scene + buildLevel + CharacterBody)",
+      "runs": [
+        {
+          "wallMs": 1909.2,
+          "ms": 1791.9,
+          "processUptimeMs": 1854.9,
+          "rssMb": 335.6,
+          "heapUsedMb": 148.8,
+          "externalMb": 30
+        },
+        {
+          "wallMs": 1323.8,
+          "ms": 1200.8,
+          "processUptimeMs": 1265.2,
+          "rssMb": 379.3,
+          "heapUsedMb": 149.3,
+          "externalMb": 30
+        },
+        {
+          "wallMs": 1323.2,
+          "ms": 1192.8,
+          "processUptimeMs": 1258.9,
+          "rssMb": 381.6,
+          "heapUsedMb": 149.1,
+          "externalMb": 30.1
+        }
+      ]
+    }
+  }
+}

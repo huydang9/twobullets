@@ -1,0 +1,204 @@
+{
+  "benchmark": "havok-tick",
+  "date": "2026-09-14T13:03:48.678Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "mode": "direct",
+    "ticks": 3600,
+    "warmup": 600,
+    "players": 100,
+    "projectiles": 500,
+    "hitboxes": 20,
+    "buildings": 300,
+    "samples": 513,
+    "seed": 1234,
+    "out": "tools/bench/runtime/results/havok-tick-direct-p100.json"
+  },
+  "scenario": {
+    "seed": 1234,
+    "players": 100,
+    "hitboxesPerPlayer": 20,
+    "projectiles": 500,
+    "buildings": 300,
+    "heightfieldSamples": 513,
+    "mapSize": 1000
+  },
+  "setup": {
+    "processToReadyMs": 2894,
+    "setupTotalMs": 63.3,
+    "phasesMs": {
+      "havokInit": 14.11,
+      "terrain": 21.1,
+      "buildings": 8.12,
+      "playersAndHitboxes": 19.66
+    }
+  },
+  "tickMs": {
+    "n": 3600,
+    "mean": 4.4185,
+    "p50": 4.1974,
+    "p95": 5.24,
+    "p99": 8.0518,
+    "p999": 37.3243,
+    "max": 89.9571,
+    "min": 3.4908
+  },
+  "phaseMs": {
+    "move": {
+      "n": 3600,
+      "mean": 1.6841,
+      "p50": 1.5932,
+      "p95": 2.0614,
+      "p99": 2.9713,
+      "p999": 9.4248,
+      "max": 25.1437,
+      "min": 1.311
+    },
+    "weapons": {
+      "n": 3600,
+      "mean": 0.0379,
+      "p50": 0.0313,
+      "p95": 0.0747,
+      "p99": 0.1377,
+      "p999": 0.4796,
+      "max": 0.6443,
+      "min": 0.011
+    },
+    "hitboxes": {
+      "n": 3600,
+      "mean": 1.257,
+      "p50": 1.1508,
+      "p95": 1.64,
+      "p99": 2.4985,
+      "p999": 10.9885,
+      "max": 36.2757,
+      "min": 1.0108
+    },
+    "worldStep": {
+      "n": 3600,
+      "mean": 0.5685,
+      "p50": 0.5138,
+      "p95": 0.7329,
+      "p99": 1.0197,
+      "p999": 4.1022,
+      "max": 27.7833,
+      "min": 0.4267
+    },
+    "projectiles": {
+      "n": 3600,
+      "mean": 0.8701,
+      "p50": 0.7975,
+      "p95": 1.1357,
+      "p99": 1.614,
+      "p999": 4.2323,
+      "max": 27.4263,
+      "min": 0.6546
+    }
+  },
+  "ticksOver": {
+    "2ms": 3600,
+    "4ms": 2518,
+    "8ms": 37,
+    "16.67ms": 8
+  },
+  "throughput": {
+    "runWallMs": 15937,
+    "cpuUserMs": 15301.8,
+    "cpuSystemMs": 223.5,
+    "realtimeFactor": 3.86
+  },
+  "memoryMb": {
+    "baseline": {
+      "rss": 85.2,
+      "heapTotal": 11.7,
+      "heapUsed": 9.4,
+      "external": 8.9,
+      "arrayBuffers": 0.1
+    },
+    "afterSetup": {
+      "rss": 114,
+      "heapTotal": 15.4,
+      "heapUsed": 10.9,
+      "external": 28.2,
+      "arrayBuffers": 2.2
+    },
+    "afterWarmup": {
+      "rss": 168.8,
+      "heapTotal": 81.1,
+      "heapUsed": 21.7,
+      "external": 28.2,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 204.6,
+      "heapTotal": 148.5,
+      "heapUsed": 55.2,
+      "external": 28.4,
+      "arrayBuffers": 2.4
+    },
+    "series": [
+      {
+        "tick": 3600,
+        "rss": 203.9,
+        "heapTotal": 148.5,
+        "heapUsed": 54.9,
+        "external": 28.4,
+        "arrayBuffers": 2.4,
+        "havokHeap": 16.9
+      }
+    ]
+  },
+  "havokHeapMb": {
+    "afterSetup": 16.9,
+    "afterRun": 16.9
+  },
+  "gc": {
+    "count": {
+      "minor": 260,
+      "incremental": 2,
+      "major": 2
+    },
+    "totalMs": {
+      "minor": 108.521,
+      "incremental": 0.431,
+      "major": 2.711
+    },
+    "maxMs": {
+      "minor": 8.219,
+      "incremental": 0.265,
+      "major": 1.972
+    },
+    "pauses": {
+      "n": 264,
+      "mean": 0.4229,
+      "p50": 0.3562,
+      "p95": 0.5562,
+      "p99": 2.8646,
+      "p999": 8.2194,
+      "max": 8.2194,
+      "min": 0.166
+    }
+  },
+  "sanity": {
+    "hitboxImpacts": 26359,
+    "worldImpacts": 376877,
+    "expired": 11183,
+    "spawned": 414830,
+    "belowTerrain": 0,
+    "groundedTicks": 362096,
+    "playerTicks": 420000,
+    "shots": 6043,
+    "groundedRatio": 0.862,
+    "stepUps": 91,
+    "meanHorizontalSpeed": 5.1
+  }
+}

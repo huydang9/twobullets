@@ -1,0 +1,108 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:05:39.643Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "workers": 1,
+    "perWorker": 30,
+    "seconds": 20,
+    "rate": 60,
+    "sharedHavok": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w1-m30.json"
+  },
+  "havokCompileMs": 3.9,
+  "spawnAndSetupMs": 532.8,
+  "memoryMb": {
+    "baseline": {
+      "rss": 93.8,
+      "heapTotal": 14,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 232,
+      "heapTotal": 14.3,
+      "heapUsed": 9.8,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 283.3,
+      "heapTotal": 12.2,
+      "heapUsed": 9.6,
+      "external": 9.3,
+      "arrayBuffers": 0.1
+    },
+    "rssPerWorker": 138.2,
+    "rssPerMatch": 4.6
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 479.70420900000005,
+      "heapUsedMb": 11.991144,
+      "wasmMb": 87.687168,
+      "ticks": 1148,
+      "lateness": {
+        "n": 1148,
+        "mean": 8.9066,
+        "p50": 0.1785,
+        "p95": 29.9929,
+        "p99": 32.7935,
+        "p999": 33.2698,
+        "max": 33.2844,
+        "min": 0
+      },
+      "workMs": {
+        "n": 1148,
+        "mean": 16.7528,
+        "p50": 15.8403,
+        "p95": 21.583,
+        "p99": 28.2383,
+        "p999": 64.2761,
+        "max": 105.7678,
+        "min": 12.6633
+      },
+      "overruns": 577,
+      "skipped": 52,
+      "threadCpuPercent": 93.6,
+      "inputLatencyMs": {
+        "n": 35880,
+        "mean": 624.4792,
+        "p50": 19.1084,
+        "p95": 3234.1233,
+        "p99": 4053.6887,
+        "p999": 4220.813,
+        "max": 4237.0518,
+        "min": 0.0039
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 1148,
+    "mean": 0.1088,
+    "p50": 0.0918,
+    "p95": 0.1875,
+    "p99": 0.4099,
+    "p999": 1.0037,
+    "max": 1.3237,
+    "min": 0.0491
+  },
+  "totals": {
+    "matches": 30,
+    "players": 300,
+    "overruns": 577,
+    "skipped": 52
+  }
+}

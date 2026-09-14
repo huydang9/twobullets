@@ -1,0 +1,308 @@
+{
+  "benchmark": "capacity",
+  "date": "2026-09-14T13:06:49.121Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "workers": 6,
+    "perWorker": 1,
+    "seconds": 10,
+    "rate": 60,
+    "sharedHavok": true,
+    "spinMs": 2,
+    "out": "tools/bench/runtime/results/capacity-w6-m1.json"
+  },
+  "havokCompileMs": 3.9,
+  "spawnAndSetupMs": 332,
+  "memoryMb": {
+    "baseline": {
+      "rss": 94.1,
+      "heapTotal": 14,
+      "heapUsed": 9.7,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterSetup": {
+      "rss": 244.3,
+      "heapTotal": 14.6,
+      "heapUsed": 10.2,
+      "external": 11.4,
+      "arrayBuffers": 2.2
+    },
+    "afterRun": {
+      "rss": 169.3,
+      "heapTotal": 12.2,
+      "heapUsed": 10.2,
+      "external": 9.3,
+      "arrayBuffers": 0.2
+    },
+    "rssPerWorker": 25,
+    "rssPerMatch": 25
+  },
+  "workers": [
+    {
+      "type": "done",
+      "setupMs": 234.68270799999993,
+      "heapUsedMb": 9.10008,
+      "wasmMb": 16.908288,
+      "ticks": 587,
+      "lateness": {
+        "n": 587,
+        "mean": 0.4014,
+        "p50": 0.0166,
+        "p95": 2.0249,
+        "p99": 8.2534,
+        "p999": 23.8613,
+        "max": 23.8613,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 587,
+        "mean": 2.1198,
+        "p50": 1.2939,
+        "p95": 3.7146,
+        "p99": 9.582,
+        "p999": 185.7722,
+        "max": 185.7722,
+        "min": 0.6011
+      },
+      "overruns": 9,
+      "skipped": 13,
+      "threadCpuPercent": 11.1,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.684,
+        "p50": 0.0696,
+        "p95": 0.3728,
+        "p99": 20.5166,
+        "p999": 296.6926,
+        "max": 296.6926,
+        "min": 0.0247
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 202.806042,
+      "heapUsedMb": 8.890624,
+      "wasmMb": 16.908288,
+      "ticks": 587,
+      "lateness": {
+        "n": 587,
+        "mean": 0.598,
+        "p50": 0.0203,
+        "p95": 2.1565,
+        "p99": 17.9631,
+        "p999": 33.2805,
+        "max": 33.2805,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 587,
+        "mean": 2.2454,
+        "p50": 1.3738,
+        "p95": 3.7698,
+        "p99": 17.9607,
+        "p999": 161.4871,
+        "max": 161.4871,
+        "min": 0.6052
+      },
+      "overruns": 10,
+      "skipped": 13,
+      "threadCpuPercent": 11.5,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.9942,
+        "p50": 0.0562,
+        "p95": 0.3677,
+        "p99": 47.592,
+        "p999": 323.7397,
+        "max": 323.7397,
+        "min": 0.019
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 213.944792,
+      "heapUsedMb": 10.046208,
+      "wasmMb": 16.908288,
+      "ticks": 586,
+      "lateness": {
+        "n": 586,
+        "mean": 0.458,
+        "p50": 0.0178,
+        "p95": 2.1255,
+        "p99": 12.4312,
+        "p999": 25.5542,
+        "max": 25.5542,
+        "min": 0
+      },
+      "workMs": {
+        "n": 586,
+        "mean": 2.1002,
+        "p50": 1.3704,
+        "p95": 3.2483,
+        "p99": 7.9622,
+        "p999": 177.5818,
+        "max": 177.5818,
+        "min": 0.5901
+      },
+      "overruns": 5,
+      "skipped": 14,
+      "threadCpuPercent": 11.3,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.1479,
+        "p50": 0.0586,
+        "p95": 0.3579,
+        "p99": 7.2004,
+        "p999": 206.7322,
+        "max": 206.7322,
+        "min": 0.0144
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 133.007291,
+      "heapUsedMb": 9.074088,
+      "wasmMb": 16.908288,
+      "ticks": 585,
+      "lateness": {
+        "n": 585,
+        "mean": 0.4711,
+        "p50": 0.0183,
+        "p95": 2.0959,
+        "p99": 12.6543,
+        "p999": 31.1748,
+        "max": 31.1748,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 585,
+        "mean": 2.1544,
+        "p50": 1.3025,
+        "p95": 3.4473,
+        "p99": 9.3413,
+        "p999": 192.127,
+        "max": 192.127,
+        "min": 0.5862
+      },
+      "overruns": 6,
+      "skipped": 15,
+      "threadCpuPercent": 11.2,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.6673,
+        "p50": 0.0647,
+        "p95": 0.3682,
+        "p99": 20.2231,
+        "p999": 296.2878,
+        "max": 296.2878,
+        "min": 0.0154
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 198.18654199999997,
+      "heapUsedMb": 8.218296,
+      "wasmMb": 16.908288,
+      "ticks": 587,
+      "lateness": {
+        "n": 587,
+        "mean": 0.532,
+        "p50": 0.0205,
+        "p95": 2.3086,
+        "p99": 15.3267,
+        "p999": 23.4839,
+        "max": 23.4839,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 587,
+        "mean": 2.1818,
+        "p50": 1.3142,
+        "p95": 3.572,
+        "p99": 13.5413,
+        "p999": 198.6357,
+        "max": 198.6357,
+        "min": 0.5681
+      },
+      "overruns": 11,
+      "skipped": 13,
+      "threadCpuPercent": 11.3,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.987,
+        "p50": 0.0681,
+        "p95": 0.3853,
+        "p99": 45.3799,
+        "p999": 321.4731,
+        "max": 321.4731,
+        "min": 0.0164
+      }
+    },
+    {
+      "type": "done",
+      "setupMs": 201.27783399999998,
+      "heapUsedMb": 11.084416,
+      "wasmMb": 16.908288,
+      "ticks": 587,
+      "lateness": {
+        "n": 587,
+        "mean": 0.5819,
+        "p50": 0.0188,
+        "p95": 2.1902,
+        "p99": 13.9827,
+        "p999": 66.9536,
+        "max": 66.9536,
+        "min": 0.0002
+      },
+      "workMs": {
+        "n": 587,
+        "mean": 2.0181,
+        "p50": 1.3525,
+        "p95": 3.4502,
+        "p99": 8.0247,
+        "p999": 151.8677,
+        "max": 151.8677,
+        "min": 0.5796
+      },
+      "overruns": 8,
+      "skipped": 13,
+      "threadCpuPercent": 11.3,
+      "inputLatencyMs": {
+        "n": 582,
+        "mean": 1.284,
+        "p50": 0.0664,
+        "p95": 0.4551,
+        "p99": 21.6826,
+        "p999": 222.3523,
+        "max": 222.3523,
+        "min": 0.0161
+      }
+    }
+  ],
+  "parentSnapshotReceiveLatencyMs": {
+    "n": 3519,
+    "mean": 0.4362,
+    "p50": 0.0691,
+    "p95": 1.0659,
+    "p99": 5.2327,
+    "p999": 39.5986,
+    "max": 120.1333,
+    "min": 0.0083
+  },
+  "totals": {
+    "matches": 6,
+    "players": 60,
+    "overruns": 49,
+    "skipped": 81
+  }
+}

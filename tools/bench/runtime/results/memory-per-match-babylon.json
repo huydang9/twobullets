@@ -1,0 +1,71 @@
+{
+  "benchmark": "memory-per-match",
+  "date": "2026-09-14T13:07:26.830Z",
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "ncpu": 10,
+    "perfCores": "6",
+    "effCores": "4",
+    "memGb": 16,
+    "node": "v24.19.0",
+    "v8": "13.6.233.17-node.51",
+    "platform": "darwin-arm64"
+  },
+  "args": {
+    "mode": "babylon",
+    "matches": 4,
+    "out": "tools/bench/runtime/results/memory-per-match-babylon.json"
+  },
+  "rows": [
+    {
+      "matches": 0,
+      "rss": 106.1,
+      "heapTotal": 14,
+      "heapUsed": 9,
+      "external": 9.1,
+      "arrayBuffers": 0.1,
+      "wasmMb": 0
+    },
+    {
+      "matches": 1,
+      "rss": 374.9,
+      "heapTotal": 267.4,
+      "heapUsed": 123.5,
+      "external": 28.1,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 2,
+      "rss": 382.6,
+      "heapTotal": 269.2,
+      "heapUsed": 131.9,
+      "external": 28.1,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 3,
+      "rss": 389.3,
+      "heapTotal": 275.8,
+      "heapUsed": 139.7,
+      "external": 28.1,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    },
+    {
+      "matches": 4,
+      "rss": 400.2,
+      "heapTotal": 283.7,
+      "heapUsed": 147.5,
+      "external": 28.1,
+      "arrayBuffers": 2.2,
+      "wasmMb": 16.9
+    }
+  ],
+  "marginalPerMatchMb": {
+    "rss": 8.4,
+    "heapUsed": 8,
+    "wasm": 0
+  }
+}
