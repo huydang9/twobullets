@@ -9,13 +9,14 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@babylonjs/core": "^9.26.0",
-    "@babylonjs/havok": "^1.3.14",
-    "@babylonjs/loaders": "~9.26.0",
-    "@twobullets/shared": "workspace:*"
+    "@babylonjs/core": "9.26.0",
+    "@babylonjs/havok": "1.3.14",
+    "@babylonjs/loaders": "9.26.0",
+    "@twobullets/shared": "workspace:*",
+    "@twobullets/sim": "workspace:*"
   },
   "devDependencies": {
-    "@babylonjs/inspector": "^9.26.0",
+    "@babylonjs/inspector": "9.26.0",
     "vite": "^8.3.0"
   }
 }

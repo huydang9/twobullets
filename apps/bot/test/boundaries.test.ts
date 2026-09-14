@@ -66,6 +66,8 @@ function reachableExternals(entries: string[]): { file: string; spec: string }[]
 }
 
 const PURE_ROOTS = [
+  // The whole shared barrel is pure since T3.1 (R1): Babylon code moved to packages/sim.
+  "packages/shared/src/index.ts",
   "packages/shared/src/input.ts",
   "packages/shared/src/hitreg",
   "packages/protocol/src",
@@ -102,6 +104,29 @@ describe("package boundaries", () => {
         .filter((spec) => spec === "@babylonjs/core")
         .map((spec) => `${relative(ROOT, file)} → ${spec}`),
     );
+    expect(violations).toEqual([]);
+  });
+
+  it("pure packages declare no @babylonjs/* dependency (R1)", () => {
+    const violations = ["packages/shared", "packages/protocol", "packages/netcode", "packages/contracts"].flatMap((dir) => {
+      const pkg = JSON.parse(readFileSync(join(ROOT, dir, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+      return Object.keys(pkg.dependencies ?? {})
+        .filter((name) => name.startsWith("@babylonjs/"))
+        .map((name) => `${dir} → ${name}`);
+    });
+    expect(violations).toEqual([]);
+  });
+
+  it("@babylonjs/* dependencies are pinned exactly (R2)", () => {
+    const violations = ["apps/client", "packages/sim", "apps/server-match", "apps/bot"].flatMap((dir) => {
+      const pkg = JSON.parse(readFileSync(join(ROOT, dir, "package.json"), "utf8")) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      return Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })
+        .filter(([name, version]) => name.startsWith("@babylonjs/") && !/^\d+\.\d+\.\d+$/.test(version))
+        .map(([name, version]) => `${dir} → ${name}@${version}`);
+    });
     expect(violations).toEqual([]);
   });
 

@@ -4,14 +4,13 @@ import {
   DRAFT_MAP_V1,
   TRAINING_YARD,
   buildTerrain,
-  createTerrainBody,
   type LevelBlock,
   type LevelData,
   type MapData,
   type Terrain,
-  type TerrainBody,
   type Vec3Tuple,
 } from "@twobullets/shared";
+import { createTerrainBody, type TerrainBody } from "@twobullets/sim";
 import type { Environment } from "../environment";
 import { TerrainMaterial } from "./TerrainMaterial";
 import { TerrainRenderer } from "./TerrainRenderer";

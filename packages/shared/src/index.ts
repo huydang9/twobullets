@@ -1,7 +1,7 @@
+// Pure gameplay barrel: no @babylonjs/* or node:* imports (Babylon/Havok code lives in @twobullets/sim).
 export * from "./constants";
 export * from "./level/types";
 export * from "./level/arena";
-export * from "./level/buildLevel";
 export * from "./movement/types";
 export * from "./movement/movement";
 export * from "./weapons/types";
@@ -10,12 +10,12 @@ export * from "./weapons/weaponStep";
 export * from "./weapons/ballistics";
 export * from "./map/types";
 export * from "./map/terrain/index";
-export * from "./map/physics/index";
 export * from "./map/draftMapV1";
 export * from "./map/mapV1";
 export * from "./map/layout/index";
 export * from "./map/buildings/index";
-export * from "./map/buildings/babylon/index";
 export * from "./equipment/index";
 export * from "./input";
+export * from "./inputRing";
+export * from "./tickClock";
 export * from "./hitreg/index";

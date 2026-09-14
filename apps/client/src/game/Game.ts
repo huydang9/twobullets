@@ -1,6 +1,7 @@
 import { Engine, HavokPlugin, Scene, Vector3 } from "@babylonjs/core";
 import HavokPhysics from "@babylonjs/havok";
-import { ARENA_LEVEL, MOVEMENT, buildLevel } from "@twobullets/shared";
+import { ARENA_LEVEL, MOVEMENT } from "@twobullets/shared";
+import { buildLevel } from "@twobullets/sim";
 import { AssetLibrary, installAssetDevTools, type AssetLoadProgress, type Credit } from "../assets";
 import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";

@@ -1,12 +1,6 @@
 import { Matrix, Mesh, Quaternion, Vector3, VertexData, type Scene } from "@babylonjs/core";
-import {
-  buildPrefabGeometry,
-  type BuildingPlacement,
-  type BuildingPrefab,
-  type BuildingVisualHandle,
-  type BuildingVisualHost,
-  type PrefabGeometry,
-} from "@twobullets/shared";
+import { buildPrefabGeometry, type BuildingPlacement, type BuildingPrefab, type PrefabGeometry } from "@twobullets/shared";
+import type { BuildingVisualHandle, BuildingVisualHost } from "@twobullets/sim";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCulling";

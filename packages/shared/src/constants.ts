@@ -3,8 +3,13 @@
 export const SIMULATION = {
   /** Fixed simulation rate, ticks per second. */
   tickRate: 60,
-  /** Max ticks simulated per rendered frame; any larger backlog is dropped (prevents a death spiral after a hitch). */
+  /** Max ticks simulated per rendered frame; the rest of the backlog carries into later frames (TickClock, R4). */
   maxTicksPerFrame: 5,
+  /**
+   * Backlog carried across frames, ticks. Offline, anything beyond it is dropped (no death spiral after a hitch);
+   * networked clocks hard-resync instead of dropping input ticks.
+   */
+  maxBacklogTicks: 10,
 } as const;
 
 export const MOVEMENT = {

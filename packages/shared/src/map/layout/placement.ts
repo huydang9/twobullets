@@ -12,11 +12,15 @@ export class PoiFrame {
   readonly buildings: LayoutBuilding[] = [];
   readonly props: PropPlacement[] = [];
 
-  constructor(
-    readonly poi: string,
-    readonly center: Vec2Tuple,
-    readonly yaw = 0,
-  ) {}
+  readonly poi: string;
+  readonly center: Vec2Tuple;
+  readonly yaw: number;
+
+  constructor(poi: string, center: Vec2Tuple, yaw = 0) {
+    this.poi = poi;
+    this.center = center;
+    this.yaw = yaw;
+  }
 
   /** World XZ of a local point. */
   at(localX: number, localZ: number): Vec2Tuple {

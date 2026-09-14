@@ -5,7 +5,8 @@ import { PhysicsMotionType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlug
 import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
 import { PhysicsShapeHeightField } from "@babylonjs/core/Physics/v2/physicsShape.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import type { Heightfield } from "../terrain/heightfield";
+import { LEVEL_MATERIAL } from "../level/shapes";
+import type { Heightfield } from "@twobullets/shared/map/terrain/heightfield";
 
 export interface TerrainShapeOptions {
   /**
@@ -42,7 +43,7 @@ export function createTerrainShape(scene: Scene, field: Heightfield, options: Te
   const stride = options.stride ?? 1;
   const samples = (field.resolution - 1) / stride + 1;
   const shape = new PhysicsShapeHeightField(field.size, field.size, samples, samples, heightfieldToHavokOrder(field, stride), scene);
-  shape.material = { friction: options.friction ?? 0.6, restitution: 0 };
+  shape.material = { friction: options.friction ?? LEVEL_MATERIAL.friction, restitution: LEVEL_MATERIAL.restitution };
   if (options.membershipMask !== undefined) shape.filterMembershipMask = options.membershipMask;
   return shape;
 }

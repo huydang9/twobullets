@@ -241,8 +241,11 @@ class GroupWriter {
   readonly positions: number[] = [];
   readonly normals: number[] = [];
   readonly indices: number[] = [];
+  readonly material: BuildingMaterialId;
 
-  constructor(readonly material: BuildingMaterialId) {}
+  constructor(material: BuildingMaterialId) {
+    this.material = material;
+  }
 
   vertex(p: V3, n: V3): number {
     this.positions.push(p[0], p[1], p[2]);

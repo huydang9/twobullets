@@ -1,4 +1,5 @@
 import { FALL_DAMAGE, MOVEMENT } from "../constants";
+import { len2 } from "../equipment/math";
 import type { MoveEnvironment, MoveInput, MoveState, Stance } from "./types";
 
 /** Ground normals flatter than this (normal.y below it) are not used for slope following. */
@@ -33,7 +34,7 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
   // Wish direction: clamp analog input to the unit circle so diagonals are not faster.
   let forward = clamp(input.forward, -1, 1);
   let right = clamp(input.right, -1, 1);
-  const inputLength = Math.hypot(forward, right);
+  const inputLength = len2(forward, right);
   if (inputLength > 1) {
     forward /= inputLength;
     right /= inputLength;
@@ -64,7 +65,7 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
     // Horizontal speed is preserved on slopes, and there is no leftover vertical speed to launch off crests or ski down ramps.
     const n = env.groundNormal;
     if (n.y > MIN_GROUND_NORMAL_Y) {
-      const maxRise = Math.hypot(vx, vz) * Math.tan((MOVEMENT.maxSlopeDegrees * Math.PI) / 180);
+      const maxRise = len2(vx, vz) * Math.tan((MOVEMENT.maxSlopeDegrees * Math.PI) / 180);
       vy = clamp(-(n.x * vx + n.z * vz) / n.y, -maxRise, maxRise);
     } else {
       vy = 0;
@@ -72,7 +73,7 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
   } else {
     if (wishAmount > 0) {
       // Steer toward the wish direction while keeping momentum: the target magnitude is never below the current speed.
-      const airSpeed = Math.max(Math.hypot(vx, vz), targetSpeed);
+      const airSpeed = Math.max(len2(vx, vz), targetSpeed);
       [vx, vz] = approach(vx, vz, wishX * airSpeed, wishZ * airSpeed, MOVEMENT.airAcceleration * dt);
     }
     vy = Math.max(vy - MOVEMENT.gravity * dt, -MOVEMENT.maxFallSpeed);
@@ -144,7 +145,7 @@ export function fallDamage(speed: number): number {
 function approach(x: number, z: number, tx: number, tz: number, maxDelta: number): [number, number] {
   const dx = tx - x;
   const dz = tz - z;
-  const distance = Math.hypot(dx, dz);
+  const distance = len2(dx, dz);
   if (distance <= maxDelta) return [tx, tz];
   const s = maxDelta / distance;
   return [x + dx * s, z + dz * s];

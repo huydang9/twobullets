@@ -1,4 +1,5 @@
 import { MOVEMENT } from "../constants";
+import { len3 } from "../equipment/math";
 import type { Vec3 } from "../movement/types";
 import type {
   CombatInput,
@@ -177,12 +178,33 @@ function spreadDegrees(def: WeaponDef, adsBlend: number, bloom: number, ctx: Wea
 
 function buildShot(def: WeaponDef, shotId: number, ctx: WeaponContext, spread: number, adsBlend: number): FiredShot {
   const random = createRng(shotId);
+  const directions = pelletDirections(def, random, ctx.yaw, ctx.pitch, spread);
+  const recoilScale = lerp(1, def.recoil.adsMultiplier, adsBlend) * DEG_TO_RAD;
+  return {
+    weaponId: def.id,
+    shotId,
+    origin: { x: ctx.eye.x, y: ctx.eye.y, z: ctx.eye.z },
+    directions,
+    recoilUp: def.recoil.up * recoilScale,
+    // Drawn after the pellets, so it stays on the same RNG stream position as before shotDirections existed.
+    recoilRight: (random() * 2 - 1) * def.recoil.yaw * recoilScale,
+  };
+}
 
+/**
+ * Unit pellet directions of shot `shotId` fired along (yaw, pitch) with `spreadDegrees` (refactor R10): identical to
+ * the `FiredShot.directions` stepWeapon produced, so remote clients regenerate pellets from a `Shot` event.
+ */
+export function shotDirections(def: WeaponDef, shotId: number, yaw: number, pitch: number, spreadDegrees: number): Vec3[] {
+  return pelletDirections(def, createRng(shotId), yaw, pitch, spreadDegrees);
+}
+
+function pelletDirections(def: WeaponDef, random: () => number, yaw: number, pitch: number, spread: number): Vec3[] {
   // Aim basis. yaw 0 = +Z, +yaw turns toward +X; +pitch looks down (left-handed, Y-up).
-  const sinYaw = Math.sin(ctx.yaw);
-  const cosYaw = Math.cos(ctx.yaw);
-  const sinPitch = Math.sin(ctx.pitch);
-  const cosPitch = Math.cos(ctx.pitch);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const sinPitch = Math.sin(pitch);
+  const cosPitch = Math.cos(pitch);
   const fx = sinYaw * cosPitch;
   const fy = -sinPitch;
   const fz = cosYaw * cosPitch;
@@ -208,19 +230,10 @@ function buildShot(def: WeaponDef, shotId: number, ctx: WeaponContext, spread: n
     const x = fx + rx * ox + ux * oy;
     const y = fy + uy * oy;
     const z = fz + rz * ox + uz * oy;
-    const length = Math.hypot(x, y, z);
+    const length = len3(x, y, z);
     directions.push({ x: x / length, y: y / length, z: z / length });
   }
-
-  const recoilScale = lerp(1, def.recoil.adsMultiplier, adsBlend) * DEG_TO_RAD;
-  return {
-    weaponId: def.id,
-    shotId,
-    origin: { x: ctx.eye.x, y: ctx.eye.y, z: ctx.eye.z },
-    directions,
-    recoilUp: def.recoil.up * recoilScale,
-    recoilRight: (random() * 2 - 1) * def.recoil.yaw * recoilScale,
-  };
+  return directions;
 }
 
 /** Uniform point in a disk of the given radius. */

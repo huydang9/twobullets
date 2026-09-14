@@ -1,8 +1,11 @@
-import type { AbstractMesh, PhysicsBody, Scene, TransformNode } from "@babylonjs/core";
-import type { Vec3Tuple } from "../../../level/types";
-import { getPrefabLootSpots, localToWorld, placedBounds } from "../placement";
-import { getBuildingPrefab, type BuildingPrefabId } from "../prefabs";
-import type { BuildingPlacement, BuildingPrefab, LootSpot } from "../types";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
+import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
+import type { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
+import type { Scene } from "@babylonjs/core/scene.js";
+import type { Vec3Tuple } from "@twobullets/shared/level/types";
+import { getPrefabLootSpots, localToWorld, placedBounds } from "@twobullets/shared/map/buildings/placement";
+import { getBuildingPrefab, type BuildingPrefabId } from "@twobullets/shared/map/buildings/prefabs/index";
+import type { BuildingPlacement, BuildingPrefab, LootSpot } from "@twobullets/shared/map/buildings/types";
 import { createBuildingBody } from "./buildingPhysics";
 
 /** Render side of a building. The client implements this with batched meshes; headless servers pass nothing. */

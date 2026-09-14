@@ -142,10 +142,13 @@ export class PrefabBuilder {
   private readonly entrances: Vec3Tuple[] = [];
   private readonly crouchPassages: { min: Vec3Tuple; max: Vec3Tuple }[] = [];
 
-  constructor(
-    readonly id: string,
-    readonly name: string,
-  ) {}
+  readonly id: string;
+  readonly name: string;
+
+  constructor(id: string, name: string) {
+    this.id = id;
+    this.name = name;
+  }
 
   box(x: Range, y: Range, z: Range, material: BuildingMaterialId, role: PartRole, faces?: BoxPart["faces"]): this {
     const min: Vec3Tuple = [snap(x[0]), snap(y[0]), snap(z[0])];

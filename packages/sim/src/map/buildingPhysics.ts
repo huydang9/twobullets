@@ -1,22 +1,16 @@
-import {
-  Mesh,
-  PhysicsBody,
-  PhysicsMotionType,
-  PhysicsShapeBox,
-  PhysicsShapeContainer,
-  PhysicsShapeConvexHull,
-  Quaternion,
-  TransformNode,
-  Vector3,
-  VertexData,
-  type Scene,
-} from "@babylonjs/core";
-import { getPrefabCollision, wedgeCorners } from "../placement";
-import type { BuildingPrefabId } from "../prefabs";
-import type { BuildingPlacement } from "../types";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector.js";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
+import { PhysicsMotionType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugin.js";
+import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
+import { PhysicsShapeBox, PhysicsShapeContainer } from "@babylonjs/core/Physics/v2/physicsShape.js";
+import type { Scene } from "@babylonjs/core/scene.js";
+import { getPrefabCollision, wedgeCorners } from "@twobullets/shared/map/buildings/placement";
+import type { BuildingPrefabId } from "@twobullets/shared/map/buildings/prefabs/index";
+import type { BuildingPlacement } from "@twobullets/shared/map/buildings/types";
+import { LEVEL_MATERIAL, createConvexHullShape } from "../level/shapes";
 
-/** Same surface response as level blocks (buildLevel's PhysicsAggregate options). */
-const MATERIAL = { friction: 0.6, restitution: 0 } as const;
+/** Same surface response as level blocks. */
+const MATERIAL = LEVEL_MATERIAL;
 
 const shapesByScene = new WeakMap<Scene, Map<BuildingPrefabId, PhysicsShapeContainer>>();
 
@@ -42,7 +36,7 @@ export function getBuildingShape(scene: Scene, id: BuildingPrefabId): PhysicsSha
     const child =
       shape.kind === "box"
         ? new PhysicsShapeBox(new Vector3(...shape.center), identity, new Vector3(...shape.size), scene)
-        : convexHull(scene, wedgeCorners(shape));
+        : createConvexHullShape(scene, wedgeCorners(shape));
     child.material = MATERIAL;
     container.addChild(child);
   }
@@ -65,16 +59,4 @@ export function createBuildingBody(scene: Scene, id: BuildingPrefabId, placement
   body.shape = getBuildingShape(scene, id);
   node.freezeWorldMatrix();
   return { node, body };
-}
-
-function convexHull(scene: Scene, corners: readonly (readonly [number, number, number])[]): PhysicsShapeConvexHull {
-  // The hull is built from a throwaway mesh's vertices (in its local space), so the mesh never needs to render.
-  const mesh = new Mesh("buildingHullSource", scene);
-  const data = new VertexData();
-  data.positions = corners.flat();
-  data.indices = [0, 1, 2, 3, 4, 5];
-  data.applyToMesh(mesh);
-  const hull = new PhysicsShapeConvexHull(mesh, scene);
-  mesh.dispose();
-  return hull;
 }

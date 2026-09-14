@@ -1,5 +1,8 @@
-import { Mesh, PhysicsAggregate, PhysicsShapeType, Quaternion, Vector3, VertexData, type Scene } from "@babylonjs/core";
-import type { LevelBlock, LevelData, SurfaceKind, Vec3Tuple } from "./types";
+import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
+import type { Scene } from "@babylonjs/core/scene.js";
+import type { LevelBlock, LevelData, SurfaceKind, Vec3Tuple } from "@twobullets/shared/level/types";
+import { attachBlockBody } from "./collision";
 
 export interface BuiltLevel {
   readonly meshes: readonly Mesh[];
@@ -8,8 +11,8 @@ export interface BuiltLevel {
 }
 
 /**
- * Creates level geometry and static physics bodies. Must stay render-agnostic
- * (no materials, lights or textures) so a headless NullEngine server can call it.
+ * Creates level geometry and static physics bodies. Render-agnostic (no materials, lights or textures); the collision
+ * shapes come from the same factory as the server's collision-only `buildCollision`.
  * Requires physics to be enabled on the scene first.
  */
 export function buildLevel(scene: Scene, level: LevelData): BuiltLevel {
@@ -19,15 +22,8 @@ export function buildLevel(scene: Scene, level: LevelData): BuiltLevel {
   level.blocks.forEach((block, i) => {
     const mesh = new Mesh(`level_${block.name ?? `${block.surface}_${block.kind}_${i}`}`, scene);
     blockVertexData(block).applyToMesh(mesh);
-    mesh.position.set(...block.position);
-    mesh.rotationQuaternion = Quaternion.RotationAxis(Vector3.Up(), block.rotationY ?? 0);
-    mesh.computeWorldMatrix(true);
-
     // Wedges are convex, so a hull matches the visual exactly and is cheaper than a triangle mesh.
-    const shapeType = block.kind === "ramp" ? PhysicsShapeType.CONVEX_HULL : PhysicsShapeType.BOX;
-    new PhysicsAggregate(mesh, shapeType, { mass: 0, friction: 0.6, restitution: 0 }, scene);
-
-    mesh.freezeWorldMatrix();
+    attachBlockBody(scene, mesh, block);
     meshes.push(mesh);
     surfaceOf.set(mesh, block.surface);
   });

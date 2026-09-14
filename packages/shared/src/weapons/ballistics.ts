@@ -7,6 +7,7 @@ import type {
   RaycastFn,
   WeaponDef,
 } from "./types";
+import { len3 } from "../equipment/math";
 import { BALLISTICS, WEAPONS } from "./weapons";
 
 /** Creates one projectile per pellet direction of a fired shot. `nextId` supplies unique projectile ids. */
@@ -44,7 +45,7 @@ export function stepProjectiles(projectiles: readonly Projectile[], dt: number, 
     let dx = vx * dt;
     let dy = vy * dt;
     let dz = vz * dt;
-    let length = Math.hypot(dx, dy, dz);
+    let length = len3(dx, dy, dz);
     const remaining = Math.max(0, def.maxRangeMeters - p.distance);
     const reachesMaxRange = length >= remaining;
     if (reachesMaxRange && length > 0) {

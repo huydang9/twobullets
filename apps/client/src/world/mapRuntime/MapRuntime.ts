@@ -3,19 +3,16 @@ import {
   MAP_V1,
   MAP_V1_TRAINING_YARD,
   ScatterContext,
-  buildBuilding,
-  createTerrainBody,
   detailRules,
   loadMapWorld,
-  type BuiltBuilding,
   type LevelData,
   type MapData,
   type MapLayout,
   type MapWorld,
   type MapWorldStage,
   type Terrain,
-  type TerrainBody,
 } from "@twobullets/shared";
+import { buildBuilding, createTerrainBody, type BuiltBuilding, type TerrainBody } from "@twobullets/sim";
 import type { AudioWorldProbe } from "../../audio/AudioWorldProbe";
 import { terrainSurfaceProvider } from "../../audio/surfaces";
 import { BuildingVisuals } from "../buildings";

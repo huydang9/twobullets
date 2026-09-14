@@ -12,7 +12,8 @@ import {
   Vector3,
   type AbstractMesh,
 } from "@babylonjs/core";
-import type { BuiltLevel, SurfaceKind } from "@twobullets/shared";
+import type { SurfaceKind } from "@twobullets/shared";
+import type { BuiltLevel } from "@twobullets/sim";
 import { OPTIMIZATIONS } from "../perf/flags";
 import { installGraphics } from "../perf/graphicsSettings";
 import { SKY } from "./environmentManifest";

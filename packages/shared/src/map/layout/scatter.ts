@@ -76,11 +76,12 @@ export class ScatterContext {
   private readonly weights = [0, 0, 0, 0];
   private readonly normal = { x: 0, y: 1, z: 0 };
 
-  constructor(
-    private readonly map: Pick<MapData, "flatten" | "spawns" | "terrain">,
-    private readonly terrain: Terrain,
-    buildings: readonly ResolvedBuilding[],
-  ) {
+  private readonly map: Pick<MapData, "flatten" | "spawns" | "terrain">;
+  private readonly terrain: Terrain;
+
+  constructor(map: Pick<MapData, "flatten" | "spawns" | "terrain">, terrain: Terrain, buildings: readonly ResolvedBuilding[]) {
+    this.map = map;
+    this.terrain = terrain;
     for (const path of mapPaths(map)) {
       for (let i = 0; i + 1 < path.points.length; i++) {
         const [ax, az] = path.points[i]!;

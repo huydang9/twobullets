@@ -1,21 +1,36 @@
 import { Observable, TargetCamera, Vector3, type PhysicsBody, type Scene } from "@babylonjs/core";
 import {
+  AccumulatorClock,
+  Btn,
   CAMERA,
   MOVEMENT,
-  SIMULATION,
+  OPEN_MOVE_GATES,
+  PlayerInputRing,
+  TICK_SECONDS,
   createMoveState,
+  createWeaponState,
+  deriveMoveModifiers,
   eyeHeightFor,
   landingSpeed,
+  len2,
+  moveInputFrom,
+  quantizePitch,
+  quantizeYaw,
   type LevelData,
+  type MoveGates,
   type MoveInput,
   type MoveState,
   type PlayerDebugState,
+  type PlayerInput,
   type SpawnPoint,
+  type TickClock,
+  type WeaponState,
 } from "@twobullets/shared";
+import { CharacterBody, stepPlayer } from "@twobullets/sim";
 import type { InputManager } from "../input/InputManager";
-import { CharacterBody } from "./CharacterBody";
 
-const TICK_SECONDS = 1 / SIMULATION.tickRate;
+export type { MoveGates } from "@twobullets/shared";
+
 const DEG_TO_RAD = Math.PI / 180;
 const TWO_PI = Math.PI * 2;
 const MAX_PITCH = CAMERA.maxPitchDegrees * DEG_TO_RAD;
@@ -25,6 +40,8 @@ const FOV_REFERENCE_ASPECT = 16 / 9;
 const STEP_SMOOTH_THRESHOLD = 0.02;
 /** Cap on the accumulated smoothing offset (running up stairs stacks a few steps), m. */
 const MAX_STEP_OFFSET = MOVEMENT.maxStepHeight * 2;
+/** Weapon state movement sees when no combat link is attached. */
+const UNARMED: WeaponState = createWeaponState([null]);
 
 /** Babylon cameras take a vertical FOV in radians. */
 function verticalFovFromHorizontal(horizontalDegrees: number): number {
@@ -39,48 +56,61 @@ function blendFactor(rate: number, dt: number): number {
 /** Emitted after every fixed movement tick, so other tick-based systems (weapons) run in lockstep with movement. */
 export interface PlayerTick {
   readonly dt: number;
+  /** The tick's movement input (derived from `playerInput`); yaw/pitch are the dequantized aim the sim used. */
   readonly input: MoveInput;
+  /** The sampled wire input of this tick (move + combat buttons + quantized aim). */
+  readonly playerInput: PlayerInput;
   readonly state: MoveState;
   /** Downward speed at touchdown if the player landed this tick, else 0, m/s (fall damage). */
   readonly landingSpeed: number;
 }
 
-/** Gameplay modifiers other systems apply to the player every render frame (e.g. aiming down sights). */
+/** Render-side modifiers other systems set on the player every frame. Movement speed/sprint come from the tick (R3). */
 export interface PlayerModifiers {
-  /** Multiplier on ground speed, 0..MOVEMENT.maxSpeedScale. */
-  speedScale: number;
-  allowSprint: boolean;
   allowJump: boolean;
   /** Multiplier on mouse sensitivity. */
   sensitivityScale: number;
 }
 
-/** Movement gates read at tick time from simulation state (healing, knocked, boost); EquipmentModifiers satisfies it. */
-export interface MoveGates {
-  readonly speedScale: number;
-  readonly allowSprint: boolean;
-  readonly allowJump: boolean;
-  /** Knocked: prone crawl at MOVEMENT.crawlSpeed. `speedScale` is ignored while crawling (the stance sets the speed). */
-  readonly crawl: boolean;
+/** Combat side of a tick: start-of-tick weapon state for movement modifiers, and this tick's queued combat input. */
+export interface PlayerCombatLink {
+  readonly weaponState: WeaponState;
+  /** Consumes the combat input queued for one tick into `out` (Btn fire/aim/reload bits, select 0 or slot index + 1). */
+  takeCombatInput(out: { buttons: number; select: number }): void;
 }
 
-const OPEN_GATES: MoveGates = { speedScale: 1, allowSprint: true, allowJump: true, crawl: false };
+export interface PlayerControllerOptions {
+  /** Tick source; default the offline accumulator. Networked play passes NetClock. */
+  readonly clock?: TickClock;
+  /**
+   * Who places the player (R12). "local" (offline): random level spawn at start and on respawn, and a respawn below
+   * killY. "server": the controller never teleports itself; call `respawnAt`/`restore` when the server says so.
+   */
+  readonly spawnAuthority?: "local" | "server";
+}
 
 /**
- * Local player: mouse look every render frame, movement on a fixed 60 Hz tick driven by MoveInput snapshots,
- * and a camera interpolated between the last two ticks.
+ * Local player: mouse look every render frame, movement on a fixed 60 Hz tick through the shared `stepPlayer`, one
+ * `PlayerInput` sampled per tick into a history ring, and a camera interpolated between the last two ticks.
  */
 export class PlayerController {
   readonly camera: TargetCamera;
   readonly onTick = new Observable<PlayerTick>();
-  readonly modifiers: PlayerModifiers = { speedScale: 1, allowSprint: true, allowJump: true, sensitivityScale: 1 };
+  readonly modifiers: PlayerModifiers = { allowJump: true, sensitivityScale: 1 };
+  /** Sampled inputs by tick (R4): what networked play sends with redundancy and replays after corrections. */
+  readonly inputHistory = new PlayerInputRing();
 
   private readonly body: CharacterBody;
+  private readonly clock: TickClock;
+  private readonly spawnAuthority: "local" | "server";
+  private readonly input: InputManager;
+  private readonly level: LevelData;
   private state: MoveState = createMoveState();
   private gates: (() => MoveGates) | null = null;
+  private combat: PlayerCombatLink | null = null;
+  private readonly combatScratch = { buttons: 0, select: 0 };
   private yaw = 0;
   private pitch = 0;
-  private accumulator = 0;
   /** A jump tap seen on a render frame, held until the next tick consumes it so short taps between ticks aren't lost. */
   private jumpQueued = false;
 
@@ -96,11 +126,11 @@ export class PlayerController {
   private zoomBlend = 0;
   private readonly punch = new Vector3();
 
-  constructor(
-    scene: Scene,
-    private readonly input: InputManager,
-    private readonly level: LevelData,
-  ) {
+  constructor(scene: Scene, input: InputManager, level: LevelData, options: PlayerControllerOptions = {}) {
+    this.input = input;
+    this.level = level;
+    this.clock = options.clock ?? new AccumulatorClock();
+    this.spawnAuthority = options.spawnAuthority ?? "local";
     const spawn = level.spawnPoints[0];
     if (!spawn) throw new Error(`Level "${level.name}" has no spawn points`);
     this.camera = new TargetCamera("playerCamera", Vector3.Zero(), scene);
@@ -108,32 +138,32 @@ export class PlayerController {
     this.camera.fov = verticalFovFromHorizontal(CAMERA.fovDegrees);
     const [x, y, z] = spawn.position;
     this.body = new CharacterBody(scene, { x, y, z });
-    this.respawn();
+    if (this.spawnAuthority === "local") this.respawn();
+    else this.respawnAt(spawn);
   }
 
   update(dt: number): void {
     this.applyLook();
     if (this.input.isLocked && this.input.wasActionPressed("jump")) this.jumpQueued = true;
 
-    this.accumulator += dt;
-    let ticks = 0;
-    while (this.accumulator >= TICK_SECONDS && ticks < SIMULATION.maxTicksPerFrame) {
-      this.tick();
-      this.accumulator -= TICK_SECONDS;
-      ticks++;
-    }
-    if (this.accumulator >= TICK_SECONDS) this.accumulator %= TICK_SECONDS;
+    for (let ticks = this.clock.advance(dt); ticks > 0; ticks--) this.tick(this.clock.nextTick());
 
-    this.updateCamera(dt, this.accumulator / TICK_SECONDS);
+    this.updateCamera(dt, this.clock.alpha);
   }
 
-  /** Source of tick-time movement gates (architecture R3: derived from tick state, not render state), or null. */
+  /** Source of tick-time movement gates (derived from tick state, not render state), or null. */
   setMoveGates(source: (() => MoveGates) | null): void {
     this.gates = source;
   }
 
-  /** Respawns at a random spawn point of the level. */
+  /** Weapon state and combat input for the tick (CombatSystem), or null for an unarmed player with no combat input. */
+  setCombatLink(link: PlayerCombatLink | null): void {
+    this.combat = link;
+  }
+
+  /** Respawns at a random spawn point of the level. Offline only; a server-placed player ignores it (R12). */
   respawn(): void {
+    if (this.spawnAuthority !== "local") return;
     const points = this.level.spawnPoints;
     const spawn = points[Math.floor(Math.random() * points.length)];
     if (spawn) this.respawnAt(spawn);
@@ -155,7 +185,7 @@ export class PlayerController {
     this.updateCamera(0, 1);
   }
 
-  /** Current aim in radians (pitch + = down). This is the gameplay aim; camera punch is not included. */
+  /** Current aim in radians (pitch + = down). This is the raw gameplay aim; ticks simulate its quantized value. */
   getAim(): { readonly yaw: number; readonly pitch: number } {
     return { yaw: this.yaw, pitch: this.pitch };
   }
@@ -200,7 +230,7 @@ export class PlayerController {
     const v = this.state.velocity;
     return {
       position: [x, y, z],
-      horizontalSpeed: Math.hypot(v.x, v.z),
+      horizontalSpeed: len2(v.x, v.z),
       verticalSpeed: v.y,
       grounded: this.state.grounded,
       stance: this.state.stance,
@@ -222,41 +252,49 @@ export class PlayerController {
     this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch + dy * sensitivity));
   }
 
-  /** Snapshot of player intent for one tick, with this tick's gates applied; this is what will be sent to the server. */
-  private sampleInput(): MoveInput {
+  /** One tick of player intent: movement keys, queued jump, combat input and the quantized aim. */
+  private sampleInput(tick: number): PlayerInput {
     const input = this.input;
-    const gates = this.gates?.() ?? OPEN_GATES;
-    const { crawl } = gates;
-    const allowJump = gates.allowJump && this.modifiers.allowJump;
-    if (!input.isLocked) {
-      return { forward: 0, right: 0, jump: false, sprint: false, crouch: false, speedScale: 1, allowJump, crawl, yaw: this.yaw, pitch: this.pitch };
+    const combat = this.combatScratch;
+    combat.buttons = 0;
+    combat.select = 0;
+    this.combat?.takeCombatInput(combat);
+    let forward: -1 | 0 | 1 = 0;
+    let right: -1 | 0 | 1 = 0;
+    let buttons = combat.buttons;
+    if (input.isLocked) {
+      forward = axis(input.isActionDown("forward"), input.isActionDown("back"));
+      right = axis(input.isActionDown("right"), input.isActionDown("left"));
+      if (this.jumpQueued || input.isActionDown("jump")) buttons |= Btn.jump;
+      if (input.isActionDown("sprint")) buttons |= Btn.sprint;
+      if (input.isActionDown("crouch")) buttons |= Btn.crouch;
     }
-    const axis = (positive: boolean, negative: boolean): number => (positive ? 1 : 0) - (negative ? 1 : 0);
     return {
-      forward: axis(input.isActionDown("forward"), input.isActionDown("back")),
-      right: axis(input.isActionDown("right"), input.isActionDown("left")),
-      jump: this.jumpQueued || input.isActionDown("jump"),
-      sprint: input.isActionDown("sprint") && this.modifiers.allowSprint && gates.allowSprint,
-      crouch: input.isActionDown("crouch"),
-      speedScale: this.modifiers.speedScale * (crawl ? 1 : gates.speedScale),
-      allowJump,
-      crawl,
-      yaw: this.yaw,
-      pitch: this.pitch,
+      tick,
+      forward,
+      right,
+      buttons,
+      select: combat.select,
+      yawQ: quantizeYaw(this.yaw),
+      pitchQ: quantizePitch(this.pitch),
+      viewOffset8: 0,
+      action: null,
     };
   }
 
-  private tick(): void {
-    const moveInput = this.sampleInput();
+  private tick(tickNumber: number): void {
+    const playerInput = this.inputHistory.push(this.sampleInput(tickNumber));
     this.jumpQueued = false;
     const previous = this.state;
     const wasGrounded = previous.grounded;
+    const weapon = this.combat?.weaponState ?? UNARMED;
+    const gates = this.tickGates();
 
     this.previousFeet.copyFrom(this.currentFeet);
-    this.state = this.body.step(previous, moveInput, TICK_SECONDS);
+    this.state = stepPlayer(this.body, { move: previous, weapon }, playerInput, TICK_SECONDS, { replay: false, gates }).state.move;
     this.body.getFeetToRef(this.currentFeet);
 
-    if (this.currentFeet.y < this.level.killY) {
+    if (this.spawnAuthority === "local" && this.currentFeet.y < this.level.killY) {
       this.respawn();
       return;
     }
@@ -271,12 +309,19 @@ export class PlayerController {
       }
     }
 
-    this.onTick.notifyObservers({ dt: TICK_SECONDS, input: moveInput, state: this.state, landingSpeed: landingSpeed(previous, this.state) });
+    const input = moveInputFrom(playerInput, deriveMoveModifiers(weapon, playerInput), gates);
+    this.onTick.notifyObservers({ dt: TICK_SECONDS, input, playerInput, state: this.state, landingSpeed: landingSpeed(previous, this.state) });
+  }
+
+  /** This tick's movement gates, with the render-side jump modifier folded in. */
+  private tickGates(): MoveGates {
+    const gates = this.gates?.() ?? OPEN_MOVE_GATES;
+    return this.modifiers.allowJump || !gates.allowJump ? gates : { ...gates, allowJump: false };
   }
 
   private updateCamera(dt: number, alpha: number): void {
     const v = this.state.velocity;
-    const speed = Math.hypot(v.x, v.z);
+    const speed = len2(v.x, v.z);
 
     this.eyeHeight += (eyeHeightFor(this.state.stance) - this.eyeHeight) * blendFactor(CAMERA.crouchBlendRate, dt);
     this.stepOffset -= this.stepOffset * blendFactor(CAMERA.stepSmoothRate, dt);
@@ -298,4 +343,8 @@ export class PlayerController {
     feet.y += this.eyeHeight + this.stepOffset + bob;
     this.camera.rotation.set(this.pitch + this.punch.x, this.yaw + this.punch.y, this.punch.z);
   }
+}
+
+function axis(positive: boolean, negative: boolean): -1 | 0 | 1 {
+  return positive === negative ? 0 : positive ? 1 : -1;
 }

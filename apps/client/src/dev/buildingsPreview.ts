@@ -6,16 +6,14 @@ import { Color3, Engine, HavokPlugin, Matrix, MeshBuilder, Scene, StandardMateri
 import HavokPhysics from "@babylonjs/havok";
 import {
   MOVEMENT,
-  buildBuilding,
-  buildLevel,
   getBuildingPrefab,
   getPrefabCollision,
   type BuildingPlacement,
   type BuildingPrefabId,
-  type BuiltBuilding,
   type LevelData,
   type SpawnPoint,
 } from "@twobullets/shared";
+import { buildBuilding, buildLevel, type BuiltBuilding } from "@twobullets/sim";
 import { installDebugTools } from "../debug/debugTools";
 import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../player/PlayerController";

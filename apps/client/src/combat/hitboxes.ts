@@ -1,15 +1,9 @@
 import type { PhysicsBody, Vector3 } from "@babylonjs/core";
 import type { DamageKind, HitZone } from "@twobullets/shared";
+import { CollisionLayer } from "@twobullets/sim";
 
-/**
- * Shape filter membership bits. Level geometry keeps Havok's default (all bits).
- * Hitboxes are trigger shapes, so movement queries (which skip triggers) never see them; bullet raycasts opt in.
- */
-export const CollisionLayer = {
-  hitbox: 1 << 1,
-  /** Solid proxies that stop players walking through targets but are invisible to bullets. */
-  blocker: 1 << 2,
-} as const;
+/** Shape filter membership bits (hitbox, blocker, player), shared with the server through packages/sim. */
+export { CollisionLayer };
 
 /** Bullet raycast filter: everything except blockers, including trigger (hitbox) shapes. */
 export const BULLET_COLLIDE_MASK = ~CollisionLayer.blocker;

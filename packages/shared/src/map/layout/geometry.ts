@@ -199,8 +199,11 @@ export function round3(value: number): number {
 /** Uniform grid of buckets for proximity queries over many small items. */
 export class SpatialHash<T> {
   private readonly cells = new Map<number, T[]>();
+  private readonly cellSize: number;
 
-  constructor(private readonly cellSize: number) {}
+  constructor(cellSize: number) {
+    this.cellSize = cellSize;
+  }
 
   private key(ix: number, iz: number): number {
     return (ix + 32768) * 65536 + (iz + 32768);

@@ -1,5 +1,6 @@
 import { Observable, Vector3, type Observer, type Scene } from "@babylonjs/core";
 import {
+  Btn,
   DEFAULT_LOADOUT,
   commitWeaponsToInventory,
   computeDamage,
@@ -7,11 +8,14 @@ import {
   currentSpreadDegrees,
   gateCombatInput,
   getWeaponDef,
+  len2,
+  selectIndexOf,
   spawnProjectiles,
   stepProjectiles,
   stepWeapon,
   syncWeaponsFromInventory,
   weaponStateFromInventory,
+  type CombatInput,
   type LevelData,
   type Projectile,
   type ProjectileImpact,
@@ -23,14 +27,14 @@ import {
   type WeaponSlot,
   type WeaponState,
 } from "@twobullets/shared";
+import { WorldRaycaster } from "@twobullets/sim";
 import type { AssetLibrary } from "../assets";
 import type { InputManager } from "../input/InputManager";
-import type { PlayerController, PlayerTick } from "../player/PlayerController";
+import type { PlayerCombatLink, PlayerController, PlayerTick } from "../player/PlayerController";
 import { TargetRange } from "../targets/TargetRange";
 import type { Environment } from "../world/environment";
 import { CombatInputQueue } from "./CombatInputQueue";
-import { HavokRaycaster } from "./HavokRaycaster";
-import { HitboxRegistry } from "./hitboxes";
+import { BULLET_COLLIDE_MASK, HitboxRegistry } from "./hitboxes";
 import { TargetArmor, testTargetArmor } from "./TargetArmor";
 import type { CombatEquipmentLink, CombatView, DamageEvent, ImpactEvent, ShotEvent } from "./types";
 
@@ -53,9 +57,10 @@ const SCOPE_PRE_ZOOM = 0.15;
 
 /**
  * Local player's weapons: ticks the shared weapon simulation in lockstep with movement, flies projectiles
- * against Havok, applies damage to practice soldiers, and drives ADS modifiers on the player.
+ * against Havok, applies damage to practice soldiers, and drives ADS zoom and sensitivity on the player. Movement
+ * speed and sprint follow from the tick's weapon state and buttons (PlayerCombatLink, deriveMoveModifiers).
  */
-export class CombatSystem implements CombatView {
+export class CombatSystem implements CombatView, PlayerCombatLink {
   readonly onShot = new Observable<ShotEvent>();
   readonly onWeaponEvent = new Observable<WeaponEvent>();
   readonly onImpact = new Observable<ImpactEvent>();
@@ -76,7 +81,7 @@ export class CombatSystem implements CombatView {
   /** Helmets and vests on practice soldiers; bullets and explosions go through it before the soldier's health. */
   readonly targetArmor = new TargetArmor();
   private readonly hitboxes = new HitboxRegistry();
-  private readonly raycaster: HavokRaycaster;
+  private readonly raycaster: WorldRaycaster;
   private readonly inputQueue: CombatInputQueue;
   private readonly tickObserver: Observer<PlayerTick>;
   private readonly eye = new Vector3();
@@ -97,13 +102,18 @@ export class CombatSystem implements CombatView {
     assets: AssetLibrary,
   ) {
     this.inputQueue = new CombatInputQueue(input);
-    this.raycaster = new HavokRaycaster(scene, this.hitboxes);
+    this.raycaster = new WorldRaycaster(scene, {
+      collideWith: BULLET_COLLIDE_MASK,
+      shouldHitTriggers: true,
+      colliderIdOf: (body) => this.hitboxes.colliderIdOf(body),
+    });
     this.targets = new TargetRange(scene, level.targets, this.hitboxes, environment, assets);
     this.targetsAlive = this.targets.dummies.map((dummy) => dummy.alive);
     if (globalThis.location && new URLSearchParams(globalThis.location.search).get("targetArmor") === "1") {
       this.targets.dummies.forEach((dummy, index) => this.targetArmor.issue(dummy.id, testTargetArmor(index)));
     }
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
+    player.setCombatLink(this);
   }
 
   /**
@@ -143,7 +153,15 @@ export class CombatSystem implements CombatView {
     return total > 0 ? Math.min(1, Math.max(0, 1 - phaseTimer / total)) : 1;
   }
 
-  /** Per render frame, after player.update: queues untaken input, ADS zoom/modifiers and dummy animation. */
+  /** Consumes one tick's queued combat input for the player's tick input (PlayerCombatLink). */
+  takeCombatInput(out: { buttons: number; select: number }): void {
+    const state = this.weaponState;
+    const combat = this.inputQueue.take(state.activeIndex, state.slots);
+    out.buttons = (combat.fire ? Btn.fire : 0) | (combat.aim ? Btn.aim : 0) | (combat.reload ? Btn.reload : 0);
+    out.select = combat.selectIndex === null ? 0 : combat.selectIndex + 1;
+  }
+
+  /** Per render frame, after player.update: queues untaken input, ADS zoom/sensitivity and dummy animation. */
   update(dt: number): void {
     const state = this.weaponState;
     this.inputQueue.endFrame(state.activeIndex, state.slots);
@@ -153,11 +171,8 @@ export class CombatSystem implements CombatView {
     this.adsBlend += Math.min(maxStep, Math.max(-maxStep, state.adsBlend - this.adsBlend));
 
     const zoom = def.ads.scoped ? scopeZoomCurve(this.adsBlend) : this.adsBlend;
-    const modifiers = this.player.modifiers;
-    modifiers.speedScale = def.moveSpeedScale * lerp(1, def.ads.moveSpeedScale, this.adsBlend);
-    modifiers.allowSprint = !(this.inputQueue.isFireHeld || this.inputQueue.isAimHeld);
     // Sensitivity follows the zoom so scoped aim speed matches the magnification on screen.
-    modifiers.sensitivityScale = lerp(1, def.ads.sensitivityScale, zoom);
+    this.player.modifiers.sensitivityScale = lerp(1, def.ads.sensitivityScale, zoom);
     this.player.setZoom(def.ads.fovDegrees, zoom);
 
     this.targets.update(dt);
@@ -166,6 +181,7 @@ export class CombatSystem implements CombatView {
 
   dispose(): void {
     this.tickObserver.remove();
+    this.player.setCombatLink(null);
     this.targets.dispose();
     this.onShot.clear();
     this.onWeaponEvent.clear();
@@ -173,15 +189,15 @@ export class CombatSystem implements CombatView {
     this.onDamage.clear();
   }
 
-  private tick({ dt, state: move }: PlayerTick): void {
+  private tick({ dt, state: move, input: moveInput, playerInput }: PlayerTick): void {
     const player = this.player;
     const eye = player.getEyeToRef(this.eye);
-    const aim = player.getAim();
     const ctx: WeaponContext = {
       eye: { x: eye.x, y: eye.y, z: eye.z },
-      yaw: aim.yaw,
-      pitch: aim.pitch,
-      horizontalSpeed: Math.hypot(move.velocity.x, move.velocity.z),
+      // The tick's dequantized aim, so a server stepping the same input fires the same pellets (R10).
+      yaw: moveInput.yaw,
+      pitch: moveInput.pitch,
+      horizontalSpeed: len2(move.velocity.x, move.velocity.z),
       grounded: move.grounded,
       sprinting: move.sprinting,
     };
@@ -198,7 +214,13 @@ export class CombatSystem implements CombatView {
       for (const event of synced.events) this.onWeaponEvent.notifyObservers(event);
     }
 
-    const raw = this.inputQueue.take(state.activeIndex, state.slots);
+    const buttons = playerInput.buttons;
+    const raw: CombatInput = {
+      fire: (buttons & Btn.fire) !== 0,
+      aim: (buttons & Btn.aim) !== 0,
+      reload: (buttons & Btn.reload) !== 0,
+      selectIndex: selectIndexOf(playerInput),
+    };
     const gate = this.gate?.() ?? equipment?.modifiers;
     const gated = gateCombatInput(raw, gate?.allowWeapons ?? true, this.fireLatched);
     this.fireLatched = gated.fireLatched;

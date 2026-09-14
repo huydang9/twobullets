@@ -35,8 +35,10 @@ export class PartBvh {
   private readonly nodes: Node[] = [];
   private readonly planes: (readonly [number, number, number, number] | null)[];
   private readonly stack: number[] = [];
+  readonly parts: readonly BuildingPart[];
 
-  constructor(readonly parts: readonly BuildingPart[]) {
+  constructor(parts: readonly BuildingPart[]) {
+    this.parts = parts;
     this.planes = parts.map((p) => (p.kind === "wedge" ? wedgePlane(p) : null));
     if (parts.length > 0) this.build(parts.map((_, i) => i));
   }

@@ -1,23 +1,22 @@
-import {
-  CharacterSupportedState,
-  PhysicsCharacterController,
-  PhysicsRaycastResult,
-  PhysicsShapeSphere,
-  Quaternion,
-  ShapeCastResult,
-  Vector3,
-  type CharacterSurfaceInfo,
-  type HavokPlugin,
-  type PhysicsBody,
-  type PhysicsShape,
-  type Scene,
-} from "@babylonjs/core";
-import { MOVEMENT, capsuleHeightFor, capsuleRadiusFor, computeDesiredVelocity, type MoveInput, type MoveState, type Stance, type Vec3 } from "@twobullets/shared";
+import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector.js";
+import { CharacterSupportedState, PhysicsCharacterController, type CharacterSurfaceInfo } from "@babylonjs/core/Physics/v2/characterController.js";
+import type { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
+import { PhysicsShapeCapsule, PhysicsShapeSphere, type PhysicsShape } from "@babylonjs/core/Physics/v2/physicsShape.js";
+import type { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin.js";
+import { PhysicsRaycastResult, type IRaycastQuery } from "@babylonjs/core/Physics/physicsRaycastResult.js";
+import { ShapeCastResult } from "@babylonjs/core/Physics/shapeCastResult.js";
+import type { Scene } from "@babylonjs/core/scene.js";
+import { MOVEMENT } from "@twobullets/shared/constants";
+import { len2 } from "@twobullets/shared/equipment/math";
+import { capsuleHeightFor, capsuleRadiusFor, computeDesiredVelocity } from "@twobullets/shared/movement/movement";
+import type { MoveInput, MoveState, Stance, Vec3 } from "@twobullets/shared/movement/types";
+import { CollisionLayer } from "./collisionLayers";
+import { havokPluginOf } from "./level/shapes";
 
 const DOWN = new Vector3(0, -1, 0);
 const IDENTITY = Quaternion.Identity();
 /** Controller skin: the capsule is kept this far from surfaces, m. */
-const KEEP_DISTANCE = 0.05;
+export const KEEP_DISTANCE = 0.05;
 /** Max distance a grounded player is pulled down per tick to stay glued to ramps and stairs, m. */
 const GROUND_SNAP_DISTANCE = MOVEMENT.maxStepHeight;
 /** A grounded move that achieves less than this fraction of the requested distance counts as blocked. */
@@ -28,14 +27,62 @@ const STEP_PROBE_AHEAD = 0.1;
 const MIN_STEP_RISE = 0.02;
 /** The headroom probe starts at least this far above the capsule bottom, so a low (prone) start doesn't touch the floor, m. */
 const HEAD_PROBE_FLOOR_CLEARANCE = 0.1;
+const STANCES: readonly Stance[] = ["stand", "crouch", "prone"];
+
+/**
+ * What movement queries collide with. Player capsules are excluded for now: every body's Havok transform is only
+ * synced by a world step, so other players would be hit at stale positions.
+ * TODO(body blocking): include CollisionLayer.player once SimWorld syncs other bodies before each step (see
+ * `CharacterBody` docs).
+ */
+const MOVEMENT_COLLIDE_MASK = ~CollisionLayer.player;
+
+/** Babylon's controller private state that carries between integrate() calls (characterController.js, 9.26.0). */
+interface ControllerHiddenState {
+  _manifold: unknown[];
+  _stepUpSavedManifold: unknown[];
+  _lastDisplacement: Vector3;
+  _lastVelocity: Vector3;
+  _lastInvDeltaTime: number;
+  _bodyPositionTracking: Map<unknown, unknown>;
+  _body: PhysicsBody;
+}
+
+/** Exposes the protected manifold refresh so hidden solver state can be rebuilt from the position alone (R5). */
+class ReplayableController extends PhysicsCharacterController {
+  resetHiddenState(): void {
+    const self = this as unknown as ControllerHiddenState;
+    self._stepUpSavedManifold.length = 0;
+    self._lastDisplacement.setAll(0);
+    self._lastVelocity.setAll(0);
+    self._lastInvDeltaTime = 1 / 60;
+    self._bodyPositionTracking.clear();
+    // Clears the manifold and fills it from a proximity query at the current position.
+    this._refreshManifoldAtPosition(this.getPosition());
+  }
+
+  get body(): PhysicsBody {
+    return (this as unknown as ControllerHiddenState)._body;
+  }
+}
 
 /**
  * Engine side of player movement: wraps Havok's PhysicsCharacterController (support queries, collide-and-slide,
  * slope limits), ground snapping, step climbing and the crouch/prone capsules. Feet positions are ground-contact points.
+ *
+ * Replay (R5): every `step` starts from state derived from the position alone (`resetForReplay`), so
+ * `restore(feet, velocity, stance)` + the same inputs reproduce a tick bit for bit on client and server.
+ *
+ * Player body blocking (product rule; not built yet): give capsules `collideWith` including `CollisionLayer.player`,
+ * and before stepping a player move every other player's body to its current feet in Havok directly
+ * (`HavokPlugin.setPhysicsBodyTransformation`), since no world step runs between players' ticks. On the client, remote
+ * players are interpolated in the past, so their contacts will mispredict; keep their capsules on the server-side
+ * separation path first (netcode.md §1.3) and measure corrections.
  */
 export class CharacterBody {
-  private readonly controller: PhysicsCharacterController;
+  private readonly controller: ReplayableController;
   private readonly plugin: HavokPlugin;
+  private readonly capsules: Readonly<Record<Stance, PhysicsShapeCapsule>>;
   private readonly surface: CharacterSurfaceInfo = {
     isSurfaceDynamic: false,
     supportedState: CharacterSupportedState.UNSUPPORTED,
@@ -47,22 +94,33 @@ export class CharacterBody {
   /** Swept upward to test whether a taller capsule fits; slightly thinner than the capsule so wall contact doesn't count. */
   private readonly headProbe: PhysicsShapeSphere;
   private readonly ray = new PhysicsRaycastResult();
+  private readonly rayQuery: IRaycastQuery;
   private readonly castInput = new ShapeCastResult();
   private readonly castHit = new ShapeCastResult();
   private readonly moveStart = new Vector3();
   private readonly tmpA = new Vector3();
   private readonly tmpB = new Vector3();
   private readonly tmpVelocity = new Vector3();
+  private readonly feetValue = { x: 0, y: 0, z: 0 };
   private currentStance: Stance = "stand";
 
   constructor(scene: Scene, feet: Vec3) {
-    const plugin = scene.getPhysicsEngine()?.getPhysicsPlugin();
-    if (!plugin || !("shapeCast" in plugin)) throw new Error("CharacterBody requires the Havok physics plugin (v2)");
-    this.plugin = plugin as HavokPlugin;
+    this.plugin = havokPluginOf(scene);
 
-    this.controller = new PhysicsCharacterController(
+    // One capsule per stance, created once and swapped in (setShapeOptions would allocate a WASM shape per change).
+    const capsule = (stance: Stance): PhysicsShapeCapsule => {
+      const h = capsuleHeightFor(stance);
+      const r = capsuleRadiusFor(stance);
+      const shape = new PhysicsShapeCapsule(new Vector3(0, h * 0.5 - r, 0), new Vector3(0, -h * 0.5 + r, 0), r, scene);
+      shape.filterMembershipMask = CollisionLayer.player;
+      shape.filterCollideMask = MOVEMENT_COLLIDE_MASK;
+      return shape;
+    };
+    this.capsules = { stand: capsule("stand"), crouch: capsule("crouch"), prone: capsule("prone") };
+
+    this.controller = new ReplayableController(
       this.centerFor(feet, "stand", this.tmpA),
-      { capsuleHeight: MOVEMENT.standHeight, capsuleRadius: MOVEMENT.capsuleRadius },
+      { capsuleHeight: MOVEMENT.standHeight, capsuleRadius: MOVEMENT.capsuleRadius, shape: this.capsules.stand },
       scene,
     );
     const cc = this.controller;
@@ -77,11 +135,22 @@ export class CharacterBody {
     cc.dynamicFriction = 1;
 
     this.headProbe = new PhysicsShapeSphere(Vector3.Zero(), MOVEMENT.capsuleRadius - KEEP_DISTANCE, scene);
+    this.headProbe.filterCollideMask = MOVEMENT_COLLIDE_MASK;
+    this.rayQuery = { ignoreBody: cc.body, collideWith: MOVEMENT_COLLIDE_MASK };
+    this.syncFeet();
+  }
+
+  /** Feet (ground contact) position after the last step or restore. */
+  get feet(): Readonly<Vec3> {
+    return this.feetValue;
+  }
+
+  get stance(): Stance {
+    return this.currentStance;
   }
 
   getFeetToRef(result: Vector3): Vector3 {
-    const center = this.controller.getPosition();
-    return result.set(center.x, center.y - this.controller.footOffset - KEEP_DISTANCE, center.z);
+    return result.set(this.feetValue.x, this.feetValue.y, this.feetValue.z);
   }
 
   getVelocity(): Vec3 {
@@ -89,19 +158,41 @@ export class CharacterBody {
     return { x, y, z };
   }
 
+  /** Standing still at `feet` (spawns, respawns). */
   teleport(feet: Vec3): void {
-    this.setStance("stand");
-    this.surface.supportedState = CharacterSupportedState.UNSUPPORTED;
-    this.controller.setPosition(this.centerFor(feet, "stand", this.tmpA));
-    this.controller.setVelocity(Vector3.ZeroReadOnly);
+    this.restore(feet, ZERO, "stand");
   }
 
   /**
-   * One fixed simulation tick: engine queries -> pure movement step -> collide-and-slide -> step/snap fixups.
-   * Returns the next state carrying the collision-resolved velocity.
+   * Puts the body exactly into a snapshotted state (R5): `stance` is applied as given (never forced to stand), then
+   * position and velocity, then the controller's hidden solver state is rebuilt from the position.
+   */
+  restore(feet: Vec3, velocity: Vec3, stance: Stance): void {
+    this.setStance(stance);
+    this.surface.supportedState = CharacterSupportedState.UNSUPPORTED;
+    this.controller.setPosition(this.centerFor(feet, stance, this.tmpA));
+    this.controller.setVelocity(this.tmpVelocity.set(velocity.x, velocity.y, velocity.z));
+    this.resetForReplay();
+    this.syncFeet();
+  }
+
+  /**
+   * Clears what Babylon's controller remembers between integrations (manifold, last displacement/velocity/dt, moving
+   * body tracking) and rebuilds the contact manifold from a proximity query at the current position.
+   */
+  resetForReplay(): void {
+    this.controller.resetHiddenState();
+  }
+
+  /**
+   * One fixed simulation tick: canonical solver state -> engine queries -> pure movement step -> collide-and-slide ->
+   * step/snap fixups. Returns the next state carrying the collision-resolved velocity.
    */
   step(state: MoveState, input: MoveInput, dt: number): MoveState {
     const cc = this.controller;
+    // The stance and body can be out of step with `state` after a restore from another source; the state wins.
+    if (state.stance !== this.currentStance) this.setStance(state.stance);
+    this.resetForReplay();
     cc.checkSupportToRef(dt, DOWN, this.surface);
     const n = this.surface.averageSurfaceNormal;
     const next = computeDesiredVelocity(
@@ -130,7 +221,19 @@ export class CharacterBody {
         this.snapToGround();
       }
     }
+    this.syncFeet();
     return { ...next, velocity: this.getVelocity() };
+  }
+
+  /** The player's own physics body, for queries (e.g. bullet raycasts) that must ignore it. */
+  get physicsBody(): PhysicsBody {
+    return this.controller.body;
+  }
+
+  dispose(): void {
+    this.headProbe.dispose();
+    this.controller.dispose();
+    for (const stance of STANCES) this.capsules[stance].dispose();
   }
 
   /** True when the capsule of a taller `stance` would fit at the current feet position. */
@@ -148,19 +251,11 @@ export class CharacterBody {
     return !this.shapeCast(this.headProbe, from, to);
   }
 
-  /**
-   * Resizes the capsule in place, keeping the feet planted. The controller supports this directly through
-   * setShapeOptions, so it isn't recreated (position, velocity and contacts carry over).
-   */
+  /** Swaps in the stance's precreated capsule, keeping the feet planted (position, velocity and contacts carry over). */
   private setStance(stance: Stance): void {
     if (stance === this.currentStance) return;
     this.currentStance = stance;
-    this.controller.setShapeOptions({ capsuleHeight: capsuleHeightFor(stance), capsuleRadius: capsuleRadiusFor(stance) }, true);
-  }
-
-  dispose(): void {
-    this.headProbe.dispose();
-    this.controller.dispose();
+    this.controller.setShapeOptions({ capsuleHeight: capsuleHeightFor(stance), capsuleRadius: capsuleRadiusFor(stance), shape: this.capsules[stance] }, true);
   }
 
   /**
@@ -186,7 +281,7 @@ export class CharacterBody {
   private tryStepUp(start: Vector3, desired: Vec3, dt: number): boolean {
     const cc = this.controller;
     const center = cc.getPosition();
-    const wanted = Math.hypot(desired.x, desired.z) * dt;
+    const wanted = len2(desired.x, desired.z) * dt;
     if (wanted < 1e-3) return false;
     const dirX = (desired.x * dt) / wanted;
     const dirZ = (desired.z * dt) / wanted;
@@ -201,7 +296,7 @@ export class CharacterBody {
       this.tmpA.set(probeX, feetY + MOVEMENT.maxStepHeight + KEEP_DISTANCE, probeZ),
       this.tmpVelocity.set(probeX, feetY + MIN_STEP_RISE, probeZ),
       this.ray,
-      { ignoreBody: this.ownBody() },
+      this.rayQuery,
     );
     if (!this.ray.hasHit || this.ray.hitNormalWorld.y < cc.maxSlopeCosine) return false;
     const rise = this.ray.hitPointWorld.y - feetY;
@@ -222,7 +317,7 @@ export class CharacterBody {
   /** Sweeps `shape` between two points, ignoring our own body. Details land in castHit. */
   private shapeCast(shape: PhysicsShape, from: Vector3, to: Vector3): boolean {
     this.plugin.shapeCast(
-      { shape, rotation: IDENTITY, startPosition: from, endPosition: to, shouldHitTriggers: false, ignoreBody: this.ownBody() },
+      { shape, rotation: IDENTITY, startPosition: from, endPosition: to, shouldHitTriggers: false, ignoreBody: this.controller.body },
       this.castInput,
       this.castHit,
     );
@@ -233,13 +328,12 @@ export class CharacterBody {
     return result.set(feet.x, feet.y + KEEP_DISTANCE + capsuleHeightFor(stance) / 2, feet.z);
   }
 
-  /** The player's own physics body, for queries (e.g. bullet raycasts) that must ignore it. */
-  get physicsBody(): PhysicsBody {
-    return this.ownBody();
-  }
-
-  /** The controller doesn't expose its body, but queries need it so they ignore our own capsule. */
-  private ownBody(): PhysicsBody {
-    return (this.controller as unknown as { _body: PhysicsBody })._body;
+  private syncFeet(): void {
+    const center = this.controller.getPosition();
+    this.feetValue.x = center.x;
+    this.feetValue.y = center.y - this.controller.footOffset - KEEP_DISTANCE;
+    this.feetValue.z = center.z;
   }
 }
+
+const ZERO: Vec3 = { x: 0, y: 0, z: 0 };

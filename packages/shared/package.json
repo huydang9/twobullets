@@ -12,8 +12,5 @@
   },
   "devDependencies": {
     "vitest": "^5.0.0"
-  },
-  "dependencies": {
-    "@babylonjs/core": "^9.26.0"
   }
 }
