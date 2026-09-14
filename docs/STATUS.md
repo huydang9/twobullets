@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-09-15 (overnight session, ~04:00). Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
+Last updated: 2026-09-15 (overnight session, ~05:30). Updated at the end of every phase by the `phase-complete` skill. Check `git log` and `git status` before acting on it.
 
 ## Roadmap
 
@@ -14,12 +14,12 @@ Last updated: 2026-09-15 (overnight session, ~04:00). Updated at the end of ever
 | — | Audio v2 · blood · performance rounds 1–2 · rules/skills/docs | ✅ Done | `4843c7a`, `5d29a3f`, `5d050d6`, `7520858`, `cf7ec07` |
 | M2.5 | **Equipment** (offline, server-ready rules) | ✅ Done, browser-verified | `f1e36ef`, `2169d6d` |
 | — | Vegetation stability; chain-link alpha and wall gaps (user's "see through wall") | ✅ Done | `d8d6794`, `cd57479`, `a43cc02` |
-| — | **Realistic throwables and gear:** CC0 flipbook VFX; real FP throw arms, grenades, consumables, helmet/vest/backpack | ✅ Done, browser-checked (medkit hold still large) | `f57776a`, `a1e6bdf` |
-| — | Cover props library: big oaks, rocks, wrecks, sandbags, hay, pipes, spools | ✅ Library done; 🔄 placement on Map v1 running | `6b63415` |
-| — | **Offline bots on Map v1** (5×2, zone, easy/normal/hard) | ✅ Nav, brain, MatchSim, client + HUD committed; browser check of combat pending | `fc4ced2`, `59c0d5a`, `bbd3ef3`, `258292e`, `32eb8ee` |
+| — | **Realistic throwables and gear:** CC0 flipbook VFX; real FP throw arms, grenades, consumables, helmet/vest/backpack | ✅ Done, browser-checked | `f57776a`, `a1e6bdf`, `762a1dc` |
+| — | Cover props: big oaks, rocks, wrecks, sandbags, hay, pipes, spools; 432 placed on Map v1; radar roof reachable | ✅ Done, browser-checked | `6b63415`, `a36a539` |
+| — | **Offline bots on Map v1** (5×2, zone, easy/normal/hard) | ✅ Nav (2 rounds), brain (2 rounds), MatchSim, client + HUD, Mixamo bot animations; full browser combat check pending | `fc4ced2`, `59c0d5a`, `bbd3ef3`, `258292e`, `32eb8ee`, `ea5356f`, `762a1dc` |
 | M3 | **Networked movement** (local server + client prediction) | ✅ Core done locally: sim refactor, protocol, netcode, server-match (ws), client net; WebTransport, CI gates, Linux staging not done | `d093110`, `2df36fd`, `357c19f`, `7c1066b` |
 | — | Real-world map (OpenStreetMap), optional | 🔍 Investigation done, waiting on user decisions | `15fb288` |
-| M4 | Networked combat (friendly fire) | Planned | `docs/backend/architecture.md` |
+| M4 | Networked combat (friendly fire) | 🔄 Wave 1 running: T4.1 sim weapon step, T4.4 protocol events + reliable events + lag-comp history | `docs/backend/architecture.md` §7.4 |
 | M5 | BR loop networked: landing/glide, zone, equipment, knock/revive, lobby bots | Planned (offline versions exist) | |
 
 ## How to try things
@@ -31,14 +31,15 @@ Last updated: 2026-09-15 (overnight session, ~04:00). Updated at the end of ever
 ## In progress
 | Area | Owner | Files | Next |
 |---|---|---|---|
-| Cover props placement on Map v1 + radar roof stair fix | map layout agent | `packages/shared/src/map/{mapV1.ts,layout/**}`, bake/checksums, nav/match test expectations | Browser-check viewpoints, commit; then nav wall-link fixes |
+| M4 T4.1 sim combat: weapon step inside `stepPlayer`, R7 projectile buffer, weapon reconciliation | T4.1 agent | `packages/shared/src/weapons/**`, `packages/sim/**`, maybe `apps/client/src/combat/CombatSystem.ts` | Browser-check offline shooting feel, commit |
+| M4 T4.4 protocol combat groups/events, reliable events, `LagCompHistory`, replication move | T4.4 agent | `packages/protocol/**`, `packages/netcode/**` | Commit; then wave 2: T4.3 server hitreg/projectiles, T4.6 server health/death/respawn, T4.5 client combat net |
 
 ## Known issues / follow-ups
-- **Bots:** browser combat not yet watched in a full match (headless: bots arm, shoot, 36% hit at 30 m on normal). Nav links through walls on four small buildings (farm sheds at (316.8, 273.8)/(312.3, 274.8), military containers 2 and 5), two town-house staircases where bots loop, tight quarry office door. Nav grid builds on the main thread (0.55 s Node; slower in browser) — move to the map worker. Per-weapon third-person props (Mixamo knocked/crawl/revive/heal/throw clips are in since `762a1dc`).
-- **Hidden-tab testing:** a `?bots=1` page froze when the first `scene.render()` happened after START in a hidden automation tab; rendering once before starting avoids it. Not expected in a visible tab, but the user should confirm.
-- **Equipment:** medkit held in first person covers the centre of the screen; frag dust slightly speckled; molotov flames look like separate tongues.
-- **Backend:** WebTransport, CI perf gates, Linux re-measure, body blocking in the sim (hook in `CharacterBody` `MOVEMENT_COLLIDE_MASK`), `replication.ts` should move from server-match to netcode, protocol `quantize` duplicates shared `aim.ts`.
-- **Docs stale:** `docs/map/terrain.md`, `docs/map/buildings.md` and `CLAUDE.md` still name pre-`packages/sim` folders; `docs/architecture-overview.md` lacks sim/protocol/netcode/server-match/bots.
+- **Bots:** full browser combat not yet watched (headless: 6-9/10 armed by 90 s, 36% hit at 30 m on normal). Nav grid builds on the main thread (0.55 s Node, slower in browser) — move to the map worker. Contract gaps: `itemUse` event lacks item id, no loot `pickup` fx event (client infers both). Per-weapon third-person props.
+- **Hidden-tab testing:** `?bots=1` froze when the first `scene.render()` happened after START in a hidden automation tab; rendering once before start avoids it. Not expected in a visible tab — user to confirm.
+- **Visuals:** frag dust slightly speckled; molotov flames look like separate tongues; car wreck very dark.
+- **Backend:** WebTransport, CI perf gates, Linux re-measure, body blocking in the sim (hook in `CharacterBody` `MOVEMENT_COLLIDE_MASK`); server-match should import replication from netcode after T4.4.
+- **Docs:** `docs/equipment/art.md` still says there is no `assets:equipment` script (there is); `docs/bots/design.md` §9 still lists heal/throw clips as missing.
 
 ## Pending user decisions
 - **Real-world map** (`docs/research/real-world-map-investigation.md`): place (Holašovice recommended / Shirakawa-go / Hội An), elevation real/scaled/flat, building cap 60 vs ~120, Training Yard on real maps, diacritics in names.
@@ -48,7 +49,7 @@ Last updated: 2026-09-15 (overnight session, ~04:00). Updated at the end of ever
 ## Pending user actions
 - Play `?bots=1` in a visible tab and say how the bots feel (difficulty, aim, looting).
 - Re-run `?bench=v1` (perf round 2 plus vegetation, VFX, cover props, bots) and paste the results; F4 numbers with `?bots=1&spectate=1`.
-- Listen to the equipment sounds; review the Vietnamese devlog in `docs/devlog/` (tonight's phases not written up yet).
+- Listen to the equipment sounds; review the Vietnamese devlog in `docs/devlog/` (chapters 13–18 cover tonight; uncommitted until you approve).
 
 ## Workflow notes
 - Weekly usage guard: if weekly Claude usage > 50% (checked hourly from `~/.claude/usage-last.json`), stop all agents and rewrite this file as a resumable report.
