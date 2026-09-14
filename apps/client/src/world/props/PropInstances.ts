@@ -1,5 +1,6 @@
 import { Matrix, Vector3, type Mesh, type Scene } from "@babylonjs/core";
-import { INSTANCE_STRIDE, getMapProp, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
+import { INSTANCE_STRIDE, getMapProp, type MapPropDef, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
+import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import type { PropVisual, PropVisuals } from "./PropVisuals";
 
@@ -25,6 +26,13 @@ export interface PropRenderStats {
 }
 
 const DEFAULT_SHADOW_DISTANCE: Readonly<Record<PropCategory, number>> = { tree: 70, rock: 50, prop: 50, bush: 25, grass: 0 };
+/**
+ * Props at most this tall (collision height at scale 1: crates, small rocks, stumps) cast shadows only within
+ * SMALL_PROP_SHADOW_DISTANCE. With the sun at 48° their shadow reaches under half a meter past the prop and lies flat,
+ * so beyond 30 m it is a thin sliver of pixels.
+ */
+const SMALL_PROP_HEIGHT = 0.5;
+const SMALL_PROP_SHADOW_DISTANCE = 30;
 
 /** One (level, casts shadow) bucket of a cell's instances of one prop. */
 class Batch {
@@ -62,6 +70,7 @@ export class PropInstances {
   private readonly lastCamera = new Vector3(Infinity, Infinity, Infinity);
   private shadowInstances = 0;
   private culledInstances = 0;
+  private enabled = true;
 
   constructor(
     scene: Scene,
@@ -80,8 +89,11 @@ export class PropInstances {
     const axis = new Vector3();
 
     for (const set of sets) {
-      const category = getMapProp(set.prop).category;
+      const def = getMapProp(set.prop);
+      const { category } = def;
       if (category === "grass") continue;
+      const small = OPTIMIZATIONS.smallPropShadowBand && propHeight(def) <= SMALL_PROP_HEIGHT;
+      const castDistance = small ? Math.min(shadowDistance[category], SMALL_PROP_SHADOW_DISTANCE) : shadowDistance[category];
       const visual = visuals.get(set.prop);
       const byCell = new Map<string, number[]>();
       for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
@@ -103,7 +115,7 @@ export class PropInstances {
           min.minimizeInPlaceFromFloats(x, y, z);
           max.maximizeInPlaceFromFloats(x, y, z);
         });
-        this.cells.push({ key: `${set.prop}@${key}`, visual, matrices, positions, min, max, batches: new Map(), shadowDistance: visual.castShadow ? shadowDistance[category] : 0 });
+        this.cells.push({ key: `${set.prop}@${key}`, visual, matrices, positions, min, max, batches: new Map(), shadowDistance: visual.castShadow ? castDistance : 0 });
       }
     }
   }
@@ -114,11 +126,26 @@ export class PropInstances {
 
   /** Re-buckets instances around the camera; cheap to call every frame (does nothing until the camera moves). */
   update(camera: Vector3, force = false): void {
+    if (!this.enabled) return;
     if (!force && Vector3.DistanceSquared(camera, this.lastCamera) < this.updateDistance * this.updateDistance) return;
     this.lastCamera.copyFrom(camera);
     this.shadowInstances = 0;
     this.culledInstances = 0;
     for (const cell of this.cells) this.updateCell(cell, camera);
+  }
+
+  /** Hides every batch (benchmark A/B); after re-enabling, the next update re-buckets. */
+  setEnabled(enabled: boolean): void {
+    if (enabled === this.enabled) return;
+    this.enabled = enabled;
+    this.lastCamera.set(Infinity, Infinity, Infinity);
+    if (enabled) return;
+    for (const cell of this.cells) {
+      for (const batch of cell.batches.values()) {
+        batch.meshes?.forEach((m) => m.setEnabled(false));
+        batch.signature = -1;
+      }
+    }
   }
 
   stats(): PropRenderStats {
@@ -215,6 +242,8 @@ export class PropInstances {
       mesh.isPickable = false;
       mesh.alwaysSelectAsActiveMesh = false;
       mesh.receiveShadows = true;
+      // Instance matrices carry the placement; the batch itself stays at the origin.
+      if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
       if (batch.shadow) this.environment.shadowGenerator.addShadowCaster(mesh, false);
       this.environment.skyFill.excludedMeshes.push(mesh);
     }
@@ -250,6 +279,13 @@ function farthestInBox(p: Vector3, min: Vector3, max: Vector3): number {
   const dy = Math.max(Math.abs(p.y - min.y), Math.abs(p.y - max.y));
   const dz = Math.max(Math.abs(p.z - min.z), Math.abs(p.z - max.z));
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function propHeight(def: MapPropDef): number {
+  const { collision } = def;
+  if (collision.kind === "box") return collision.size[1];
+  if (collision.kind === "cylinder") return collision.height;
+  return Infinity;
 }
 
 function signatureOf(indices: readonly number[]): number {

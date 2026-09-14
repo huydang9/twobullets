@@ -5,20 +5,25 @@ import {
   DirectionalLight,
   HemisphericLight,
   ImageProcessingConfiguration,
+  Mesh,
   Scene,
   ShadowGenerator,
   Vector3,
   type AbstractMesh,
 } from "@babylonjs/core";
-import type { BuiltLevel } from "@twobullets/shared";
+import type { BuiltLevel, SurfaceKind } from "@twobullets/shared";
+import { OPTIMIZATIONS } from "../perf/flags";
 import { SKY } from "./environmentManifest";
 import { LevelMaterials } from "./materials";
 import { installPostEffects } from "./postEffects";
+import { CascadeCasterCulling } from "./shadowCulling";
 import { createSkybox, loadImageBasedLighting } from "./sky";
 
 export interface Environment {
   readonly sun: DirectionalLight;
   readonly shadowGenerator: ShadowGenerator;
+  /** Per-cascade caster culling and its counts; null when cascaded shadows are unsupported. */
+  readonly shadowCulling: CascadeCasterCulling | null;
   /**
    * Hemispheric sky/ground fill for non-PBR materials (StandardMaterial placeholders and debug meshes, FX).
    * PBR meshes are lit by the IBL instead: add them to `skyFill.excludedMeshes` to avoid double ambient.
@@ -108,6 +113,7 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
     sun,
     options.largeWorld ? { ...LOOK.shadows, distance: LARGE_WORLD_LOOK.shadowDistance, lambda: LARGE_WORLD_LOOK.shadowLambda } : LOOK.shadows,
   );
+  const shadowCulling = shadowGenerator instanceof CascadedShadowGenerator ? new CascadeCasterCulling(shadowGenerator) : null;
   const materials = new LevelMaterials(scene);
   const skybox = createSkybox(scene);
   const ibl = loadImageBasedLighting(scene, LOOK.sky);
@@ -126,6 +132,7 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
   return {
     sun,
     shadowGenerator,
+    shadowCulling,
     skyFill,
     ready,
     addShadowCaster,
@@ -133,6 +140,9 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
       for (const mesh of level.meshes) {
         const kind = level.surfaceOf.get(mesh);
         if (kind) materials.apply(mesh, kind);
+      }
+      const visuals = OPTIMIZATIONS.mergeLevelBlocks ? mergeByMaterial(level) : level.meshes.map((mesh) => ({ mesh, kind: level.surfaceOf.get(mesh) }));
+      for (const { mesh, kind } of visuals) {
         mesh.receiveShadows = true;
         skyFill.excludedMeshes.push(mesh);
         // The ground slab is the lowest thing in the level; it never shadows anything.
@@ -143,6 +153,34 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
 }
 
 type ShadowSettings = { readonly [K in keyof typeof LOOK.shadows]: number };
+
+/**
+ * Level blocks are static boxes, one mesh (and draw call per pass, shadow cascades included) each. Draws one merged
+ * copy per material and surface kind instead; the original meshes stay enabled and pickable for physics, raycasts and
+ * surface lookups, just invisible.
+ */
+function mergeByMaterial(level: BuiltLevel): { mesh: Mesh; kind: SurfaceKind | undefined }[] {
+  const groups = new Map<string, Mesh[]>();
+  for (const mesh of level.meshes) {
+    const kind = level.surfaceOf.get(mesh);
+    const key = `${kind}|${mesh.material?.uniqueId ?? "none"}`;
+    let group = groups.get(key);
+    if (!group) groups.set(key, (group = []));
+    group.push(mesh);
+  }
+  return [...groups.values()].map((group) => {
+    const kind = level.surfaceOf.get(group[0]!);
+    if (group.length === 1) return { mesh: group[0]!, kind };
+    const merged = Mesh.MergeMeshes(group, false, true);
+    if (!merged) return { mesh: group[0]!, kind };
+    merged.name = `level_merged_${kind ?? "block"}_${group.length}`;
+    merged.material = group[0]!.material;
+    merged.isPickable = false;
+    merged.freezeWorldMatrix();
+    for (const mesh of group) mesh.isVisible = false;
+    return { mesh: merged, kind };
+  });
+}
 
 /** Same as createEnvironment, but resolves once all environment assets are loaded. */
 export async function createEnvironmentAsync(scene: Scene, options: EnvironmentOptions = {}): Promise<Environment> {

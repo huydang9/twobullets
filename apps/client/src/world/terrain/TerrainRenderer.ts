@@ -1,5 +1,6 @@
 import { AbstractMesh, Mesh, SubMesh, VertexBuffer, type Camera, type Material, type Observer, type Scene } from "@babylonjs/core";
 import type { Terrain } from "@twobullets/shared";
+import { OPTIMIZATIONS } from "../../perf/flags";
 import { buildChunkGeometry, chunkLayout, distanceToBox, projectionScale, selectLod, type ChunkGeometry } from "./terrainGeometry";
 
 export interface TerrainRenderOptions {
@@ -12,6 +13,13 @@ export interface TerrainRenderOptions {
 }
 
 export const TERRAIN_RENDER_DEFAULTS: TerrainRenderOptions = { chunkCells: 128, maxLod: 4, pixelError: 3 };
+
+/**
+ * A chunk coarsens only when the coarser LOD's error is within this fraction of the pixel budget (about 18% farther
+ * than the switch distance), and refines as soon as the budget is exceeded, so a camera hovering at the threshold
+ * doesn't flip the chunk back and forth.
+ */
+const COARSEN_HYSTERESIS = 0.85;
 
 interface Chunk {
   readonly mesh: Mesh;
@@ -106,7 +114,10 @@ export class TerrainRenderer {
       const g = chunk.geometry;
       const box = chunk.mesh.getBoundingInfo().boundingBox;
       const distance = distanceToBox(x, y, z, box.minimumWorld.x, g.minY, box.minimumWorld.z, box.maximumWorld.x, g.maxY, box.maximumWorld.z);
-      const lod = selectLod(g.lodErrors, distance, scale, this.options.pixelError);
+      let lod = selectLod(g.lodErrors, distance, scale, this.options.pixelError);
+      if (lod > chunk.lod && OPTIMIZATIONS.terrainLodHysteresis) {
+        lod = Math.max(chunk.lod, selectLod(g.lodErrors, distance, scale, this.options.pixelError * COARSEN_HYSTERESIS));
+      }
       if (lod !== chunk.lod) {
         chunk.lod = lod;
         chunk.mesh.subMeshes = [chunk.lodSubMeshes[lod]!];

@@ -25,6 +25,13 @@ const MIN_EQUIP_SECONDS_FOR_HIDE = 0.45;
 const ANIMATED_HIP_RECOIL_SCALE = 0.4;
 const FORWARD = new Vector3(0, 0, 1);
 
+let suppressed = false;
+
+/** DEV benchmark hook: hides every viewmodel (arms, weapon, red dot) until released. */
+export function setViewmodelSuppressed(value: boolean): void {
+  suppressed = value;
+}
+
 /** Per-frame facts the viewmodel reacts to. Owned and refilled by the caller to avoid allocations. */
 export interface ViewmodelFrame {
   weaponId: WeaponId;
@@ -253,7 +260,7 @@ export class Viewmodel {
 
     const scoped = frame.def.ads.scoped;
     const ads = smoothstep(0, 1, frame.adsBlend);
-    this.setHidden(scoped && frame.adsBlend > SCOPE_HIDE_BLEND);
+    this.setHidden(suppressed || (scoped && frame.adsBlend > SCOPE_HIDE_BLEND));
     const reloading = frame.phase === "reloading";
 
     // FOV compensation: scaling camera-space X/Y by the tangent ratio projects exactly like the reference FOV.

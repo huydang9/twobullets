@@ -6,6 +6,9 @@ import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
+import { DynamicResolution } from "../perf/DynamicResolution";
+import { OPTIMIZATIONS } from "../perf/flags";
+import type { PerfTools } from "../perf/PerfTools";
 import { PlayerController } from "../player/PlayerController";
 import { Hud } from "../ui/Hud";
 import { createEnvironment } from "../world/environment";
@@ -22,21 +25,30 @@ export class Game {
     private readonly presentation: WeaponPresentation,
     private readonly hud: Hud,
     private readonly world: MapRuntime | null,
+    private readonly perf: PerfTools | null,
+    private readonly dynamicResolution: DynamicResolution | null,
   ) {}
 
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement): Promise<Game> {
+    const params = new URLSearchParams(window.location.search);
+    // DEV: `?bench=v1` runs the Map v1 benchmark (docs/perf/benchmark.md); it implies `?map=v1`.
+    const benchmark = import.meta.env.DEV ? params.get("bench") : null;
     const engine = new Engine(canvas, true, { stencil: true, preserveDrawingBuffer: false }, true);
     const scene = new Scene(engine);
+    // Aiming uses pointer lock and Havok raycasts; Babylon's per-mousemove picking has nothing to find.
+    scene.skipPointerMovePicking = OPTIMIZATIONS.skipPointerMovePicking;
 
     const havok = await HavokPhysics();
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
     // DEV: `?map=v1` loads the full Map v1; no query (or `?map=arena`) keeps the blockout arena.
-    const mapV1 = import.meta.env.DEV && new URLSearchParams(window.location.search).get("map") === "v1";
+    const mapV1 = import.meta.env.DEV && (params.get("map") === "v1" || benchmark === "v1");
     const environment = createEnvironment(scene, { largeWorld: mapV1 });
     // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
     const assetsLoading = loadAssets(scene);
+    // Thousands of meshes and light exclusions are added while loading; resync materials once at the end instead.
+    scene.blockMaterialDirtyMechanism = OPTIMIZATIONS.blockMaterialDirtyOnLoad;
     const world = mapV1
       ? await MapRuntime.load(scene, environment, { bakeUrl: `${import.meta.env.BASE_URL}assets/map/mapV1.terrain.bin`, overlay: new MapOverlay() })
       : null;
@@ -44,6 +56,7 @@ export class Game {
     const level = buildLevel(scene, levelData);
     environment.decorateLevel(level);
     const [assets] = await Promise.all([assetsLoading, environment.ready, world?.ready]);
+    scene.blockMaterialDirtyMechanism = false;
 
     const input = new InputManager(canvas);
     const spawn = levelData.spawnPoints[0];
@@ -65,11 +78,20 @@ export class Game {
 
     installDebugTools(scene, input, { hud });
 
-    const game = new Game(engine, scene, input, player, combat, presentation, hud, world);
+    // DEV: F4 or `?perf=1` stats panel, `?bench=v1` benchmark. Loaded on demand so production builds leave it out.
+    let perf: PerfTools | null = null;
+    if (import.meta.env.DEV) {
+      const { PerfTools, readPerfOptions } = await import("../perf/PerfTools");
+      perf = new PerfTools({ engine, scene, camera: player.camera, environment, world, targets: combat.targets, hud }, readPerfOptions(window.location.search));
+    }
+    // Off by default (`?opt=dynamicResolution:1&fps=120`); never during a benchmark, which measures fixed resolutions.
+    const dynamicResolution = OPTIMIZATIONS.dynamicResolution && !benchmark ? new DynamicResolution(engine, { targetFps: Number(params.get("fps")) || 120 }) : null;
+
+    const game = new Game(engine, scene, input, player, combat, presentation, hud, world, perf, dynamicResolution);
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets, world } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets, world, perf } });
     }
     game.start();
     return game;
@@ -77,14 +99,21 @@ export class Game {
 
   private start(): void {
     this.engine.runRenderLoop(() => {
+      const perf = this.perf;
+      perf?.beginFrame();
       const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
-      this.player.update(dt);
+      // The benchmark poses the camera itself.
+      if (!perf?.drivesCamera) this.player.update(dt);
       this.combat.update(dt);
       this.presentation.update(dt);
       this.world?.update(dt);
+      perf?.beforeRender();
       this.scene.render();
+      perf?.afterRender();
       this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
       this.input.endFrame();
+      this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
+      perf?.endFrame();
     });
     window.addEventListener("resize", () => this.engine.resize());
   }

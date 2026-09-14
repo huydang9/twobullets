@@ -7,6 +7,7 @@ import {
   type BuildingVisualHost,
   type PrefabGeometry,
 } from "@twobullets/shared";
+import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import { BUILDING_SHADE_ATTRIBUTE } from "./buildingShadePlugin";
 import { BuildingMaterials, lookOf, type BuildingLookId } from "./BuildingMaterials";
@@ -70,6 +71,11 @@ export class BuildingVisuals implements BuildingVisualHost {
     return this.materials.whenLoaded();
   }
 
+  /** Hides every building mesh (benchmark A/B). Collision and gameplay are unaffected. */
+  setEnabled(enabled: boolean): void {
+    for (const batch of this.batches.values()) batch.setVisible(enabled);
+  }
+
   stats(): BuildingRenderStats {
     const prefabs = new Set<string>();
     let instances = 0;
@@ -104,6 +110,7 @@ export class BuildingVisuals implements BuildingVisualHost {
       mesh.material = this.materials.get(look);
       mesh.isPickable = false;
       mesh.receiveShadows = true;
+      if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
       this.environment.shadowGenerator.addShadowCaster(mesh);
       // PBR is lit by the IBL; the hemispheric fill is for non-PBR meshes only.
       this.environment.skyFill.excludedMeshes.push(mesh);
@@ -116,6 +123,7 @@ export class BuildingVisuals implements BuildingVisualHost {
 class Batch {
   private readonly matrices = new Map<number, Float32Array>();
   private nextId = 0;
+  private visible = true;
 
   constructor(
     readonly prefabId: string,
@@ -138,6 +146,11 @@ class Batch {
     if (this.matrices.delete(id)) this.sync();
   }
 
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    for (const mesh of this.meshes) mesh.setEnabled(visible && this.count > 0);
+  }
+
   dispose(): void {
     this.meshes.forEach((m) => m.dispose());
   }
@@ -152,10 +165,10 @@ class Batch {
     }
     for (const mesh of this.meshes) {
       // With zero thin instances Babylon would draw the source mesh itself at the origin.
-      mesh.setEnabled(buffer.length > 0);
+      mesh.setEnabled(this.visible && buffer.length > 0);
       if (buffer.length === 0) continue;
+      // Also refreshes the bounding info over all instances.
       mesh.thinInstanceSetBuffer("matrix", buffer, 16, true);
-      mesh.thinInstanceRefreshBoundingInfo();
     }
   }
 }
