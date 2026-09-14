@@ -1,9 +1,9 @@
 /**
  * "Babylon" server match: NullEngine + Scene + HavokPlugin, exactly the client code path.
- *  - Level blocks go through the shared `buildLevel` (Mesh + VertexData + PhysicsAggregate).
- *  - Players use the client's `CharacterBody` (Babylon PhysicsCharacterController + step-up/ground-snap shape casts).
+ *  - Level blocks go through `@twobullets/sim`'s `buildLevel` (Mesh + VertexData + PhysicsAggregate).
+ *  - Players use the sim's `CharacterBody` (Babylon PhysicsCharacterController + step-up/ground-snap shape casts).
  *  - Hitboxes are ANIMATED trigger PhysicsBodies on TransformNodes with the TELEPORT prestep (like TargetDummy).
- *  - Bullets use the client's `HavokRaycaster` through `stepProjectiles`.
+ *  - Bullets use the sim's `WorldRaycaster` (hitbox triggers included) through `stepProjectiles`.
  *  - The world is advanced with scene._advancePhysicsEngineStep (what scene.render() calls), or with a full
  *    scene.render() in "babylon-render" mode to price a naive NullEngine render loop.
  */
@@ -57,10 +57,9 @@ export class BabylonMatch implements MatchLike {
     const B = (this.B = await import("@babylonjs/core"));
     lap("importBabylonCore");
     const S = (this.S = await import("../../../../packages/shared/src/index.ts"));
-    const { CharacterBody } = await import("../../../../apps/client/src/player/CharacterBody.ts");
-    const { HavokRaycaster } = await import("../../../../apps/client/src/combat/HavokRaycaster.ts");
-    const { HitboxRegistry } = await import("../../../../apps/client/src/combat/hitboxes.ts");
-    lap("importClientCode");
+    // T3.1 moved CharacterBody, the raycaster and buildLevel into packages/sim (lib/resolve.ts maps the specifier).
+    const Sim = await import("@twobullets/sim");
+    lap("importSimCode");
 
     this.feet = new B.Vector3();
     this.a3 = new B.Vector3();
@@ -82,11 +81,11 @@ export class BabylonMatch implements MatchLike {
     terrainBody.shape = terrainShape;
     lap("terrain");
 
-    const built = S.buildLevel(scene, { name: "bench", blocks: buildingBlocks(o), spawnPoints: [], targets: [], killY: -100 });
+    const built = Sim.buildLevel(scene, { name: "bench", blocks: buildingBlocks(o), spawnPoints: [], targets: [], killY: -100 });
     for (const mesh of built.meshes) mesh.physicsBody.shape.filterMembershipMask = LAYER.world;
     lap("buildings");
 
-    const registry = new HitboxRegistry();
+    const colliderIds = new Map<unknown, string>();
     const hitboxShapes = HITBOX_SPECS.slice(0, o.hitboxesPerPlayer).map((spec) => {
       const [a, b, c] = spec.size;
       const shape =
@@ -102,9 +101,8 @@ export class BabylonMatch implements MatchLike {
     });
     for (let i = 0; i < o.players; i++) {
       const spawn = spawnPoint(o, i);
-      const body = new CharacterBody(scene, spawn);
+      const body = new Sim.CharacterBody(scene, spawn);
       this.applyPlayerFilter(body);
-      const owner = { id: `p${i}`, alive: true, applyDamage: () => null };
       const hitboxes = hitboxShapes.map((shape, k) => {
         const node = new B.TransformNode(`hb_${i}_${k}`, scene);
         node.position.set(spawn.x, spawn.y + 1, spawn.z);
@@ -113,15 +111,17 @@ export class BabylonMatch implements MatchLike {
         hb.shape = shape;
         hb.disablePreStep = false;
         hb.disableSync = true;
-        registry.add(hb, { colliderId: `p${i}:${HITBOX_SPECS[k]!.name}`, owner, zone: "body" });
+        colliderIds.set(hb, `p${i}:${HITBOX_SPECS[k]!.name}`);
         return node;
       });
       this.players.push({ body, script: new InputScript(o.seed, i), move: S.createMoveState(), weapon: S.createWeaponState(S.DEFAULT_LOADOUT), yaw: 0, hitboxes, shape: null, input: null });
     }
-    const raycaster = new HavokRaycaster(scene, registry);
-    const query = (raycaster as any).query;
-    query.membership = LAYER.bulletQuery;
-    query.collideWith = BULLET_COLLIDE;
+    const raycaster = new Sim.WorldRaycaster(scene, {
+      collideWith: BULLET_COLLIDE,
+      shouldHitTriggers: true,
+      colliderIdOf: (body) => (body ? (colliderIds.get(body) ?? null) : null),
+    });
+    (raycaster as any).query.membership = LAYER.bulletQuery;
     this.raycast = raycaster.cast;
     scene._advancePhysicsEngineStep(1000 / 60);
     lap("playersAndHitboxes");

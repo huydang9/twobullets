@@ -3,18 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-transform-types src/main.ts",
+    "dev": "node --import ./src/node/resolveHooks.ts src/main.ts",
+    "load": "node --import ./src/node/resolveHooks.ts src/cli/wsLoad.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --no-file-parallelism"
   },
   "dependencies": {
     "@twobullets/contracts": "workspace:*",
     "@twobullets/netcode": "workspace:*",
     "@twobullets/protocol": "workspace:*",
     "@twobullets/shared": "workspace:*",
-    "@twobullets/sim": "workspace:*"
+    "@twobullets/sim": "workspace:*",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "vitest": "^5.0.0"
   }
 }

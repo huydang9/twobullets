@@ -1,1 +1,12 @@
 export type { AttachResult, Match, MatchHost } from "./host/MatchHost";
+export { LocalMatchHost, type HostMetrics, type HostMode, type LocalMatchHostOptions } from "./host/LocalMatchHost";
+export { ServerMatch, type ServerMatchOptions } from "./match/ServerMatch";
+export { TickScheduler, NODE_TIMERS, type TimerApi, type TickSchedulerOptions } from "./sched/TickScheduler";
+export { SessionManager, type AcceptInfo, type ConnectionHandle, type MatchDirectory } from "./session/SessionManager";
+export { SnapshotBuilder, ClientReplication } from "./snapshot/SnapshotBuilder";
+export { writeOwnerMove, writeRemoteEntity } from "./snapshot/replication";
+export { JoinTokenVerifier, signDevJoinToken, createDevClaims, devHmacKey, ed25519KeyFromJwk, type VerifyKey } from "./auth/joinToken";
+export { WsSession, wsCloseCode } from "./transport/WsSession";
+export { startWsServer, type WsServerHandle, type WsServerOptions } from "./transport/wsServer";
+export { HeadlessClient, type HeadlessClientOptions } from "./dev/HeadlessClient";
+export { startServer, localMatchConfig, LOCAL_HOST_ID, type RunningServer, type ServerOptions } from "./app";

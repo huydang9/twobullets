@@ -3,6 +3,7 @@ import type { Session } from "@twobullets/netcode";
 import type { DisconnectReason } from "@twobullets/protocol";
 
 // Match process model (ADR 0004): single-match by default, packed workers behind the same interface.
+// Implementation: LocalMatchHost (host/LocalMatchHost.ts) and ServerMatch (match/ServerMatch.ts).
 
 export interface MatchHost {
   createMatch(config: MatchConfig): Match;

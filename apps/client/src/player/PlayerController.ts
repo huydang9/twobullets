@@ -24,6 +24,7 @@ import {
   type PlayerInput,
   type SpawnPoint,
   type TickClock,
+  type Vec3,
   type WeaponState,
 } from "@twobullets/shared";
 import { CharacterBody, stepPlayer } from "@twobullets/sim";
@@ -87,6 +88,11 @@ export interface PlayerControllerOptions {
    * killY. "server": the controller never teleports itself; call `respawnAt`/`restore` when the server says so.
    */
   readonly spawnAuthority?: "local" | "server";
+  /**
+   * Networked movement parity: the fixed weapon state and gates the server steps movement with. When set, ticks and
+   * replays ignore the combat link's weapon state, the gate source and `modifiers.allowJump` for movement.
+   */
+  readonly movement?: { readonly weapon: WeaponState; readonly gates: MoveGates };
 }
 
 /**
@@ -103,6 +109,7 @@ export class PlayerController {
   private readonly body: CharacterBody;
   private readonly clock: TickClock;
   private readonly spawnAuthority: "local" | "server";
+  private readonly fixedMovement: { readonly weapon: WeaponState; readonly gates: MoveGates } | null;
   private readonly input: InputManager;
   private readonly level: LevelData;
   private state: MoveState = createMoveState();
@@ -125,12 +132,15 @@ export class PlayerController {
   private zoomFovDegrees: number = CAMERA.fovDegrees;
   private zoomBlend = 0;
   private readonly punch = new Vector3();
+  /** Render-only correction offset (networked reconciliation smoothing), added to the camera position. */
+  private readonly renderOffset = new Vector3();
 
   constructor(scene: Scene, input: InputManager, level: LevelData, options: PlayerControllerOptions = {}) {
     this.input = input;
     this.level = level;
     this.clock = options.clock ?? new AccumulatorClock();
     this.spawnAuthority = options.spawnAuthority ?? "local";
+    this.fixedMovement = options.movement ?? null;
     const spawn = level.spawnPoints[0];
     if (!spawn) throw new Error(`Level "${level.name}" has no spawn points`);
     this.camera = new TargetCamera("playerCamera", Vector3.Zero(), scene);
@@ -202,6 +212,36 @@ export class PlayerController {
 
   get moveState(): MoveState {
     return this.state;
+  }
+
+  /** Tick-accurate feet after the last tick, replay or restore (networked prediction reads it without copying). */
+  get tickFeet(): Readonly<Vec3> {
+    return this.currentFeet;
+  }
+
+  /**
+   * Networked reconciliation: puts the body and movement state exactly into `state` at `feet` (R5 restore). Aim, camera
+   * blends and the input history are untouched.
+   */
+  restoreMove(feet: Vec3, state: MoveState): void {
+    this.body.restore(feet, state.velocity, state.stance);
+    this.state = state;
+    this.body.getFeetToRef(this.currentFeet);
+    this.previousFeet.copyFrom(this.currentFeet);
+  }
+
+  /** Re-simulates one recorded tick after a restore (R11): no `onTick` observers, so no combat, FX or audio. */
+  replayTick(playerInput: PlayerInput): MoveState {
+    const weapon = this.fixedMovement?.weapon ?? this.combat?.weaponState ?? UNARMED;
+    this.previousFeet.copyFrom(this.currentFeet);
+    this.state = stepPlayer(this.body, { move: this.state, weapon }, playerInput, TICK_SECONDS, { replay: true, gates: this.tickGates() }).state.move;
+    this.body.getFeetToRef(this.currentFeet);
+    return this.state;
+  }
+
+  /** Render-only position offset (m) for correction smoothing; set every frame, never affects simulation. */
+  setRenderOffset(x: number, y: number, z: number): void {
+    this.renderOffset.set(x, y, z);
   }
 
   get physicsBody(): PhysicsBody {
@@ -287,7 +327,7 @@ export class PlayerController {
     this.jumpQueued = false;
     const previous = this.state;
     const wasGrounded = previous.grounded;
-    const weapon = this.combat?.weaponState ?? UNARMED;
+    const weapon = this.fixedMovement?.weapon ?? this.combat?.weaponState ?? UNARMED;
     const gates = this.tickGates();
 
     this.previousFeet.copyFrom(this.currentFeet);
@@ -315,6 +355,7 @@ export class PlayerController {
 
   /** This tick's movement gates, with the render-side jump modifier folded in. */
   private tickGates(): MoveGates {
+    if (this.fixedMovement) return this.fixedMovement.gates;
     const gates = this.gates?.() ?? OPEN_MOVE_GATES;
     return this.modifiers.allowJump || !gates.allowJump ? gates : { ...gates, allowJump: false };
   }
@@ -340,6 +381,7 @@ export class PlayerController {
     }
 
     const feet = Vector3.LerpToRef(this.previousFeet, this.currentFeet, alpha, this.camera.position);
+    feet.addInPlace(this.renderOffset);
     feet.y += this.eyeHeight + this.stepOffset + bob;
     this.camera.rotation.set(this.pitch + this.punch.x, this.yaw + this.punch.y, this.punch.z);
   }

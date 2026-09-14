@@ -7,6 +7,7 @@ import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";
 import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
 import { LootRenderer, presentationLootModels } from "../equipment/loot";
+import { NET_MOVEMENT, NetGame, readNetConfig } from "../net/NetGame";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
 import { DynamicResolution } from "../perf/DynamicResolution";
@@ -20,8 +21,16 @@ import { InventoryScreen } from "../ui/inventory";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
 
-/** Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop. */
+/**
+ * Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop.
+ *
+ * DEV `?net=ws://localhost:7350/m/local` joins a server-match (docs/backend/m3-local-run.md). M3 makes the server
+ * authoritative for movement only: the local player is predicted and reconciled, remote players are interpolated.
+ * Combat, equipment, dummies and loot stay local/offline in that mode. Without `?net` nothing changes.
+ */
 export class Game {
+  private net: NetGame | null = null;
+
   private constructor(
     private readonly engine: Engine,
     private readonly scene: Scene,
@@ -56,7 +65,10 @@ export class Game {
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
     // DEV: `?map=v1` loads the full Map v1; no query (or `?map=arena`) keeps the blockout arena.
-    const mapV1 = import.meta.env.DEV && (params.get("map") === "v1" || benchmark === "v1");
+    // DEV: `?net=` joins a match server (arena only in M3).
+    const netConfig = import.meta.env.DEV && !benchmark ? readNetConfig(params) : null;
+    const mapV1 = import.meta.env.DEV && !netConfig && (params.get("map") === "v1" || benchmark === "v1");
+    if (netConfig && params.get("map") === "v1") console.warn("[net] ?map=v1 is ignored in networked play (the M3 server runs the arena)");
     const environment = createEnvironment(scene, { largeWorld: mapV1 });
     // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
     const assetsLoading = loadAssets(scene);
@@ -74,7 +86,9 @@ export class Game {
     const input = new InputManager(canvas);
     const spawn = levelData.spawnPoints[0];
     if (!spawn) throw new Error(`Level "${levelData.name}" has no spawn points`);
-    const player = new PlayerController(scene, input, levelData);
+    // Networked: the net clock drives ticks, the server places the player, movement uses the server's weapon/gates.
+    const net = netConfig ? new NetGame(netConfig) : null;
+    const player = new PlayerController(scene, input, levelData, net ? { clock: net.clock, spawnAuthority: "server", movement: NET_MOVEMENT } : {});
     if (world) player.camera.maxZ = MAP_FAR_PLANE;
     scene.activeCamera = player.camera;
 
@@ -87,7 +101,8 @@ export class Game {
       ...(world ? { map: { pois: world.map.pois, buildings: world.layout.buildings } } : {}),
       targets: () => targets,
     });
-    player.setMoveGates(() => equipment.modifiers);
+    // Networked movement ignores equipment gates (the M3 server doesn't simulate equipment).
+    if (!net) player.setMoveGates(() => equipment.modifiers);
     combat.attachEquipment(equipment);
 
     // Owns the equipment presentation (hands, grenades, smoke, fire, flash) and the audio director.
@@ -123,10 +138,15 @@ export class Game {
     const dynamicResolution = OPTIMIZATIONS.dynamicResolution && !benchmark ? new DynamicResolution(engine, { targetFps: Number(params.get("fps")) || 120 }) : null;
 
     const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution);
+    if (net) {
+      net.attach(scene, player, input, hudRoot, { assets, environment });
+      game.net = net;
+      void net.connect();
+    }
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, equipment, life, presentation, hud, loot, inventory, assets, world, perf } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, equipment, life, presentation, hud, loot, inventory, assets, world, perf, net } });
     }
     game.start();
     return game;
@@ -138,7 +158,9 @@ export class Game {
       perf?.beginFrame();
       const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
       // The benchmark poses the camera itself.
+      this.net?.update(dt);
       if (!perf?.drivesCamera) this.player.update(dt);
+      this.net?.lateUpdate(dt);
       this.combat.update(dt);
       this.equipment.update();
       this.presentation.update(dt);

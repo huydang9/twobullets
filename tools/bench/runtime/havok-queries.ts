@@ -6,8 +6,8 @@
  *   - kinematic body teleport (TransformNode + prestep vs HP_Body_SetQTransform)
  *   - an empty HP call (HP_QueryCollector_GetNumHits) = embind crossing floor
  *
- *   node --experimental-transform-types tools/bench/runtime/havok-queries.ts [--calls=20000] [--batches=20]
- * (--experimental-transform-types is needed because the client sources use TS parameter properties.)
+ *   node tools/bench/runtime/havok-queries.ts [--calls=20000] [--batches=20]
+ * (BabylonMatch now loads packages/sim, which is erasable-syntax only, so plain type stripping is enough.)
  */
 import "./lib/resolve.ts";
 import { writeFileSync } from "node:fs";

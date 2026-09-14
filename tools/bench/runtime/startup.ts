@@ -19,10 +19,10 @@ const CASES = {
   havok: "import @babylonjs/havok + instantiate WASM (from bytes)",
   babylonBarrel: 'import("@babylonjs/core") barrel',
   babylonDeep: "deep imports: NullEngine, Scene, HavokPlugin, physics v2 body/shape/aggregate/character controller, Mesh",
-  sharedIndex: "import packages/shared/src/index.ts (re-exports buildLevel → Babylon barrel)",
+  sharedIndex: "import packages/shared/src/index.ts (pure since T3.1: buildLevel moved to packages/sim)",
   sharedSimOnly: "import shared movement + weapons modules only",
   directMatchReady: "direct match fully built (Havok + heightfield + 300 buildings + 10 players + 200 hitboxes)",
-  babylonMatchReady: "babylon match fully built (barrel + NullEngine scene + buildLevel + CharacterBody)",
+  babylonMatchReady: "babylon match fully built (barrel + NullEngine scene + sim buildLevel + CharacterBody)",
 } as const;
 
 if (args.probe) {

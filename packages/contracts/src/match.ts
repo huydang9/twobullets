@@ -120,3 +120,16 @@ export interface MatchResult {
   readonly winningTeamId: number | null;
   readonly players: readonly PlayerResult[];
 }
+
+/**
+ * `GET /dev/token?sub=<accountId>&team=<0..4>` on a match server started with `--mode=local` (M3 dev only; production
+ * tokens come from server-api). The token is a single-use join JWT; fetch a new one for every connect.
+ */
+export interface DevJoinTokenResponse {
+  readonly token: string;
+  readonly matchId: string;
+  /** WebSocket URL to connect to, e.g. `ws://localhost:7350/m/local`. */
+  readonly url: string;
+  /** Epoch ms. */
+  readonly expiresAt: number;
+}
