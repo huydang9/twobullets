@@ -10,6 +10,7 @@ import { AimModel, aimHeight, createAimSolution, solveAim } from "../aim/aim";
 import { FireControl } from "../aim/fire";
 import { chooseBoost, chooseHeal, chooseWeaponSlot, bestUsableRange, countOf, hasAmmo, hasGun, lootNeed, type LootNeed } from "../goals/equipment";
 import { GrenadeThrow } from "../goals/grenade";
+import { BuildingSearch, SEARCH_MAX_DISTANCE_UNARMED } from "../goals/search";
 import { PositionPicker } from "../goals/tactics";
 import { createGoalFacts, GoalSelector, scoreGoals, type ActiveGoal } from "../goals/utility";
 import { createRotatePlan, planRotate } from "../goals/zone";
@@ -36,16 +37,24 @@ import { BotRandom, DEG, RNG_STREAM, copyVec, ticksFor, vec3, type MutVec3 } fro
 type MutableDebug = { -readonly [K in keyof BotDebugState]: BotDebugState[K] };
 type MutableAction = { type: PlayerActionType; arg: number };
 
-const LOOT_SCAN_RADIUS = 40;
-const LOOT_MAX_RAYS = 8;
+const LOOT_SCAN_RADIUS = 35;
+const LOOT_MAX_RAYS = 6;
 const LOOT_CAPACITY = 48;
 const PICKUP_RANGE = 1.6;
+const PICKUP_REACH = 2.4;
 const PICKUP_RETRY_TICKS = 20;
 const LOOT_SKIP_SECONDS = 20;
+const LOOT_TARGET_SECONDS = 25;
 const REVIVE_REACH = 1.4;
 const COVER_HOLD_SECONDS = 8;
 const RECENT_TICKS = 90;
 const LOOK_RATE_CASUAL = 0.45;
+const SETTLE_MIN_DISTANCE = 15;
+const PLANNING_OFFSET = 1;
+const INVESTIGATE_NEAR = 60;
+const INVESTIGATE_FAR = 180;
+const LOOT_OFFSET = 2;
+const SETTLE_SPEED = 1;
 
 /** Look intent for this tick. */
 const Look = { Move: 0, Point: 1, Track: 2, Angles: 3 } as const;
@@ -65,6 +74,7 @@ class UtilityBrain implements BotBrain {
   private readonly goals = new GoalSelector();
   private readonly grenade = new GrenadeThrow();
   private readonly picker = new PositionPicker();
+  private readonly search = new BuildingSearch();
   private readonly facts = createGoalFacts();
   private readonly rotate = createRotatePlan();
   private readonly solution = createAimSolution();
@@ -97,6 +107,13 @@ class UtilityBrain implements BotBrain {
   private aiming = false;
   private aimSteered = false;
   private dt = 1 / 60;
+  private lastPlannedThreat = -1;
+  private rotateLatched = false;
+  private zonePressureUntil = 0;
+  private rotateLatchX = 0;
+  private rotateLatchY = 0;
+  private rotateLatchZ = 0;
+  private rotateCircleR = -1;
 
   // Loot.
   private lootId = -1;
@@ -105,6 +122,7 @@ class UtilityBrain implements BotBrain {
   private readonly lootPos: MutVec3 = vec3();
   private lootAttempts = 0;
   private lastPickupTick = -1000;
+  private lootTargetTick = 0;
 
   // Combat.
   private switchWaitUntil = 0;
@@ -216,12 +234,22 @@ class UtilityBrain implements BotBrain {
       this.subState = view.phase;
       this.scan(view, tick);
     } else {
-      if ((tick + this.slot) % BOT_SCHEDULE.lootTicks === 0) this.scanLoot(view);
-      const planning = (tick + this.slot) % BOT_SCHEDULE.planningTicks === 0;
+      // Offsets keep perception (≡0 mod 3), planning (≡1) and the loot scan (≡2) on different ticks of each bot.
+      const busy = this.goals.goal === "engage" || this.goals.goal === "cover" || this.goals.goal === "flee" || this.goals.goal === "revive";
+      if (!busy && (tick + this.slot) % BOT_SCHEDULE.lootTicks === LOOT_OFFSET) this.scanLoot(view);
+      const planning = (tick + this.slot) % BOT_SCHEDULE.planningTicks === PLANNING_OFFSET;
       const preempt = this.perception.damagedThisTick && this.goals.goal !== "cover" && this.goals.goal !== "flee" && this.goals.goal !== "engage";
-      if (planning || preempt) this.plan(view, preempt);
+      // A new threat past its reaction time is acted on now, not at the next 4 Hz planning tick.
+      const threat = this.perception.track(this.perception.threatSlot);
+      const newThreat = threat !== null && threat.visible && threat.awake(tick) && this.goals.goal !== "engage" && this.lastPlannedThreat !== threat.slot;
+      if (planning || preempt || newThreat) {
+        this.plan(view, preempt || newThreat);
+        this.lastPlannedThreat = this.perception.threatSlot;
+      }
       this.goalKind = this.goals.goal;
       this.runGoal(view, out);
+      const g = this.goals.goal;
+      if (g === "idle" || g === "loot" || g === "rotate" || g === "regroup" || g === "heal") this.glance(view);
       this.reactToThrowables(view);
     }
 
@@ -258,6 +286,7 @@ class UtilityBrain implements BotBrain {
     this.lootId = -1;
     this.lootValue = 0;
     this.coverValid = false;
+    this.search.reset();
     this.coverHoldUntil = -1;
     this.coverRollSlot = -1;
     this.fleeValid = false;
@@ -349,11 +378,23 @@ class UtilityBrain implements BotBrain {
     f.zonePhaseIndex = view.zone.phaseIndex;
 
     f.lootValue = this.lootId >= 0 ? this.lootValue : 0;
+    f.unarmed = !f.hasGun;
+    f.searchValue = 0;
+    // Zone pressure (latched 30 s so a bot near the threshold doesn't alternate): search only inside the circle.
+    if (f.rotateScore >= (f.unarmed ? 0.85 : 0.5)) this.zonePressureUntil = tick + ticksFor(30, dt);
+    const searchNeed = f.unarmed ? 0.75 : this.poorlyEquipped(self) ? 0.45 : 0.2;
+    if (this.search.available(view, view.zone.next ?? view.zone.current, f.unarmed ? SEARCH_MAX_DISTANCE_UNARMED : undefined, tick < this.zonePressureUntil)) {
+      // Far buildings are worth less (a long walk), except to an unarmed bot.
+      const falloff = f.unarmed ? 1 : Math.exp(-this.search.distance(view) / 150);
+      f.searchValue = searchNeed * falloff;
+    }
 
     const mate = this.aliveTeammate(view);
     f.teammateAlive = mate !== null;
     f.teammateDistance = mate ? flatDistance(self.feet, mate.feet) : 0;
     f.teammateIsHuman = mate !== null && mate.kind === "human";
+    f.regrouping = this.goals.goal === "regroup";
+    f.fleeing = this.goals.goal === "flee";
 
     // Investigate the most confident unseen hostile memory, for at most chaseSeconds per goal.
     f.investigateConfidence = 0;
@@ -362,7 +403,11 @@ class UtilityBrain implements BotBrain {
       const t = perception.track(entry.slot);
       const chasing = this.goals.goal === "investigate" && (tick - this.goals.startTick) * dt > profile.tactics.chaseSeconds;
       if (chasing) this.memory.forget(entry.slot);
-      else if (!t || !t.visible) f.investigateConfidence = entry.confidence;
+      else if (!t || !t.visible) {
+        // Distant fights aren't worth a walk across the map: interest fades from 60 m to nothing at 180 m.
+        const d = flatDistance(self.feet, entry.position);
+        f.investigateConfidence = entry.confidence * Math.max(0, Math.min(1, 1 - (d - INVESTIGATE_NEAR) / (INVESTIGATE_FAR - INVESTIGATE_NEAR)));
+      }
     }
 
     scoreGoals(f, profile, this.goals.scores);
@@ -385,7 +430,7 @@ class UtilityBrain implements BotBrain {
     }
     if (next === "heal") this.useAttempts = 0;
     if (next === "idle") this.scanBaseYaw = this.aim.yaw;
-    this.motor.stop(view);
+    // The motor keeps its path when the new goal walks the same way; it replans when the target moves.
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -511,6 +556,9 @@ class UtilityBrain implements BotBrain {
     }
 
     const ready = weapon.phase === "ready" && weapon.cooldown <= 1e-6 && active.magazine > 0 && self.modifiers.allowWeapons;
+    // Settle before a burst beyond close range: moving spread would waste it (the strafe stops while on target).
+    const speed = Math.sqrt(self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z);
+    const settling = distance > SETTLE_MIN_DISTANCE && speed > SETTLE_SPEED && !this.fire.inBurst;
     if (!this.aimSteered && tick >= this.dodgeUntil) {
       this.aim.track(target.slot, this.solution, tick, dt, profile.aim, this.rngAim, this.noiseScale);
       this.aimSteered = true;
@@ -518,7 +566,7 @@ class UtilityBrain implements BotBrain {
     let blocked = false;
     let press = false;
     if (canShoot && target.life !== "dead") {
-      press = this.fire.decide(tick, dt, def.fireMode, distance, this.aim.perceivedErrorDeg, this.solution.toleranceDeg, ready, false, profile.aim, profile.fire, this.rngCombat);
+      press = this.fire.decide(tick, dt, def.fireMode, distance, this.aim.perceivedErrorDeg, this.solution.toleranceDeg, ready && !settling, false, profile.aim, profile.fire, this.rngCombat);
       if (press) {
         const hit = view.actorOnSegment(self.eye, this.solution.point, self.slot);
         if (hit >= 0 && this.isTeammate(view, hit)) {
@@ -559,9 +607,13 @@ class UtilityBrain implements BotBrain {
       }
       this.crouchHold = profile.difficulty !== "easy" && distance > 60 && active.id === "rifle" && this.rngCombat.chance(0.5);
     }
+    // Counter-strafe: stand still while on target or firing (moving spread), strafe during burst pauses and while
+    // re-acquiring.
+    const onTarget = this.aim.perceivedErrorDeg <= this.solution.toleranceDeg * 1.5;
+    const shooting = press || this.fire.inBurst || (onTarget && ready && !this.fire.pausing(tick) && distance > SETTLE_MIN_DISTANCE);
     if (active.id === "shotgun" && distance > 8) {
       this.motor.moveDirect(dx + rx * this.strafeDir * 2, dz + rz * this.strafeDir * 2, false);
-    } else if (this.strafeDir !== 0) {
+    } else if (this.strafeDir !== 0 && !shooting) {
       this.motor.moveDirect(rx * this.strafeDir, rz * this.strafeDir, false);
     }
     this.motor.setCrouch(this.crouchHold && this.strafeDir === 0);
@@ -627,7 +679,7 @@ class UtilityBrain implements BotBrain {
       this.moveOptions.zone = null;
       this.moveOptions.arriveRadius = 0.5;
       const status = this.motor.moveTo(view, this.coverPoint.x, this.coverPoint.y, this.coverPoint.z, this.moveOptions);
-      if (status === "failed" || this.motor.gaveUp) {
+      if (this.motor.gaveUp) {
         this.coverValid = false;
         this.coverFailUntil = tick + ticksFor(4, dt);
         return;
@@ -708,7 +760,7 @@ class UtilityBrain implements BotBrain {
     this.moveOptions.zone = view.zone.next;
     this.moveOptions.arriveRadius = 3;
     const status = this.motor.moveTo(view, this.fleePoint.x, this.fleePoint.y, this.fleePoint.z, this.moveOptions);
-    if (status === "arrived" || status === "failed" || this.motor.gaveUp) this.fleeValid = false;
+    if (status === "arrived" || this.motor.gaveUp) this.fleeValid = false;
     this.subState = "run";
     // Cornered at close range: fight back instead of showing the back.
     if (threat && threat.visible && threat.awake(tick) && threat.distance < 10 && hasAmmo(self.weapon)) this.combat(view, out, threat, false);
@@ -785,11 +837,25 @@ class UtilityBrain implements BotBrain {
   private rotateGoal(view: BotWorldView, out: BotTickOutput): void {
     this.maintain(view, out);
     const target = this.rotate.target;
+    // Latch the destination: the safe point slides as the bot walks, and a sliding target flips between nav levels.
+    const circle = this.rotate.circle;
+    const cx = circle ? circle.cx : target.x;
+    const cz = circle ? circle.cz : target.z;
+    const cr = circle ? circle.r : 0;
+    const latchedInside = circle !== null && flatDistance2(this.rotateLatchX, this.rotateLatchZ, cx, cz) < cr * 0.85;
+    if (!this.rotateLatched || !latchedInside || this.rotateCircleR !== cr) {
+      this.rotateLatchX = target.x;
+      this.rotateLatchZ = target.z;
+      this.rotateLatchY = view.self.feet.y;
+      this.rotateCircleR = cr;
+      this.rotateLatched = true;
+    }
     this.moveOptions.sprint = true;
     this.moveOptions.preferCover = 0.2;
     this.moveOptions.zone = this.rotate.circle;
     this.moveOptions.arriveRadius = 8;
-    const status = this.motor.moveTo(view, target.x, view.self.feet.y, target.z, this.moveOptions);
+    const status = this.motor.moveTo(view, this.rotateLatchX, this.rotateLatchY, this.rotateLatchZ, this.moveOptions);
+    if (this.motor.gaveUp) this.rotateLatched = false;
     this.subState = this.rotate.outside ? "outside-zone" : status === "pending" ? "planning" : "to-zone";
   }
 
@@ -798,13 +864,20 @@ class UtilityBrain implements BotBrain {
     const self = view.self;
     this.maintain(view, out);
     if (this.lootId < 0) {
-      this.subState = "none";
-      this.scan(view, tick);
+      this.searchBuildings(view);
       return;
     }
     const d = flatDistance(self.feet, this.lootPos);
-    const eyeGap = Math.sqrt(d * d + (this.lootPos.y + 0.1 - self.eye.y) * (this.lootPos.y + 0.1 - self.eye.y));
-    if (d <= PICKUP_RANGE && eyeGap <= INTERACT.reach - 0.15) {
+    if ((tick - this.lootTargetTick) * view.dt > LOOT_TARGET_SECONDS) {
+      // Couldn't reach or take it in time (other floor, behind furniture): skip it.
+      this.memory.skipLoot(this.lootId, tick + ticksFor(LOOT_SKIP_SECONDS * 3, view.dt));
+      this.clearLoot();
+      return;
+    }
+    const eyeGap = Math.sqrt(d * d + (this.lootPos.y + 0.15 - self.eye.y) * (this.lootPos.y + 0.15 - self.eye.y));
+    if (d <= PICKUP_REACH) this.motor.setCrouch(eyeGap > INTERACT.reach - 0.2);
+    // The match allows INTERACT.reach + 0.4 from the eye with a clear line; stay a little inside it.
+    if (d <= PICKUP_REACH && eyeGap <= INTERACT.reach + 0.25) {
       this.look = Look.Point;
       copyVec(this.lookPoint, this.lootPos);
       this.subState = "pickup";
@@ -828,10 +901,40 @@ class UtilityBrain implements BotBrain {
     this.moveOptions.arriveRadius = PICKUP_RANGE * 0.6;
     const status = this.motor.moveTo(view, this.lootPos.x, this.lootPos.y, this.lootPos.z, this.moveOptions);
     this.subState = "to-item";
-    if (status === "failed" || this.motor.gaveUp) {
+    if (this.motor.gaveUp) {
       this.memory.skipLoot(this.lootId, tick + ticksFor(LOOT_SKIP_SECONDS, view.dt));
       this.clearLoot();
     }
+  }
+
+  /** No item in sight: walk into the nearest unsearched building and look around its rooms. */
+  private searchBuildings(view: BotWorldView): void {
+    const zone = view.zone.next ?? view.zone.current;
+    if (!this.search.available(view, zone, this.facts.unarmed ? SEARCH_MAX_DISTANCE_UNARMED : undefined, view.tick < this.zonePressureUntil)) {
+      this.subState = "nothing-to-search";
+      this.scan(view, view.tick);
+      return;
+    }
+    const p = this.search.point;
+    const approach = this.search.stage === "approach";
+    this.moveOptions.sprint = approach;
+    this.moveOptions.preferCover = 0;
+    this.moveOptions.zone = null;
+    this.moveOptions.arriveRadius = approach ? 2.5 : 1.2;
+    const status = this.motor.moveTo(view, p.x, p.y, p.z, this.moveOptions);
+    if (!this.search.advance(view, status === "arrived", this.motor.gaveUp, this.rngGoals, zone)) {
+      this.subState = "nothing-to-search";
+      return;
+    }
+    this.subState = this.search.stage === "approach" ? "to-building" : "search-rooms";
+  }
+
+  /** Missing a primary, body armor or heals. */
+  private poorlyEquipped(self: BotWorldView["self"]): boolean {
+    const inv = self.inventory;
+    if (!inv.weapons[0] && !inv.weapons[1]) return true;
+    if (!inv.vest && !inv.helmet) return true;
+    return chooseHeal(inv, 50) === null;
   }
 
   private regroup(view: BotWorldView, out: BotTickOutput): void {
@@ -895,7 +998,7 @@ class UtilityBrain implements BotBrain {
     this.moveOptions.arriveRadius = 3;
     const status = this.motor.moveTo(view, this.investigatePoint.x, this.investigatePoint.y, this.investigatePoint.z, this.moveOptions);
     this.subState = "approach";
-    if (status === "failed" || this.motor.gaveUp) this.memory.forget(entry.slot);
+    if (this.motor.gaveUp) this.memory.forget(entry.slot);
   }
 
   private downed(view: BotWorldView): void {
@@ -948,6 +1051,34 @@ class UtilityBrain implements BotBrain {
     this.lookPoint.x = track.position.x;
     this.lookPoint.y = track.position.y + track.eyeHeight * 0.8;
     this.lookPoint.z = track.position.z;
+  }
+
+  /**
+   * Turn toward something half-noticed (a figure building awareness, a hostile noise in the last second) so the field
+   * of view can confirm it: what a player does when movement catches the eye. Uses perception only.
+   */
+  private glance(view: BotWorldView): void {
+    if (this.grenade.active) return;
+    const tick = view.tick;
+    const tracks = this.perception.actors;
+    let best: PerceivedActorState | null = null;
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i]!;
+      if (!t.hostile || t.life === "dead" || t.awareness < 0.1) continue;
+      if (!t.visible && tick - t.lastSeenTick > 60) continue;
+      if (!best || t.awareness > best.awareness) best = t;
+    }
+    if (best) {
+      this.lookAtTrack(best);
+      return;
+    }
+    const heard = this.memory.bestHostile(tick - 60, -1);
+    if (heard && heard.source !== "seen") {
+      this.look = Look.Point;
+      this.lookPoint.x = heard.position.x;
+      this.lookPoint.y = heard.position.y + 1.4;
+      this.lookPoint.z = heard.position.z;
+    }
   }
 
   /** Flashbang dodge and escaping a live grenade, over any goal. */
@@ -1089,6 +1220,7 @@ class UtilityBrain implements BotBrain {
     if (item.lootId !== this.lootId) {
       this.lootAttempts = 0;
       this.lootId = item.lootId;
+      this.lootTargetTick = tick;
     }
     this.lootReplace = bestReplace;
     this.lootValue = bestValue;
@@ -1137,6 +1269,12 @@ class UtilityBrain implements BotBrain {
 }
 
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+
+function flatDistance2(ax: number, az: number, bx: number, bz: number): number {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return Math.sqrt(dx * dx + dz * dz);
+}
 
 function flatDistance(a: Vec3, b: Vec3): number {
   const dx = a.x - b.x;

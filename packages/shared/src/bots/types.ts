@@ -211,9 +211,28 @@ export interface NavGridInfo {
   readonly checksum: string;
 }
 
+/**
+ * A building on the nav grid: public map knowledge (every player knows where the houses are) that bots use to search
+ * for loot by walking. The nav builder's placements satisfy it.
+ */
+export interface NavBuildingPlacement {
+  readonly id: string;
+  /** Placement origin (ground floor), world. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** World XZ bounds. */
+  readonly minX: number;
+  readonly minZ: number;
+  readonly maxX: number;
+  readonly maxZ: number;
+}
+
 /** Built navigation data. Immutable after build; shareable across matches on one map. */
 export interface NavGrid {
   readonly info: NavGridInfo;
+  /** Buildings with walkable layers (additive, optional: fake and straight-line navs have none). */
+  readonly placements?: readonly NavBuildingPlacement[];
 }
 
 export type PathStatus = "pending" | "found" | "partial" | "unreachable" | "released";

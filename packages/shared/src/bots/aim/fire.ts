@@ -7,7 +7,7 @@ import { ticksFor, type BotRandom } from "../brain/util";
 // range band, then pause; semi and bolt weapons tap (press one tick, release the next) at most at their fire rate.
 
 /** During an automatic burst, keep firing while the error is within this multiple of the tolerance. */
-const BURST_TOLERANCE_SCALE = 3;
+const BURST_TOLERANCE_SCALE = 2;
 
 export class FireControl {
   private onTargetSince = -1;
@@ -35,6 +35,11 @@ export class FireControl {
 
   get inBurst(): boolean {
     return this.holding;
+  }
+
+  /** In the pause after a burst (the bot may move). */
+  pausing(tick: number): boolean {
+    return tick < this.pauseUntil;
   }
 
   /** A shot left the barrel this tick. */

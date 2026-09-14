@@ -80,7 +80,7 @@ describe("goal scoring", () => {
     expect(inside.score).toBe(0);
     const outsideCurrent = planRotate({ ...zone, current: { cx: 0, cz: 0, r: 100 } }, feet, 1 / 60, 20, createRotatePlan());
     expect(outsideCurrent.outside).toBe(true);
-    expect(outsideCurrent.score).toBe(0.95);
+    expect(outsideCurrent.score).toBe(1);
   });
 
   it("loot is ignored with a visible threat and halves late in the match", () => {

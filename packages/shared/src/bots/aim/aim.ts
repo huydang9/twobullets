@@ -10,14 +10,15 @@ import { DEG, RAD_TO_DEG, TWO_PI, wrapAngle, type BotRandom, type MutVec3 } from
 // `recoilCompensation` of each kick is pulled back after `recoilDelaySeconds`, and the rest fades slowly (the bot
 // re-centers the way a player does between bursts).
 
-export const AIM_HEIGHT: Readonly<Record<BotAimProfile["aimPoint"], number>> = { chest: 1.25, upperChest: 1.4, neck: 1.55 };
+/** Aim point heights on a standing rig (hitreg/rig: body ~0.9–1.45 m, head at 1.66 m). Recoil climb pushes shots up. */
+export const AIM_HEIGHT: Readonly<Record<BotAimProfile["aimPoint"], number>> = { chest: 1.1, upperChest: 1.22, neck: 1.38 };
 /** Crouched aim points scale by this; downed targets use a fixed height. */
 const CROUCH_SCALE = 0.58;
 const DOWNED_HEIGHT = 0.35;
 /** Proportional steering gain toward the goal, 1/s (feed-forward handles target motion). */
 const STEER_GAIN = 14;
 /** Compensation of one kick is spread over this long, s. */
-const COMPENSATION_SECONDS = 0.12;
+const COMPENSATION_SECONDS = 0.06;
 const RING = 64;
 /** A target not tracked for this long is acquired again (new offset), ticks at 60 Hz. */
 const REACQUIRE_TICKS = 90;
@@ -25,6 +26,14 @@ const REACQUIRE_TICKS = 90;
 const TARGET_RADIUS = 0.25;
 /** Uniform lattice RMS is 1/√3; the cubic blend loses a little more. */
 const NOISE_RMS_SCALE = Math.sqrt(3) * 1.25;
+/** Acquisition error is full for a flick of this many degrees and at least this fraction for any flick. */
+const ACQUIRE_FULL_TRAVEL_DEG = 20;
+const ACQUIRE_MIN_FRACTION = 0.25;
+/** Tracking noise is specified at this range and scales by (reference / distance)^exponent, clamped. */
+const NOISE_REFERENCE_METERS = 30;
+const NOISE_RANGE_EXPONENT = 0.6;
+const NOISE_RANGE_MIN = 0.35;
+const NOISE_RANGE_MAX = 1.25;
 const MAX_PITCH = (CAMERA.maxPitchDegrees * Math.PI) / 180;
 
 export interface AimSolution {
@@ -203,7 +212,13 @@ export class AimModel {
     this.stepRecoil(tick, dt, profile);
     if (slot !== this.targetSlot || this.lastTrackTick < 0 || tick - this.lastTrackTick > REACQUIRE_TICKS) {
       const a = rng.next() * TWO_PI;
-      const m = (profile.acquireErrorDeg + profile.velocityErrorScale * solution.angularSpeedDeg) * DEG * (0.6 + 0.4 * rng.next());
+      // The flick error scales with how far the aim has to travel: a target already near the crosshair (the bot
+      // turned toward it while noticing it) starts with a smaller offset.
+      const dy = wrapInline(solution.yaw - (this.baseYaw + this.recoilRight));
+      const dp = solution.pitch - this.basePitch;
+      const travelDeg = Math.sqrt(dy * dy + dp * dp) * RAD_TO_DEG;
+      const travel = Math.min(1, Math.max(ACQUIRE_MIN_FRACTION, travelDeg / ACQUIRE_FULL_TRAVEL_DEG));
+      const m = (profile.acquireErrorDeg * travel + profile.velocityErrorScale * solution.angularSpeedDeg) * DEG * (0.6 + 0.4 * rng.next());
       this.offsetYaw = Math.sin(a) * m;
       this.offsetPitch = Math.cos(a) * m * 0.6;
       this.targetSlot = slot;
@@ -216,7 +231,9 @@ export class AimModel {
 
     this.noiseTime = tick * dt * profile.trackingNoiseHz;
     this.sampleNoise(rng);
-    const rms = profile.trackingNoiseDeg * DEG * NOISE_RMS_SCALE * noiseScale;
+    // Angular noise shrinks with range: at distance players slow down and settle the (zoomed) sights.
+    const rangeScale = Math.min(NOISE_RANGE_MAX, Math.max(NOISE_RANGE_MIN, Math.pow(NOISE_REFERENCE_METERS / Math.max(1, solution.distance), NOISE_RANGE_EXPONENT)));
+    const rms = profile.trackingNoiseDeg * DEG * NOISE_RMS_SCALE * noiseScale * rangeScale;
     const noiseYaw = this.noise0 * rms;
     const noisePitch = this.noise1 * rms * 0.7;
     // Trailing lag across fast lateral motion.
@@ -320,7 +337,7 @@ export class AimModel {
     this.pendingUp -= cu;
     this.pendingRight -= cr;
     // The uncompensated residual fades as the bot re-centers.
-    const decay = Math.exp(-dt / Math.max(0.25, profile.acquireSeconds * 2));
+    const decay = Math.exp(-dt / Math.max(0.15, profile.acquireSeconds));
     this.recoilUp = this.pendingUp + (this.recoilUp - this.pendingUp) * decay;
     this.recoilRight = this.pendingRight + (this.recoilRight - this.pendingRight) * decay;
   }

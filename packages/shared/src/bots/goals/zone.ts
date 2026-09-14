@@ -42,7 +42,7 @@ export function planRotate(zone: ZoneState, feet: Vec3, dt: number, marginSecond
 
   if (dCurrent > current.r) {
     out.outside = true;
-    out.score = 0.95;
+    out.score = 1;
     out.circle = goal;
     return out;
   }

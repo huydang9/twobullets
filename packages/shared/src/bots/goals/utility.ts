@@ -11,6 +11,10 @@ export const GoalIndex = { idle: 0, loot: 1, rotate: 2, engage: 3, cover: 4, hea
 export const HYSTERESIS = 0.1;
 /** A goal is kept at least this long unless damage preempts, s. */
 export const MIN_GOAL_SECONDS = 1;
+/** Travel goals (loot, rotate, regroup, investigate) commit longer and need a clearer win to be replaced, so two
+ * walking goals with different destinations don't alternate and leave the bot shuffling in place. */
+export const TRAVEL_GOAL_SECONDS = 3;
+export const TRAVEL_HYSTERESIS = 0.15;
 
 export interface GoalFacts {
   health: number;
@@ -51,9 +55,17 @@ export interface GoalFacts {
   zonePhaseIndex: number;
   /** Best loot value (need × quality × distance falloff), 0 when none. */
   lootValue: number;
+  /** Value of walking to search an unsearched building (by how badly the bot needs gear), 0 when none is left. */
+  searchValue: number;
+  /** No gun at all. */
+  unarmed: boolean;
   teammateAlive: boolean;
   teammateDistance: number;
   teammateIsHuman: boolean;
+  /** Regroup is the current goal (it then continues until close, instead of flickering at the 40 m edge). */
+  regrouping: boolean;
+  /** Flee is the current goal. */
+  fleeing: boolean;
   /** Confidence of the best unseen hostile memory, 0 when none (or chase time is over). */
   investigateConfidence: number;
 }
@@ -84,9 +96,13 @@ export function createGoalFacts(): GoalFacts {
     rotateScore: 0,
     zonePhaseIndex: 0,
     lootValue: 0,
+    searchValue: 0,
+    unarmed: false,
     teammateAlive: false,
     teammateDistance: 0,
     teammateIsHuman: false,
+    regrouping: false,
+    fleeing: false,
     investigateConfidence: 0,
   };
 }
@@ -115,7 +131,8 @@ export function scoreGoals(f: GoalFacts, profile: BotProfile, out: Float64Array)
   }
 
   // flee
-  if ((f.health < t.fleeHealth && f.threatVisible) || (f.hasGun && !f.hasAmmo && (f.threatVisible || f.damagedRecently))) {
+  const low = f.health < t.fleeHealth;
+  if ((low && (f.threatVisible || f.damagedRecently || (f.fleeing && f.safeSeconds < 3))) || (f.hasGun && !f.hasAmmo && (f.threatVisible || f.damagedRecently))) {
     out[GoalIndex.flee] = 0.85;
   }
 
@@ -133,22 +150,26 @@ export function scoreGoals(f: GoalFacts, profile: BotProfile, out: Float64Array)
     out[GoalIndex.revive] = clamp01(0.7 + 0.2 * (1 - f.reviveDownedHealth / 100) - f.visibleThreats * (1 - t.reviveRisk) * 0.25);
   }
 
-  out[GoalIndex.rotate] = f.rotateScore;
+  // rotate: an unarmed bot keeps looting until the zone really forces it to move.
+  out[GoalIndex.rotate] = f.unarmed && f.rotateScore < 0.85 ? f.rotateScore * 0.5 : f.rotateScore;
 
-  // loot
-  if (!f.threatVisible && f.lootValue > 0) {
-    out[GoalIndex.loot] = f.lootValue * 0.6 * (f.zonePhaseIndex >= 3 ? 0.5 : 1);
+  // loot: a spotted item, or searching buildings for one
+  if (!f.threatVisible && (f.lootValue > 0 || f.searchValue > 0)) {
+    const late = f.zonePhaseIndex >= 3 && !f.unarmed ? 0.5 : 1;
+    out[GoalIndex.loot] = Math.max(f.lootValue * (f.unarmed ? 0.9 : 0.6), f.searchValue) * late;
   }
 
   // regroup
   if (f.teammateAlive) {
     let s = f.teammateDistance > 40 ? 0.3 + 0.3 * Math.min(1, (f.teammateDistance - 40) / 60) : 0;
     if (f.teammateIsHuman && f.teammateDistance > 25) s = Math.max(s, 0.45);
+    if (f.regrouping && f.teammateDistance > (f.teammateIsHuman ? 15 : 12)) s = Math.max(s, 0.35);
     out[GoalIndex.regroup] = s;
   }
 
   // investigate
-  if (!f.threatVisible && f.investigateConfidence > 0) out[GoalIndex.investigate] = 0.35 * f.investigateConfidence;
+  // Low on health, a bot doesn't go looking for the enemy.
+  if (!f.threatVisible && !low && f.investigateConfidence > 0) out[GoalIndex.investigate] = 0.35 * f.investigateConfidence;
 
   return out;
 }
@@ -173,8 +194,10 @@ export class GoalSelector {
   select(tick: number, dt: number, preempt: boolean): boolean {
     const scores = this.scores;
     const current = GoalIndex[this.goal];
+    const travel = current === GoalIndex.loot || current === GoalIndex.rotate || current === GoalIndex.regroup || current === GoalIndex.investigate;
     let best: number = current;
-    let bestScore = scores[current]! + HYSTERESIS;
+    // A goal whose score dropped to zero has no claim to keep: anything positive replaces it.
+    let bestScore = scores[current]! > 0 ? scores[current]! + (travel ? TRAVEL_HYSTERESIS : HYSTERESIS) : 0;
     for (let i = 0; i < GOAL_COUNT; i++) {
       if (i === current) continue;
       if (scores[i]! > bestScore) {
@@ -185,9 +208,11 @@ export class GoalSelector {
     this.score = scores[best]!;
     if (best === current) return false;
     const currentDead = scores[current]! <= 0;
-    const held = (tick - this.startTick) * dt < MIN_GOAL_SECONDS;
+    const held = (tick - this.startTick) * dt < (travel ? TRAVEL_GOAL_SECONDS : MIN_GOAL_SECONDS);
     const combat = best === GoalIndex.cover || best === GoalIndex.flee || best === GoalIndex.engage;
-    if (held && !currentDead && !(preempt && combat)) {
+    // Zone pressure and revives are not held back by travel commitment.
+    const urgent = combat || (best === GoalIndex.rotate && scores[best]! >= 0.85) || best === GoalIndex.revive;
+    if (held && !currentDead && !(preempt && combat) && !(travel && urgent && (tick - this.startTick) * dt >= MIN_GOAL_SECONDS)) {
       this.score = scores[current]!;
       return false;
     }

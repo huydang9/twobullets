@@ -1,6 +1,6 @@
 import { hash32 } from "../../equipment/math";
 import type { Vec3 } from "../../movement/types";
-import { NavFlag, type NavGrid, type NavPath, type NavQuery, type PathOptions, type PathStatus } from "../types";
+import { NavFlag, type NavBuildingPlacement, type NavGrid, type NavPath, type NavQuery, type PathOptions, type PathStatus } from "../types";
 
 // Fake NavQuery for brain tests and early match-sim wiring: a flat open world at `groundY` with optional solid 2D
 // boxes. Paths go straight when the line is clear, otherwise around the blocking box's nearest corner. Searches resolve
@@ -23,6 +23,10 @@ export interface FakeNavOptions {
   readonly flags?: (x: number, z: number) => number;
   /** Goals for which paths fail. */
   readonly unreachable?: (x: number, z: number) => boolean;
+  /** Buildings exposed as `grid.placements` (search tests). */
+  readonly placements?: readonly NavBuildingPlacement[];
+  /** `requestPath` returns -1 (queue full) for goals matching this. */
+  readonly refuse?: (x: number, z: number) => boolean;
 }
 
 interface Request {
@@ -54,7 +58,7 @@ const FAKE_GRID: NavGrid = {
 };
 
 export class FakeNavQuery implements NavQuery {
-  readonly grid = FAKE_GRID;
+  readonly grid: NavGrid;
   readonly groundY: number;
   readonly halfExtent: number;
   readonly boxes: FakeNavBox[];
@@ -63,6 +67,7 @@ export class FakeNavQuery implements NavQuery {
   private readonly pendingUpdates: number;
   private readonly flagFn: ((x: number, z: number) => number) | null;
   private readonly unreachableFn: ((x: number, z: number) => boolean) | null;
+  private readonly refuseFn: ((x: number, z: number) => boolean) | null;
 
   constructor(options: FakeNavOptions = {}) {
     this.groundY = options.groundY ?? 0;
@@ -71,6 +76,8 @@ export class FakeNavQuery implements NavQuery {
     this.pendingUpdates = options.pendingUpdates ?? 1;
     this.flagFn = options.flags ?? null;
     this.unreachableFn = options.unreachable ?? null;
+    this.refuseFn = options.refuse ?? null;
+    this.grid = options.placements ? { info: FAKE_GRID.info, placements: options.placements } : FAKE_GRID;
   }
 
   nearest(p: Vec3, _maxDistance: number, out: { x: number; y: number; z: number }): number {
@@ -100,6 +107,7 @@ export class FakeNavQuery implements NavQuery {
   }
 
   requestPath(from: Vec3, to: Vec3, options: PathOptions | null): number {
+    if (this.refuseFn?.(to.x, to.z)) return -1;
     this.requests.push({ fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, status: "pending", waited: 0, options });
     return this.requests.length - 1;
   }

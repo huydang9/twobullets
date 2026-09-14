@@ -33,6 +33,8 @@ const RECENT_THREAT_TICKS = 90;
 const SUPPRESS_RADIUS = 4;
 const THROWABLE_RANGE = 25;
 const MAX_THROWABLE_RAYS = 3;
+/** Per-tick blend of the observed velocity into the perceived one. */
+const VELOCITY_SMOOTHING = 0.08;
 
 export class PerceivedActorState implements PerceivedActor {
   slot: number;
@@ -358,7 +360,15 @@ export class PerceptionState implements BotPerception {
 
   private samplePose(track: PerceivedActorState, actor: ActorSnapshot, selfFeet: Vec3, tick: number): void {
     copyVec(track.position, actor.feet);
-    copyVec(track.velocity, actor.velocity);
+    // Perceived velocity is smoothed over ~0.2 s: a jittery strafe reads as its average motion, like a player's eye.
+    if (track.sampleTick >= 0 && tick - track.sampleTick <= BOT_SCHEDULE.perceptionTicks) {
+      const k = tick - track.sampleTick >= BOT_SCHEDULE.perceptionTicks ? 0.6 : VELOCITY_SMOOTHING;
+      track.velocity.x += (actor.velocity.x - track.velocity.x) * k;
+      track.velocity.y += (actor.velocity.y - track.velocity.y) * k;
+      track.velocity.z += (actor.velocity.z - track.velocity.z) * k;
+    } else {
+      copyVec(track.velocity, actor.velocity);
+    }
     track.life = actor.life;
     track.stance = actor.stance;
     track.eyeHeight = actor.eye.y - actor.feet.y;

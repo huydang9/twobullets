@@ -9,6 +9,8 @@ export const MEMORY_CAPACITY = 8;
 export const DANGER_CAPACITY = 6;
 /** Remembered positions extrapolate along the last velocity for at most this long, s. */
 export const MEMORY_EXTRAPOLATE_SECONDS = 1.5;
+const HEARD_BLEND_TICKS = 180;
+const HEARD_BLEND = 0.3;
 
 export class MemoryEntryState implements MemoryEntry {
   slot = -1;
@@ -70,6 +72,16 @@ export class BotMemoryState implements BotMemory {
   observe(slot: number, hostile: boolean, position: Vec3, velocity: Vec3 | null, tick: number, source: MemorySource, confidence: number): MemoryEntryState {
     let e = this.find(slot);
     if (e && source !== "seen" && e.source === "seen" && e.confidence > confidence) {
+      return e;
+    }
+    if (e && source === "heard" && e.source === "heard" && tick - e.tick < HEARD_BLEND_TICKS) {
+      // Repeated noises from one source converge instead of jumping between independent error samples.
+      e.position.x += (position.x - e.position.x) * HEARD_BLEND;
+      e.position.y += (position.y - e.position.y) * HEARD_BLEND;
+      e.position.z += (position.z - e.position.z) * HEARD_BLEND;
+      e.tick = tick;
+      e.base = Math.max(e.confidence, confidence);
+      e.confidence = e.base;
       return e;
     }
     if (!e) e = this.allocate();
