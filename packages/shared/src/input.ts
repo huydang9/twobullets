@@ -20,7 +20,7 @@ export type PlayerActionType = (typeof PlayerActionType)[keyof typeof PlayerActi
 
 export interface PlayerAction {
   readonly type: PlayerActionType;
-  /** 16-bit argument: loot id, inventory slot, or slot + quantity packed by the action. */
+  /** 16-bit argument: loot id, inventory slot, or slot + quantity packed by the action (pickup: lootId, use: itemCode(consumableId)). */
   readonly arg: number;
 }
 

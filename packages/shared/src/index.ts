@@ -19,5 +19,5 @@ export * from "./input";
 export * from "./inputRing";
 export * from "./tickClock";
 export * from "./hitreg/index";
-export * from "./bots/types";
+export * from "./bots/index";
 export * from "./match/types";
