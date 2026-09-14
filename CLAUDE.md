@@ -68,3 +68,4 @@ Browser multiplayer first-person battle royale: **realistic, PUBG-like**. Up to 
   - Downloads need the user's explicit OK with file names and sizes.
   - The user logs in to Sketchfab/Mixamo themselves; never handle credentials.
   - Record credits (`public/assets/*/credits.json`).
+  - For the full find → verify → download → pipeline flow, use `.claude/skills/asset-sourcing`.
