@@ -9,6 +9,7 @@ import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../player/PlayerController";
 import { Hud } from "../ui/Hud";
 import { createEnvironment } from "../world/environment";
+import { LARGE_WORLD_FAR_PLANE, createDevMapV1 } from "../world/terrain";
 
 /** Top-level wiring: engine, physics, assets, world, player, combat, HUD. Owns the frame loop. */
 export class Game {
@@ -30,20 +31,25 @@ export class Game {
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
-    const environment = createEnvironment(scene);
-    const level = buildLevel(scene, ARENA_LEVEL);
+    // DEV: `?map=v1` loads the Map v1 terrain with the arena as its Training Yard; no query keeps the arena.
+    const mapV1 = import.meta.env.DEV && new URLSearchParams(window.location.search).get("map") === "v1";
+    const environment = createEnvironment(scene, { largeWorld: mapV1 });
+    const world = mapV1 ? createDevMapV1(scene, environment) : null;
+    const levelData = world?.level ?? ARENA_LEVEL;
+    const level = buildLevel(scene, levelData);
     environment.decorateLevel(level);
     // Models download while the environment textures and IBL load.
-    const [assets] = await Promise.all([loadAssets(scene), environment.ready]);
+    const [assets] = await Promise.all([loadAssets(scene), environment.ready, world?.ready]);
 
     const input = new InputManager(canvas);
-    const spawn = ARENA_LEVEL.spawnPoints[0];
-    if (!spawn) throw new Error(`Level "${ARENA_LEVEL.name}" has no spawn points`);
-    const player = new PlayerController(scene, input, ARENA_LEVEL);
+    const spawn = levelData.spawnPoints[0];
+    if (!spawn) throw new Error(`Level "${levelData.name}" has no spawn points`);
+    const player = new PlayerController(scene, input, levelData);
+    if (world) player.camera.maxZ = LARGE_WORLD_FAR_PLANE;
     scene.activeCamera = player.camera;
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
-    const combat = new CombatSystem(scene, input, player, ARENA_LEVEL, environment, assets);
+    const combat = new CombatSystem(scene, input, player, levelData, environment, assets);
     const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
@@ -58,7 +64,7 @@ export class Game {
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets, world } });
     }
     game.start();
     return game;

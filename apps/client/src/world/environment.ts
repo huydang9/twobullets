@@ -57,13 +57,30 @@ export const LOOK = {
   post: { ssao: false, bloom: false },
 } as const;
 
-export function createEnvironment(scene: Scene): Environment {
+/**
+ * View-distance tuning for the 1 km map (`?map=v1`), replacing the arena values in LOOK. Everything else in LOOK
+ * applies unchanged.
+ */
+export const LARGE_WORLD_LOOK = {
+  /** EXP2 haze: ~4% at 200 m, ~26% at 500 m, ~70% at 1 km; the horizon mountains at 2–3 km fade out. */
+  fogDensity: 0.0011,
+  /** Cascades cover 160 m; terrain doesn't cast (the sun is 48° up, so hills barely shadow anything). */
+  shadowDistance: 160,
+  shadowLambda: 0.9,
+} as const;
+
+export interface EnvironmentOptions {
+  /** Large outdoor map: longer haze and shadow ranges. Default false (the arena look). */
+  readonly largeWorld?: boolean;
+}
+
+export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}): Environment {
   // Fog and clear colors are specified in gamma space; PBR converts them back to linear.
   const horizon = new Color3(...SKY.horizonColor).toGammaSpace();
   scene.clearColor = Color4.FromColor3(horizon, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
   scene.fogColor = horizon;
-  scene.fogDensity = LOOK.fogDensity;
+  scene.fogDensity = options.largeWorld ? LARGE_WORLD_LOOK.fogDensity : LOOK.fogDensity;
 
   const imageProcessing = scene.imageProcessingConfiguration;
   imageProcessing.toneMappingEnabled = true;
@@ -87,7 +104,10 @@ export function createEnvironment(scene: Scene): Environment {
   skyFill.groundColor = new Color3(...SKY.groundRadiance).scale(1 / SKY.skyAmbient);
   skyFill.specular = Color3.Black();
 
-  const shadowGenerator = createSunShadows(sun);
+  const shadowGenerator = createSunShadows(
+    sun,
+    options.largeWorld ? { ...LOOK.shadows, distance: LARGE_WORLD_LOOK.shadowDistance, lambda: LARGE_WORLD_LOOK.shadowLambda } : LOOK.shadows,
+  );
   const materials = new LevelMaterials(scene);
   const skybox = createSkybox(scene);
   const ibl = loadImageBasedLighting(scene, LOOK.sky);
@@ -122,15 +142,16 @@ export function createEnvironment(scene: Scene): Environment {
   };
 }
 
+type ShadowSettings = { readonly [K in keyof typeof LOOK.shadows]: number };
+
 /** Same as createEnvironment, but resolves once all environment assets are loaded. */
-export async function createEnvironmentAsync(scene: Scene): Promise<Environment> {
-  const environment = createEnvironment(scene);
+export async function createEnvironmentAsync(scene: Scene, options: EnvironmentOptions = {}): Promise<Environment> {
+  const environment = createEnvironment(scene, options);
   await environment.ready;
   return environment;
 }
 
-function createSunShadows(sun: DirectionalLight): ShadowGenerator {
-  const settings = LOOK.shadows;
+function createSunShadows(sun: DirectionalLight, settings: ShadowSettings): ShadowGenerator {
   if (!CascadedShadowGenerator.IsSupported) {
     const generator = new ShadowGenerator(settings.mapSize, sun);
     generator.usePercentageCloserFiltering = true;
