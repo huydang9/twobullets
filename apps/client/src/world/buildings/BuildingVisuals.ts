@@ -9,6 +9,7 @@ import {
 } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
+import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCulling";
 import { BUILDING_SHADE_ATTRIBUTE } from "./buildingShadePlugin";
 import { BuildingMaterials, lookOf, type BuildingLookId } from "./BuildingMaterials";
 
@@ -112,6 +113,7 @@ export class BuildingVisuals implements BuildingVisualHost {
       mesh.receiveShadows = true;
       if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
       this.environment.shadowGenerator.addShadowCaster(mesh);
+      markStaticShadowCaster(mesh);
       // PBR is lit by the IBL; the hemispheric fill is for non-PBR meshes only.
       this.environment.skyFill.excludedMeshes.push(mesh);
       return mesh;
@@ -149,6 +151,7 @@ class Batch {
   setVisible(visible: boolean): void {
     this.visible = visible;
     for (const mesh of this.meshes) mesh.setEnabled(visible && this.count > 0);
+    invalidateStaticShadows();
   }
 
   dispose(): void {
@@ -163,6 +166,7 @@ class Batch {
       buffer.set(m, offset);
       offset += 16;
     }
+    invalidateStaticShadows();
     for (const mesh of this.meshes) {
       // With zero thin instances Babylon would draw the source mesh itself at the origin.
       mesh.setEnabled(this.visible && buffer.length > 0);

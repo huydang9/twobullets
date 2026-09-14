@@ -2,6 +2,7 @@ import { Matrix, Vector3, type Mesh, type Scene } from "@babylonjs/core";
 import { INSTANCE_STRIDE, getMapProp, type MapPropDef, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
+import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCulling";
 import type { PropVisual, PropVisuals } from "./PropVisuals";
 
 export interface PropInstancesOptions {
@@ -139,6 +140,7 @@ export class PropInstances {
     if (enabled === this.enabled) return;
     this.enabled = enabled;
     this.lastCamera.set(Infinity, Infinity, Infinity);
+    invalidateStaticShadows();
     if (enabled) return;
     for (const cell of this.cells) {
       for (const batch of cell.batches.values()) {
@@ -203,6 +205,7 @@ export class PropInstances {
       const signature = all ? -2 : signatureOf(indices);
       if (batch.signature === signature && batch.meshes?.[0]?.isEnabled()) continue;
       batch.signature = signature;
+      if (batch.shadow) invalidateStaticShadows();
       const buffer = all ? cell.matrices : new Float32Array(size * 16);
       if (!all) indices.forEach((index, n) => buffer.set(cell.matrices.subarray(index * 16, index * 16 + 16), n * 16));
       for (const mesh of this.meshesOf(batch, cell)) {
@@ -213,6 +216,7 @@ export class PropInstances {
     this.culledInstances += count - visible;
     for (const [bucket, batch] of cell.batches) {
       if (!members.has(bucket) && batch.meshes?.[0]?.isEnabled()) {
+        if (batch.shadow) invalidateStaticShadows();
         batch.meshes.forEach((m) => m.setEnabled(false));
         batch.signature = -1;
       }
@@ -244,7 +248,10 @@ export class PropInstances {
       mesh.receiveShadows = true;
       // Instance matrices carry the placement; the batch itself stays at the origin.
       if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
-      if (batch.shadow) this.environment.shadowGenerator.addShadowCaster(mesh, false);
+      if (batch.shadow) {
+        this.environment.shadowGenerator.addShadowCaster(mesh, false);
+        markStaticShadowCaster(mesh);
+      }
       this.environment.skyFill.excludedMeshes.push(mesh);
     }
     return batch.meshes;

@@ -1,6 +1,7 @@
 import {
   CascadedShadowGenerator,
   Color3,
+  Constants,
   Color4,
   DirectionalLight,
   HemisphericLight,
@@ -13,10 +14,11 @@ import {
 } from "@babylonjs/core";
 import type { BuiltLevel, SurfaceKind } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../perf/flags";
+import { installGraphics } from "../perf/graphicsSettings";
 import { SKY } from "./environmentManifest";
 import { LevelMaterials } from "./materials";
 import { installPostEffects } from "./postEffects";
-import { CascadeCasterCulling } from "./shadowCulling";
+import { CascadeCasterCulling, markStaticShadowCaster } from "./shadowCulling";
 import { createSkybox, loadImageBasedLighting } from "./sky";
 
 export interface Environment {
@@ -38,6 +40,8 @@ export interface Environment {
   decorateLevel(level: BuiltLevel): void;
   /** Registers a dynamic mesh (players, props) to cast and receive sun shadows. */
   addShadowCaster(mesh: AbstractMesh): void;
+  /** Re-applies the shadow* optimization flags (cascade count, map size, filtering) after they change at runtime. */
+  refreshShadowQuality(): void;
 }
 
 /** Look tuning. Sun, sky and haze values themselves come from the HDRI calibration in environmentManifest. */
@@ -54,6 +58,11 @@ export const LOOK = {
     distance: 100,
     /** 0 = uniform cascade split, 1 = logarithmic (more resolution near the camera). */
     lambda: 0.85,
+    /**
+     * Split for 3 cascades (shadowThreeCascades). With a 5 cm near plane and 160 m of shadows: 0–11, 11–30 and 30–160 m,
+     * i.e. the 4-cascade split at 4, 10 and 31 m with its two nearest cascades merged. 100 m arena: 0–7, 7–20, 20–100 m.
+     */
+    threeCascadeLambda: 0.8,
     bias: 0.0015,
     normalBias: 0.015,
   },
@@ -80,6 +89,9 @@ export interface EnvironmentOptions {
 }
 
 export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}): Environment {
+  // Render scale and anti-aliasing from the saved graphics settings, before anything sizes itself to the canvas.
+  installGraphics(scene);
+
   // Fog and clear colors are specified in gamma space; PBR converts them back to linear.
   const horizon = new Color3(...SKY.horizonColor).toGammaSpace();
   scene.clearColor = Color4.FromColor3(horizon, 1);
@@ -109,10 +121,11 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
   skyFill.groundColor = new Color3(...SKY.groundRadiance).scale(1 / SKY.skyAmbient);
   skyFill.specular = Color3.Black();
 
-  const shadowGenerator = createSunShadows(
-    sun,
-    options.largeWorld ? { ...LOOK.shadows, distance: LARGE_WORLD_LOOK.shadowDistance, lambda: LARGE_WORLD_LOOK.shadowLambda } : LOOK.shadows,
-  );
+  const shadowSettings: ShadowSettings = options.largeWorld
+    ? { ...LOOK.shadows, distance: LARGE_WORLD_LOOK.shadowDistance, lambda: LARGE_WORLD_LOOK.shadowLambda }
+    : LOOK.shadows;
+  const shadowGenerator = createSunShadows(sun, shadowSettings);
+  applyShadowQuality(shadowGenerator, shadowSettings);
   const shadowCulling = shadowGenerator instanceof CascadedShadowGenerator ? new CascadeCasterCulling(shadowGenerator) : null;
   const materials = new LevelMaterials(scene);
   const skybox = createSkybox(scene);
@@ -136,6 +149,10 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
     skyFill,
     ready,
     addShadowCaster,
+    refreshShadowQuality() {
+      applyShadowQuality(shadowGenerator, shadowSettings);
+      shadowCulling?.attach();
+    },
     decorateLevel(level) {
       for (const mesh of level.meshes) {
         const kind = level.surfaceOf.get(mesh);
@@ -146,7 +163,9 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
         mesh.receiveShadows = true;
         skyFill.excludedMeshes.push(mesh);
         // The ground slab is the lowest thing in the level; it never shadows anything.
-        if (kind !== "ground") shadowGenerator.addShadowCaster(mesh);
+        if (kind === "ground") continue;
+        shadowGenerator.addShadowCaster(mesh);
+        markStaticShadowCaster(mesh);
       }
     },
   };
@@ -200,16 +219,28 @@ function createSunShadows(sun: DirectionalLight, settings: ShadowSettings): Shad
   }
   // The camera is resolved from scene.activeCamera each frame, so it may be assigned later.
   const generator = new CascadedShadowGenerator(settings.mapSize, sun);
-  generator.numCascades = settings.cascades;
-  generator.lambda = settings.lambda;
   generator.shadowMaxZ = settings.distance;
   // Bounding-sphere cascades don't shimmer as the camera turns, at some cost in texel density.
   generator.stabilizeCascades = true;
   generator.cascadeBlendPercentage = 0.08;
   generator.depthClamp = true;
   generator.usePercentageCloserFiltering = true;
-  generator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
   generator.bias = settings.bias;
   generator.normalBias = settings.normalBias;
   return generator;
+}
+
+/** Cascade count and split, map size and PCF taps from the shadow* flags. Changing count or size recreates the map. */
+function applyShadowQuality(generator: ShadowGenerator, settings: ShadowSettings): void {
+  const mapSize = OPTIMIZATIONS.shadowMap1536 ? 1536 : settings.mapSize;
+  if (generator.mapSize !== mapSize) generator.mapSize = mapSize;
+  generator.filteringQuality = OPTIMIZATIONS.shadowPcfLow ? ShadowGenerator.QUALITY_LOW : ShadowGenerator.QUALITY_MEDIUM;
+  if (!(generator instanceof CascadedShadowGenerator)) return;
+  const three = OPTIMIZATIONS.shadowThreeCascades;
+  const cascades = three ? 3 : settings.cascades;
+  generator.lambda = three ? settings.threeCascadeLambda : settings.lambda;
+  if (generator.numCascades === cascades) return;
+  generator.numCascades = cascades;
+  // Recreating the map doesn't touch receivers, whose shaders are compiled for a cascade count.
+  generator.getLight().getScene().markAllMaterialsAsDirty(Constants.MATERIAL_LightDirtyFlag);
 }

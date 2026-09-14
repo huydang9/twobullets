@@ -1,4 +1,4 @@
-import { DefaultRenderingPipeline, SSAO2RenderingPipeline, type Camera, type Scene } from "@babylonjs/core";
+import { DefaultRenderingPipeline, FxaaPostProcess, PassPostProcess, SSAO2RenderingPipeline, type Camera, type PostProcess, type Scene } from "@babylonjs/core";
 
 export interface PostEffectSettings {
   /**
@@ -41,6 +41,33 @@ export function installPostEffects(scene: Scene, settings: PostEffectSettings): 
     }
   };
 
+  if (scene.activeCamera) attach(scene.activeCamera);
+  else scene.onActiveCameraChanged.addOnce(() => scene.activeCamera && attach(scene.activeCamera));
+}
+
+/**
+ * Final full-screen pass that takes over anti-aliasing from the canvas:
+ * - "msaa": none; the scene draws straight into the canvas's multisampled back buffer.
+ * - "fxaa": the scene draws into a single-sample target, then one FXAA pass writes the canvas (only that pass is
+ *   multisampled, and a full-screen triangle costs next to nothing per extra sample).
+ * - "resolve": same single-sample target with a plain copy, no anti-aliasing (benchmark reference for MSAA's cost).
+ */
+export type AntiAliasingPass = "msaa" | "fxaa" | "resolve";
+
+const antiAliasingPasses = new WeakMap<Scene, { mode: AntiAliasingPass; postProcess: PostProcess | null }>();
+
+export function setAntiAliasingPass(scene: Scene, mode: AntiAliasingPass): void {
+  const current = antiAliasingPasses.get(scene);
+  if (current?.mode === mode) return;
+  const entry: { mode: AntiAliasingPass; postProcess: PostProcess | null } = { mode, postProcess: null };
+  antiAliasingPasses.set(scene, entry);
+
+  const attach = (camera: Camera) => {
+    if (antiAliasingPasses.get(scene) !== entry) return;
+    current?.postProcess?.dispose(camera);
+    if (mode === "fxaa") entry.postProcess = new FxaaPostProcess("fxaa", 1, camera);
+    else if (mode === "resolve") entry.postProcess = new PassPostProcess("resolve", 1, camera);
+  };
   if (scene.activeCamera) attach(scene.activeCamera);
   else scene.onActiveCameraChanged.addOnce(() => scene.activeCamera && attach(scene.activeCamera));
 }

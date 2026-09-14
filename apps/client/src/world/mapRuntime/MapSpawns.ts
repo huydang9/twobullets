@@ -1,17 +1,13 @@
 import type { MapData, SpawnPoint, Terrain } from "@twobullets/shared";
 
-/** Anything that can respawn from a level's spawn list (PlayerController). */
+/** Anything that can respawn at a given spawn point (PlayerController). */
 export interface Respawnable {
-  respawn(): void;
+  respawnAt(spawn: SpawnPoint): void;
 }
 
-/**
- * The map's fixed spawns, used until the landing phase exists. `spawnPoints` is what the level hands the player: every
- * spawn (PlayerController picks one at random), or just one while `respawnNear` forces the nearest.
- */
+/** The map's fixed spawns, used until the landing phase exists. `spawnPoints` is what the level hands the player. */
 export class MapSpawns {
   readonly all: readonly SpawnPoint[];
-  private forced: readonly SpawnPoint[] | null = null;
 
   constructor(map: Pick<MapData, "spawns">, terrain: Terrain) {
     this.all = map.spawns.map(({ position: [x, z], yaw }) => ({ position: [x, terrain.sampleHeight(x, z), z], yaw }));
@@ -19,7 +15,7 @@ export class MapSpawns {
   }
 
   get spawnPoints(): readonly SpawnPoint[] {
-    return this.forced ?? this.all;
+    return this.all;
   }
 
   nearest(x: number, z: number): SpawnPoint {
@@ -32,18 +28,10 @@ export class MapSpawns {
     return best;
   }
 
-  /**
-   * Respawns at the spawn nearest (x, z). PlayerController only knows random respawns from its level, so the level's
-   * spawn list narrows to one point for the call. Replace with a direct `respawnAt` once the player exposes one.
-   */
+  /** Respawns at the spawn nearest (x, z). */
   respawnNear(player: Respawnable, x: number, z: number): SpawnPoint {
     const spawn = this.nearest(x, z);
-    this.forced = [spawn];
-    try {
-      player.respawn();
-    } finally {
-      this.forced = null;
-    }
+    player.respawnAt(spawn);
     return spawn;
   }
 }

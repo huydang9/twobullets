@@ -8,6 +8,7 @@ import { BenchRunner, type BenchRun } from "./BenchRunner";
 import { createBenchVariants } from "./benchVariants";
 import { resolveBenchViewpoints } from "./benchViewpoints";
 import { describeOptimizations } from "./flags";
+import { graphicsOf } from "./graphicsSettings";
 import { PerfMonitor, type FrameSample } from "./PerfMonitor";
 import { PerfOverlay } from "./PerfOverlay";
 
@@ -191,11 +192,27 @@ export class PerfTools {
       antialias: engine.getCreationOptions().antialias ?? false,
       gpuTimer: this.monitor?.gpuTimerAvailable ? "EXT_disjoint_timer_query_webgl2" : "unavailable",
       gpuSync: this.options.gpuSync,
+      graphics: this.graphicsText(),
+      shadows: this.shadowText(),
       optimizations: describeOptimizations(),
       meshes: scene.meshes.length,
       materials: scene.materials.length,
       textures: scene.textures.length,
     };
+  }
+
+  private graphicsText(): string {
+    const graphics = graphicsOf(this.context.scene);
+    if (!graphics) return "not installed";
+    const { preset, antiAliasing, dynamicResolution } = graphics.current;
+    return `${preset} (scale ${graphics.renderScale.toFixed(2)}), ${antiAliasing}${dynamicResolution ? ", dynamic resolution" : ""}`;
+  }
+
+  private shadowText(): string {
+    const generator = this.context.environment.shadowGenerator;
+    const cascades = "numCascades" in generator ? `${String(generator.numCascades)} cascades × ` : "";
+    const filter = ["high", "medium", "low"][generator.filteringQuality] ?? String(generator.filteringQuality);
+    return `${cascades}${generator.mapSize}², PCF ${filter}`;
   }
 
   private statsText(): string {
@@ -216,7 +233,8 @@ export class PerfTools {
       `draws  ${w.avg("drawCalls").toFixed(0)} · meshes ${w.avg("activeMeshes").toFixed(0)}/${scene.meshes.length} · tris ${(w.avg("triangles") / 1e6).toFixed(2)}M · bones ${w.avg("activeBones").toFixed(0)} · textures ${scene.textures.length}`,
     ];
     const culling = environment.shadowCulling;
-    if (culling) lines.push(`casters/cascade ${culling.counts.join(" · ")} (of ${culling.candidates})`);
+    lines.push(`graphics ${this.graphicsText()} · shadows ${this.shadowText()}`);
+    if (culling) lines.push(`casters/cascade ${culling.counts.join(" · ")} (of ${culling.candidates}) · cached layers ${culling.cachedLayers}`);
     if (world) {
       const terrain = world.renderer.getStats();
       lines.push(`grass ${world.grass.instances} · terrain chunks ${terrain.visible}/${terrain.chunks} · LOD ${terrain.lodHistogram.join("/")}`);

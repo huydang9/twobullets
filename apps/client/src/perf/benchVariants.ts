@@ -3,8 +3,10 @@ import type { TargetRange } from "../targets/TargetRange";
 import { setViewmodelSuppressed } from "../viewmodel/Viewmodel";
 import type { Environment } from "../world/environment";
 import type { MapRuntime } from "../world/mapRuntime";
+import { setAntiAliasingPass } from "../world/postEffects";
 import type { BenchVariant } from "./BenchRunner";
-import { OPTIMIZATIONS } from "./flags";
+import { OPTIMIZATIONS, type RenderOptimizations } from "./flags";
+import { RENDER_SCALE, graphicsOf, type QualityPreset } from "./graphicsSettings";
 
 export interface BenchSubsystems {
   readonly engine: AbstractEngine;
@@ -14,25 +16,71 @@ export interface BenchSubsystems {
   readonly targets: TargetRange;
 }
 
-/**
- * Subsystem toggles for the A/B passes, in run order. Each removes (or changes) one cost so its delta against the
- * baseline shows what that subsystem takes. `only` selects a subset by id.
- */
-export function createBenchVariants(s: BenchSubsystems, only?: readonly string[]): BenchVariant[] {
-  const { engine, scene, environment, world } = s;
-  const culling = OPTIMIZATIONS.shadowCascadeCulling;
+export interface GroupedBenchVariant extends BenchVariant {
+  /** resolution | shadows | terrain | shading | scene */
+  readonly group: string;
+  /** Part of the default run (`?variants` absent). */
+  readonly byDefault: boolean;
+}
 
-  const variants: BenchVariant[] = [
+/**
+ * A/B variants in run order. Each changes one thing so its delta against the baseline shows what it costs or saves.
+ * `select` takes ids or group names; "all" includes the scene-content toggles that are off by default.
+ */
+export function createBenchVariants(s: BenchSubsystems, select?: readonly string[]): BenchVariant[] {
+  const { scene, environment, world } = s;
+  const graphics = graphicsOf(scene);
+  const refreshShadows = () => environment.refreshShadowQuality();
+  const refreshTerrain = () => world.terrainMaterial.refreshOptimizations();
+
+  const presets = (["high", "balanced", "performance"] as const satisfies readonly QualityPreset[])
+    .filter((preset) => graphics && preset !== graphics.current.preset)
+    .map(
+      (preset): GroupedBenchVariant => ({
+        id: `preset_${preset}`,
+        group: "resolution",
+        byDefault: true,
+        label: `${preset} preset (render scale ${RENDER_SCALE[preset]})`,
+        apply: () => {
+          graphics?.setRenderScale(RENDER_SCALE[preset]);
+          return () => graphics?.apply();
+        },
+      }),
+    );
+  const antiAliasing = graphics?.current.antiAliasing ?? "msaa";
+
+  const variants: GroupedBenchVariant[] = [
+    ...presets,
     {
-      id: "cascadeCulling",
-      label: `shadow cascade culling ${culling ? "off" : "on"}`,
+      id: "aa_swap",
+      group: "resolution",
+      byDefault: true,
+      label: antiAliasing === "msaa" ? "FXAA instead of MSAA" : "MSAA instead of FXAA",
       apply: () => {
-        OPTIMIZATIONS.shadowCascadeCulling = !culling;
-        return () => (OPTIMIZATIONS.shadowCascadeCulling = culling);
+        setAntiAliasingPass(scene, antiAliasing === "msaa" ? "fxaa" : "msaa");
+        return () => setAntiAliasingPass(scene, antiAliasing);
       },
     },
     {
+      id: "aa_none",
+      group: "resolution",
+      byDefault: true,
+      label: "no anti-aliasing (single-sample target, plain copy)",
+      apply: () => {
+        setAntiAliasingPass(scene, "resolve");
+        return () => setAntiAliasingPass(scene, antiAliasing);
+      },
+    },
+
+    flag("shadowThreeCascades", "shadows", ["3 shadow cascades", "4 shadow cascades"], refreshShadows),
+    flag("shadowMap1536", "shadows", ["shadow maps 1536²", "shadow maps 2048²"], refreshShadows),
+    flag("shadowPcfLow", "shadows", ["PCF 1 tap", "PCF 4 taps"], refreshShadows),
+    flag("shadowStaticCache", "shadows", ["static shadow cache on", "static shadow cache off"]),
+    flag("shadowCascadeCulling", "shadows", ["cascade caster culling on", "cascade caster culling off"], undefined, false),
+    {
       id: "shadowMapsFrozen",
+      group: "shadows",
+      byDefault: false,
       label: "shadow maps not re-rendered (sampling kept)",
       apply: () => {
         const map = environment.shadowGenerator.getShadowMap();
@@ -42,33 +90,69 @@ export function createBenchVariants(s: BenchSubsystems, only?: readonly string[]
         return () => (map.refreshRate = refreshRate);
       },
     },
-    toggle("shadowsOff", "shadows off (maps and sampling)", (off) => (scene.shadowsEnabled = !off)),
-    toggle("grassOff", "grass off", (off) => world.grass.setEnabled(!off)),
-    toggle("propsOff", "props + vegetation off", (off) => world.props.setEnabled(!off)),
-    toggle("buildingsOff", "buildings off", (off) => world.buildingVisuals.setEnabled(!off)),
-    toggle("fogPostOff", "fog + image processing off", (off) => {
-      scene.fogEnabled = !off;
-      scene.imageProcessingConfiguration.isEnabled = !off;
-    }),
-    toggle("viewmodelOff", "viewmodel off", setViewmodelSuppressed),
-    { id: "soldiersOff", label: "soldiers off (hidden, animation paused)", apply: () => hideSoldiers(s.targets) },
-    { id: "terrainPlain", label: "terrain: plain PBR instead of the splat shader", apply: () => plainTerrain(scene, world) },
+    toggle("shadowsOff", "shadows", false, "shadows off (maps and sampling)", (off) => (scene.shadowsEnabled = !off)),
+
+    flag("terrainWeightSkip", "terrain", ["terrain weight skip on", "terrain weight skip off"], refreshTerrain),
+    flag("terrainBiplanarRock", "terrain", ["terrain rock biplanar", "terrain rock triplanar"], refreshTerrain),
+    flag("terrainFarSimplify", "terrain", ["terrain far simplification on", "terrain far simplification off"], refreshTerrain),
     {
-      id: "scale125",
-      label: "hardware scaling ×1.25 (80% resolution)",
+      id: "terrainLegacy",
+      group: "terrain",
+      byDefault: true,
+      label: "terrain shader as before (all three terrain flags off)",
       apply: () => {
-        const level = engine.getHardwareScalingLevel();
-        engine.setHardwareScalingLevel(level * 1.25);
-        return () => engine.setHardwareScalingLevel(level);
+        const saved = { skip: OPTIMIZATIONS.terrainWeightSkip, biplanar: OPTIMIZATIONS.terrainBiplanarRock, far: OPTIMIZATIONS.terrainFarSimplify };
+        OPTIMIZATIONS.terrainWeightSkip = OPTIMIZATIONS.terrainBiplanarRock = OPTIMIZATIONS.terrainFarSimplify = false;
+        refreshTerrain();
+        return () => {
+          OPTIMIZATIONS.terrainWeightSkip = saved.skip;
+          OPTIMIZATIONS.terrainBiplanarRock = saved.biplanar;
+          OPTIMIZATIONS.terrainFarSimplify = saved.far;
+          refreshTerrain();
+        };
       },
     },
+    { id: "terrainPlain", group: "terrain", byDefault: false, label: "terrain: plain PBR instead of the splat shader", apply: () => plainTerrain(scene, world) },
+
+    toggle("fogOff", "shading", true, "fog off", (off) => (scene.fogEnabled = !off)),
+    toggle("imageProcessingOff", "shading", true, "image processing off (ACES, contrast, dithering)", (off) => (scene.imageProcessingConfiguration.isEnabled = !off)),
+    toggle("viewmodelOff", "shading", true, "viewmodel off", setViewmodelSuppressed),
+
+    toggle("grassOff", "scene", false, "grass off", (off) => world.grass.setEnabled(!off)),
+    toggle("propsOff", "scene", false, "props + vegetation off", (off) => world.props.setEnabled(!off)),
+    toggle("buildingsOff", "scene", false, "buildings off", (off) => world.buildingVisuals.setEnabled(!off)),
+    { id: "soldiersOff", group: "scene", byDefault: false, label: "soldiers off (hidden, animation paused)", apply: () => hideSoldiers(s.targets) },
   ];
-  return only ? variants.filter((v) => only.includes(v.id)) : variants;
+
+  if (!select) return variants.filter((v) => v.byDefault);
+  if (select.includes("all")) return variants;
+  return variants.filter((v) => select.includes(v.id) || select.includes(v.group));
 }
 
-function toggle(id: string, label: string, set: (off: boolean) => void): BenchVariant {
+/** Flips a runtime optimization flag for the pass; labels are [when on, when off]. */
+function flag(name: keyof RenderOptimizations, group: string, labels: readonly [on: string, off: string], refresh?: () => void, byDefault = true): GroupedBenchVariant {
+  const initial = OPTIMIZATIONS[name];
+  return {
+    id: name,
+    group,
+    byDefault,
+    label: initial ? labels[1] : labels[0],
+    apply: () => {
+      OPTIMIZATIONS[name] = !initial;
+      refresh?.();
+      return () => {
+        OPTIMIZATIONS[name] = initial;
+        refresh?.();
+      };
+    },
+  };
+}
+
+function toggle(id: string, group: string, byDefault: boolean, label: string, set: (off: boolean) => void): GroupedBenchVariant {
   return {
     id,
+    group,
+    byDefault,
     label,
     apply: () => {
       set(true);

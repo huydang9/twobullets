@@ -76,6 +76,7 @@ export class MapRuntime {
     readonly world: MapWorld,
     readonly physics: TerrainBody,
     readonly renderer: TerrainRenderer,
+    readonly terrainMaterial: TerrainMaterial,
     readonly buildings: readonly BuiltBuilding[],
     readonly buildingVisuals: BuildingVisuals,
     readonly props: PropInstances,
@@ -175,7 +176,7 @@ export class MapRuntime {
         ` · ${buildings.length} buildings, ${props.instanceCount} prop instances, ${colliderStats.bodies} prop bodies / ${colliderStats.shapes} shapes`,
     );
     const ready = Promise.all([material.ready, buildingVisuals.whenLoaded()]).then(() => undefined);
-    return new MapRuntime(scene, map, world, physics, renderer, buildings, buildingVisuals, props, colliders, grass, spawns, ready, overlay, timings, yard, yardPlacement);
+    return new MapRuntime(scene, map, world, physics, renderer, material, buildings, buildingVisuals, props, colliders, grass, spawns, ready, overlay, timings, yard, yardPlacement);
   }
 
   /**

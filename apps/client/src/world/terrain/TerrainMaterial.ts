@@ -14,6 +14,7 @@ import {
   type UniformBuffer,
 } from "@babylonjs/core";
 import type { Terrain } from "@twobullets/shared";
+import { OPTIMIZATIONS } from "../../perf/flags";
 import { TEXTURE_SETS, type TextureSetId } from "../environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "../materials";
 
@@ -38,6 +39,8 @@ const LOOK = {
   heightBlend: { contrast: 0.6, depth: 0.25 },
   /** Distance band over which texture detail fades toward each layer's mean color, m. */
   detailFade: { start: 35, end: 450 },
+  /** With terrainFarSimplify: normal/AO maps and the anti-tile grass sample fade out over this band, m. */
+  farDetail: { start: 60, end: 85 },
 } as const;
 
 const SAMPLERS = [
@@ -55,8 +58,12 @@ const SAMPLERS = [
 ] as const;
 type SamplerName = (typeof SAMPLERS)[number];
 
-// Fetches per pixel (excluding PBR/IBL/shadow samplers): mask 1 + macro 2, then per layer present
-// grass 3 (albedo, NXA, anti-tile albedo), dirt 2, road 3 (albedo, NXA, shoulder albedo), rock 6 (triplanar).
+// Layer fetches per pixel, excluding PBR/IBL/shadow samplers; mask + macro (3) are always taken.
+//                     grass  dirt  rock  road (albedo, NXA, shoulder)
+//   legacy              3     2     6     3      all layers present: 17
+//   near (< 60 m)       3     2    2–4    3      biplanar takes 2 fetches per projection, 1 or 2 projections
+//   far (> 85 m)        1     1    1–2    2      albedo only: no NXA, no anti-tile grass sample
+// TS_WEIGHT_SKIP also skips layers whose weight can't survive the height blend, so blend edges rarely pay for all four.
 const FRAGMENT_DEFINITIONS = /* glsl */ `
 #ifdef TERRAIN_SPLAT
 ${SAMPLERS.map((s) => `uniform sampler2D ${s};`).join("\n")}
@@ -70,14 +77,30 @@ struct TsSample { vec3 albedo; vec3 normal; float ao; };
 
 TsSample tsEmpty() { TsSample s; s.albedo = vec3(0.0); s.normal = vec3(0.0, 0.0, 1.0); s.ao = 1.0; return s; }
 
-TsSample tsSampleGrad(sampler2D albedoTex, sampler2D nxaTex, vec2 uv, vec2 ddx, vec2 ddy) {
-  TsSample s;
+// Albedo, plus the packed normal and AO faded by detail (0 skips the NXA fetch: flat normal, no occlusion).
+TsSample tsSampleLayer(sampler2D albedoTex, sampler2D nxaTex, vec2 uv, vec2 ddx, vec2 ddy, float detail) {
+  TsSample s = tsEmpty();
   s.albedo = toLinearSpace(textureGrad(albedoTex, uv, ddx, ddy).rgb);
-  vec3 nxa = textureGrad(nxaTex, uv, ddx, ddy).rgb;
-  vec2 xy = nxa.xy * 2.0 - 1.0;
-  s.normal = vec3(xy, sqrt(saturate(1.0 - dot(xy, xy))));
-  s.ao = nxa.b;
+  if (detail > 0.0) {
+    vec3 nxa = textureGrad(nxaTex, uv, ddx, ddy).rgb;
+    vec2 xy = (nxa.xy * 2.0 - 1.0) * detail;
+    s.normal = vec3(xy, sqrt(saturate(1.0 - dot(xy, xy))));
+    s.ao = mix(1.0, nxa.b, detail);
+  }
   return s;
+}
+
+// Rock projected along axis 0 (x), 1 (y) or 2 (z); the normal comes back whiteout-blended in world space (unnormalized).
+TsSample tsRockProjection(int axis, vec3 p, vec3 ddxP, vec3 ddyP, vec3 n, float scale, float detail) {
+  vec2 uv = axis == 0 ? p.zy : (axis == 1 ? p.xz : p.xy);
+  vec2 gx = axis == 0 ? ddxP.zy : (axis == 1 ? ddxP.xz : ddxP.xy);
+  vec2 gy = axis == 0 ? ddyP.zy : (axis == 1 ? ddyP.xz : ddyP.xy);
+  TsSample r = tsSampleLayer(tsRockAlbedo, tsRockNxa, uv * scale, gx * scale, gy * scale, detail);
+  vec3 t = r.normal;
+  if (axis == 0) r.normal = vec3(t.xy + n.zy, abs(t.z) * n.x).zyx;
+  else if (axis == 1) r.normal = vec3(t.xy + n.xz, abs(t.z) * n.y).xzy;
+  else r.normal = vec3(t.xy + n.xy, abs(t.z) * n.z);
+  return r;
 }
 #endif
 `;
@@ -91,6 +114,12 @@ const FRAGMENT_BEFORE_LIGHTS = /* glsl */ `
   vec3 dpdy = dFdy(p);
   float viewDistance = length(vEyePosition.xyz - p);
   float fade = smoothstep(tsFade.x, tsFade.y, viewDistance);
+#ifdef TS_FAR_SIMPLE
+  // 1 up close, 0 past the band: normal/AO fetches and the anti-tile grass sample fade out, then are skipped.
+  float detail = 1.0 - smoothstep(tsDetail.x, tsDetail.y, viewDistance);
+#else
+  float detail = 1.0;
+#endif
 
   vec4 w = texture2D(tsMask, (p.xz - tsMaskInfo.xy) * tsMaskInfo.z + tsMaskInfo.w);
   // Past the heightfield (horizon mesh) the mask clamps; steep ground still turns to rock.
@@ -99,47 +128,83 @@ const FRAGMENT_BEFORE_LIGHTS = /* glsl */ `
   vec3 macroColor = min(toLinearSpace(texture2D(tsMacro, p.xz * tsMacroScale.x).rgb) / tsMacroMean.rgb, vec3(2.5));
   float macroLuma = getLuminance(toLinearSpace(texture2D(tsMacro, p.zx * tsMacroScale.y + 0.37).rgb)) / tsMacroMean.a;
 
+  vec4 present = step(vec4(0.004), w);
+#ifdef TS_WEIGHT_SKIP
+  // A layer keeps any weight after the height blend only if its weight plus its largest possible height (AO, or rock
+  // luminance x 4, times contrast) reaches the strongest weight minus the blend depth. Others are not sampled; the
+  // result is identical.
+  float wMax = max(max(w.r, w.g), max(w.b, w.a));
+  vec4 sampled = present * step(vec4(wMax - tsBlend.y), w + vec4(1.0, 1.0, 4.0, 1.0) * tsBlend.x);
+#else
+  vec4 sampled = present;
+#endif
+
   // Grass: two top-projected samples at different scales and rotations, mixed by macro noise.
   TsSample grass = tsEmpty();
-  if (w.r > 0.004) {
+  if (sampled.r > 0.5) {
     float sg = tsScale.x;
-    grass = tsSampleGrad(tsGrassAlbedo, tsGrassNxa, p.xz * sg, dpdx.xz * sg, dpdy.xz * sg);
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    float sg2 = sg * tsScale2.x;
-    vec3 grassAlt = toLinearSpace(textureGrad(tsGrassAlbedo, rot * p.xz * sg2 + 0.5, rot * dpdx.xz * sg2, rot * dpdy.xz * sg2).rgb);
-    grass.albedo = mix(grass.albedo, grassAlt, smoothstep(0.75, 1.25, macroLuma) * 0.6) * tsGrassTint.rgb;
-    grass.albedo = mix(grass.albedo, tsGrassMean.rgb, fade * 0.5);
+    grass = tsSampleLayer(tsGrassAlbedo, tsGrassNxa, p.xz * sg, dpdx.xz * sg, dpdy.xz * sg, detail);
+    if (detail > 0.0) {
+      mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+      float sg2 = sg * tsScale2.x;
+      vec3 grassAlt = toLinearSpace(textureGrad(tsGrassAlbedo, rot * p.xz * sg2 + 0.5, rot * dpdx.xz * sg2, rot * dpdy.xz * sg2).rgb);
+      grass.albedo = mix(grass.albedo, grassAlt, smoothstep(0.75, 1.25, macroLuma) * 0.6 * detail);
+    }
+    grass.albedo = mix(grass.albedo * tsGrassTint.rgb, tsGrassMean.rgb, fade * 0.5);
   }
 
   TsSample dirt = tsEmpty();
-  if (w.g > 0.004) {
+  if (sampled.g > 0.5) {
     float sd = tsScale.y;
-    dirt = tsSampleGrad(tsDirtAlbedo, tsDirtNxa, p.xz * sd, dpdx.xz * sd, dpdy.xz * sd);
+    dirt = tsSampleLayer(tsDirtAlbedo, tsDirtNxa, p.xz * sd, dpdx.xz * sd, dpdy.xz * sd, detail);
     dirt.albedo = mix(dirt.albedo, tsDirtMean.rgb, fade * 0.5);
   }
 
   TsSample rock = tsEmpty();
   vec3 rockNormalW = n;
-  if (w.b > 0.004) {
+  if (sampled.b > 0.5) {
+    float sr = tsScale.z;
+    vec3 rockNormal;
+#ifdef TS_BIPLANAR
+    // Biplanar: the axis the normal faces most, plus the better of the other two. Weights start at |n| = 0.577, so an
+    // axis has no weight wherever it could swap with the dropped one, and the blend stays continuous.
+    vec3 an = abs(n);
+    int axisMain = an.x > an.y && an.x > an.z ? 0 : (an.y > an.z ? 1 : 2);
+    int sideA = axisMain == 0 ? 1 : 0;
+    int sideB = axisMain == 2 ? 1 : 2;
+    float facingA = sideA == 0 ? an.x : an.y;
+    float facingB = sideB == 1 ? an.y : an.z;
+    int axisSide = facingA >= facingB ? sideA : sideB;
+    float facingMain = axisMain == 0 ? an.x : (axisMain == 1 ? an.y : an.z);
+    float wMain = saturate((facingMain - 0.5773) / 0.4227) + 0.001;
+    float wSide = saturate((max(facingA, facingB) - 0.5773) / 0.4227);
+    rock = tsRockProjection(axisMain, p, dpdx, dpdy, n, sr, detail);
+    rockNormal = rock.normal;
+    if (wSide > 0.0) {
+      TsSample side = tsRockProjection(axisSide, p, dpdx, dpdy, n, sr, detail);
+      float total = wMain + wSide;
+      rock.albedo = (rock.albedo * wMain + side.albedo * wSide) / total;
+      rock.ao = (rock.ao * wMain + side.ao * wSide) / total;
+      rockNormal = rockNormal * wMain + side.normal * wSide;
+    }
+#else
     // Triplanar so cliffs don't stretch.
     vec3 bw = abs(n); bw *= bw; bw *= bw; bw /= bw.x + bw.y + bw.z;
-    float sr = tsScale.z;
-    TsSample rx = tsSampleGrad(tsRockAlbedo, tsRockNxa, p.zy * sr, dpdx.zy * sr, dpdy.zy * sr);
-    TsSample ry = tsSampleGrad(tsRockAlbedo, tsRockNxa, p.xz * sr, dpdx.xz * sr, dpdy.xz * sr);
-    TsSample rz = tsSampleGrad(tsRockAlbedo, tsRockNxa, p.xy * sr, dpdx.xy * sr, dpdy.xy * sr);
+    TsSample rx = tsRockProjection(0, p, dpdx, dpdy, n, sr, detail);
+    TsSample ry = tsRockProjection(1, p, dpdx, dpdy, n, sr, detail);
+    TsSample rz = tsRockProjection(2, p, dpdx, dpdy, n, sr, detail);
     rock.albedo = rx.albedo * bw.x + ry.albedo * bw.y + rz.albedo * bw.z;
-    rock.albedo = mix(rock.albedo, tsRockMean.rgb, fade * 0.5);
     rock.ao = rx.ao * bw.x + ry.ao * bw.y + rz.ao * bw.z;
-    vec3 nx = vec3(rx.normal.xy + n.zy, abs(rx.normal.z) * n.x);
-    vec3 ny = vec3(ry.normal.xy + n.xz, abs(ry.normal.z) * n.y);
-    vec3 nz = vec3(rz.normal.xy + n.xy, abs(rz.normal.z) * n.z);
-    rockNormalW = normalize(mix(n, normalize(nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z), 1.0 - fade * 0.7));
+    rockNormal = rx.normal * bw.x + ry.normal * bw.y + rz.normal * bw.z;
+#endif
+    rock.albedo = mix(rock.albedo, tsRockMean.rgb, fade * 0.5);
+    rockNormalW = normalize(mix(n, normalize(rockNormal), 1.0 - fade * 0.7));
   }
 
   TsSample road = tsEmpty();
-  if (w.a > 0.004) {
+  if (sampled.a > 0.5) {
     float sd = tsScale.w;
-    road = tsSampleGrad(tsRoadAlbedo, tsRoadNxa, p.xz * sd, dpdx.xz * sd, dpdy.xz * sd);
+    road = tsSampleLayer(tsRoadAlbedo, tsRoadNxa, p.xz * sd, dpdx.xz * sd, dpdy.xz * sd, detail);
     // Gravel shoulder where the painted road weight fades out, with a ragged macro-noise edge.
     float ss = tsScale2.y;
     vec3 shoulder = toLinearSpace(textureGrad(tsShoulderAlbedo, p.xz * ss, dpdx.xz * ss, dpdy.xz * ss).rgb);
@@ -149,7 +214,6 @@ const FRAGMENT_BEFORE_LIGHTS = /* glsl */ `
   }
 
   // Height-based blend: the layer that "sticks out" (grass tufts, pebbles, rock bumps) wins at transitions.
-  vec4 present = step(vec4(0.004), w);
   vec4 heights = vec4(grass.ao, dirt.ao, getLuminance(rock.albedo) * 4.0, road.ao) * tsBlend.x;
   vec4 hw = w + heights * present;
   float top = max(max(hw.x, hw.y), max(hw.z, hw.w)) - tsBlend.y;
@@ -195,7 +259,7 @@ class TerrainSplatPlugin extends MaterialPluginBase {
     private readonly textures: Record<SamplerName, BaseTexture>,
     private readonly maskInfo: readonly [number, number, number, number],
   ) {
-    super(material, "TerrainSplat", 200, { TERRAIN_SPLAT: false }, true, true);
+    super(material, "TerrainSplat", 200, { TERRAIN_SPLAT: false, TS_WEIGHT_SKIP: false, TS_BIPLANAR: false, TS_FAR_SIMPLE: false }, true, true);
   }
 
   override getClassName(): string {
@@ -212,6 +276,9 @@ class TerrainSplatPlugin extends MaterialPluginBase {
 
   override prepareDefines(defines: MaterialDefines): void {
     defines["TERRAIN_SPLAT"] = true;
+    defines["TS_WEIGHT_SKIP"] = OPTIMIZATIONS.terrainWeightSkip;
+    defines["TS_BIPLANAR"] = OPTIMIZATIONS.terrainBiplanarRock;
+    defines["TS_FAR_SIMPLE"] = OPTIMIZATIONS.terrainFarSimplify;
   }
 
   override getSamplers(samplers: string[]): void {
@@ -239,6 +306,7 @@ class TerrainSplatPlugin extends MaterialPluginBase {
       "tsLayerRoughness",
       "tsBlend",
       "tsFade",
+      "tsDetail",
       "tsGrassMean",
       "tsDirtMean",
       "tsRockMean",
@@ -267,6 +335,7 @@ class TerrainSplatPlugin extends MaterialPluginBase {
     ubo.updateFloat4("tsLayerRoughness", TEXTURE_SETS[LOOK.grass.set].roughness, TEXTURE_SETS[LOOK.dirt.set].roughness, TEXTURE_SETS[LOOK.rock.set].roughness, TEXTURE_SETS[LOOK.road.set].roughness);
     ubo.updateFloat4("tsBlend", LOOK.heightBlend.contrast, LOOK.heightBlend.depth, 0, 0);
     ubo.updateFloat4("tsFade", LOOK.detailFade.start, LOOK.detailFade.end, 0, 0);
+    ubo.updateFloat4("tsDetail", LOOK.farDetail.start, LOOK.farDetail.end, 0, 0);
     ubo.updateFloat4("tsGrassMean", ...mean(LOOK.grass.set, grassTint), 0);
     ubo.updateFloat4("tsDirtMean", ...mean(LOOK.dirt.set), 0);
     ubo.updateFloat4("tsRockMean", ...mean(LOOK.rock.set), 0);
@@ -294,6 +363,7 @@ class TerrainSplatPlugin extends MaterialPluginBase {
 export class TerrainMaterial {
   readonly material: PBRMaterial;
   readonly ready: Promise<void>;
+  private readonly plugin: TerrainSplatPlugin;
 
   constructor(scene: Scene, terrain: Terrain) {
     const { field } = terrain;
@@ -329,8 +399,13 @@ export class TerrainMaterial {
     };
     // Mask texel centers sit on height samples: uv = ((xz - min) / spacing + 0.5) / resolution.
     const texel = 1 / (field.spacing * field.resolution);
-    new TerrainSplatPlugin(material, textures, [field.minX, field.minZ, texel, 0.5 / field.resolution]);
+    this.plugin = new TerrainSplatPlugin(material, textures, [field.minX, field.minZ, texel, 0.5 / field.resolution]);
 
     this.ready = Promise.all(Object.values(textures).filter((t) => t !== mask).map(waitForTexture)).then(() => undefined);
+  }
+
+  /** Recompiles with the current terrain* optimization flags. */
+  refreshOptimizations(): void {
+    this.plugin.markAllDefinesAsDirty();
   }
 }
