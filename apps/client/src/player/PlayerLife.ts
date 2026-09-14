@@ -11,6 +11,8 @@ const DEV_TEAMMATE_ID = 1000;
 export interface PlayerLifeOptions {
   /** DEV `?teammate=1`: a simulated standing teammate, so 0 HP knocks instead of eliminating. */
   readonly teammate?: boolean;
+  /** False: elimination is final (offline bot match: death screen and spectate instead). Default true. */
+  readonly respawn?: boolean;
 }
 
 /**
@@ -20,6 +22,8 @@ export interface PlayerLifeOptions {
 export class PlayerLife {
   private respawnTimer = 0;
   private reviving = false;
+  /** Offline respawn after elimination; the offline match turns it off (`respawn: false` does the same). */
+  respawnEnabled: boolean;
   private readonly tickObserver: Observer<PlayerTick>;
   private readonly vitalsObserver: Observer<VitalsViewEvent>;
   private readonly feet = new Vector3();
@@ -30,6 +34,7 @@ export class PlayerLife {
     private readonly control: EquipmentPlayerControl,
     private readonly options: PlayerLifeOptions = {},
   ) {
+    this.respawnEnabled = options.respawn !== false;
     control.canBeKnocked = options.teammate === true;
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
     this.vitalsObserver = equipment.onVitals.add((event) => this.onVitals(event));
@@ -68,6 +73,10 @@ export class PlayerLife {
     switch (event.type) {
       case "eliminated": {
         this.stopRevive();
+        if (!this.respawnEnabled) {
+          console.info(`[life] eliminated by ${event.killerId < 0 ? "the world" : `#${event.killerId}`} (${event.cause})`);
+          break;
+        }
         this.respawnTimer = RESPAWN_SECONDS;
         // The HUD's death recap listens to the same event; this is the console trail.
         console.info(`[life] eliminated by ${event.killerId < 0 ? "the world" : `#${event.killerId}`} (${event.cause}); respawning in ${RESPAWN_SECONDS} s`);

@@ -1,4 +1,4 @@
-import { Ray, Vector3, type DynamicTexture, type Observer, type Scene } from "@babylonjs/core";
+import { Color3, Ray, Vector3, type DynamicTexture, type Observer, type Scene } from "@babylonjs/core";
 import {
   MOVEMENT,
   SIMULATION,
@@ -7,6 +7,7 @@ import {
   type FiredShot,
   type ThrowableKind,
   type HitZone,
+  type Vec3,
   type Projectile,
   type WeaponDef,
   type WeaponEvent,
@@ -32,7 +33,7 @@ import {
   type BloodBody,
 } from "./BloodEffects";
 import { bloodSettings, type BloodSettings } from "./bloodSettings";
-import { createFxAtlas } from "./fxAtlas";
+import { createFxAtlas, FxCell } from "./fxAtlas";
 import { FxBatch } from "./FxBatch";
 import { ImpactEffects } from "./ImpactEffects";
 import { MuzzleFlash } from "./MuzzleFlash";
@@ -47,6 +48,15 @@ const TICK_SECONDS = 1 / SIMULATION.tickRate;
 const HIT_ZONE_RANK: Readonly<Record<HitZone, number>> = { limb: 0, body: 1, head: 2 };
 /** On-screen floor for blood mist, px (half size), so a hit still reads as a puff through a scope at 150 m. */
 const BLOOD_MIST_MIN_PIXELS = 3;
+/** Remote (bot) bullets drawn as tracers and tested for near misses at once. */
+const REMOTE_PROJECTILE_CAPACITY = 64;
+const REMOTE_FLASH_CAPACITY = 16;
+const REMOTE_FLASH_SECONDS = 0.05;
+/** Third-person flashes read at distance: bigger than the viewmodel's. */
+const REMOTE_FLASH_SCALE = 2.2;
+const REMOTE_PROJECTILE_ID_BASE = 1 << 28;
+const REMOTE_FLASH_CORE = Color3.FromHexString("#fff2b0");
+const REMOTE_FLASH_GLOW = Color3.FromHexString("#ff8a2a");
 
 interface PendingEject {
   time: number;
@@ -112,6 +122,17 @@ export class WeaponPresentation {
   private readonly up = new Vector3();
   private readonly forward = new Vector3();
   private readonly shotDirection = new Vector3();
+
+  // Remote actors (offline match bots): straight-line bullets for tracers and near misses, world-space muzzle flashes.
+  private readonly remoteProjectiles = Array.from({ length: REMOTE_PROJECTILE_CAPACITY }, () => new RemoteProjectile());
+  private readonly remoteFlashes = Array.from({ length: REMOTE_FLASH_CAPACITY }, () => ({ position: new Vector3(), forward: new Vector3(), remaining: 0, size: 0, rotation: 0 }));
+  private readonly tracerExtra: Projectile[] = [];
+  private nextRemoteId = REMOTE_PROJECTILE_ID_BASE;
+  private readonly remoteMuzzle = new Vector3();
+  private readonly remotePoint = new Vector3();
+  private readonly remoteNormal = new Vector3();
+  private readonly remoteDirection = new Vector3();
+  private readonly flashTip = new Vector3();
 
   // DEV preview state (see debug* methods).
   private previewWeapon: WeaponId | null = null;
@@ -207,6 +228,66 @@ export class WeaponPresentation {
   /** Connects the local player's equipment: hands, grenades, smoke, fire, flash (Game.ts wiring). */
   attachEquipment(equipment: EquipmentView): void {
     this.equipment.attach(equipment);
+  }
+
+  // --- Remote actors (offline match bots; remote players later) ------------------------------------------------------
+
+  /** A character blood wounds attach to, by the damageable id its hits report (bots register their soldiers). */
+  registerBody(id: string, body: BloodBody): void {
+    this.bodies.set(id, body);
+  }
+
+  unregisterBody(id: string): void {
+    this.bodies.delete(id);
+  }
+
+  /**
+   * A shot by an actor the client doesn't simulate: spatial gunshot, world-space muzzle flash and tracers from `muzzle`
+   * (the third-person rifle), near-miss cracks. `forward` is the unit barrel direction.
+   */
+  playRemoteShot(shot: FiredShot, muzzle: Vec3, forward: Vec3): void {
+    this.audio.remoteShot(shot.weaponId, muzzle);
+    this.remoteMuzzle.set(muzzle.x, muzzle.y, muzzle.z);
+    this.tracers.recordShot(shot, this.remoteMuzzle);
+    const def = getWeaponDef(shot.weaponId);
+    for (let i = 0; i < shot.directions.length; i++) {
+      const projectile = this.remoteProjectiles.find((p) => !p.active) ?? oldestRemote(this.remoteProjectiles);
+      projectile.launch(this.nextRemoteId++, shot.shotId, def, shot.origin, shot.directions[i]!);
+    }
+    const flash = this.remoteFlashes.find((f) => f.remaining <= 0) ?? this.remoteFlashes[0]!;
+    const profile = VIEWMODEL_PROFILES[shot.weaponId].muzzleFlash;
+    flash.position.set(muzzle.x, muzzle.y, muzzle.z);
+    flash.forward.set(forward.x, forward.y, forward.z);
+    flash.remaining = REMOTE_FLASH_SECONDS;
+    flash.size = profile.size * REMOTE_FLASH_SCALE * (0.8 + Math.random() * 0.4);
+    flash.rotation = Math.random() * Math.PI * 2;
+  }
+
+  /**
+   * A remote bullet struck: ends its tracer, then dust and a bullet hole on the world, or blood on the registered body
+   * `targetId` (null for the local player, who gets no wound decals). `direction` is the unit bullet direction.
+   */
+  playRemoteImpact(weaponId: WeaponId, point: Vec3, normal: Vec3, direction: Vec3, hit: { readonly targetId: string | null; readonly zone: HitZone } | null): void {
+    const p = this.remotePoint.set(point.x, point.y, point.z);
+    const n = this.remoteNormal.set(normal.x, normal.y, normal.z);
+    this.remoteDirection.set(direction.x, direction.y, direction.z);
+    for (const projectile of this.remoteProjectiles) if (projectile.active && projectile.weaponId === weaponId) projectile.stopAt(p);
+    this.tracers.noteImpact(weaponId, p);
+    let sound = this.impactSoundsThisFrame < MAX_IMPACT_SOUNDS_PER_FRAME;
+    if (!hit) {
+      this.impacts.world(p, n, weaponId === "sniper");
+      if (sound) this.audio.remoteImpact(weaponId, p, n, null);
+    } else if (hit.targetId !== null) {
+      const first = this.blood.hit(hit.targetId, this.bodies.get(hit.targetId) ?? null, p, n, this.remoteDirection, hit.zone, weaponId === "sniper");
+      sound &&= first;
+      if (sound) this.audio.remoteImpact(weaponId, p, n, hit.zone);
+    }
+    if (sound) this.impactSoundsThisFrame++;
+  }
+
+  /** The body `targetId` died from its pending hit: a bigger burst and a pool. */
+  playRemoteKill(targetId: string): void {
+    this.blood.kill(targetId);
   }
 
   /** Procedural throwable and consumable models, shared with the loot renderer (`presentationLootModels`). */
@@ -389,6 +470,16 @@ export class WeaponPresentation {
     }
 
     this.stepDebugProjectiles(dt);
+    const extra = this.tracerExtra;
+    extra.length = 0;
+    for (let i = 0; i < this.debugProjectiles.length; i++) extra.push(this.debugProjectiles[i]!);
+    const remoteShots = this.audio.remoteShots;
+    remoteShots.length = 0;
+    for (const projectile of this.remoteProjectiles) {
+      if (!projectile.active || !projectile.advance(dt)) continue;
+      extra.push(projectile);
+      remoteShots.push(projectile);
+    }
 
     this.worldAdditive.begin();
     this.worldAlpha.begin();
@@ -397,7 +488,8 @@ export class WeaponPresentation {
     this.bloodParticles.begin();
     this.bloodDecals.begin();
     this.flash.update(dt, this.muzzle, this.muzzleForward, this.viewmodel.visible);
-    this.tracers.update(dt, camera.position, this.combat.projectiles, this.debugProjectiles);
+    this.tracers.update(dt, camera.position, this.combat.projectiles, extra);
+    this.drawRemoteFlashes(dt);
     this.sparks.update(dt);
     this.dust.update(dt);
     this.impacts.update(dt);
@@ -480,6 +572,19 @@ export class WeaponPresentation {
 
   // --- Helpers -----------------------------------------------------------------------------------------------------
 
+  private drawRemoteFlashes(dt: number): void {
+    for (const flash of this.remoteFlashes) {
+      if (flash.remaining <= 0) continue;
+      flash.remaining -= dt;
+      const size = flash.size;
+      const f = flash.forward;
+      this.flashTip.set(flash.position.x + f.x * size * 3, flash.position.y + f.y * size * 3, flash.position.z + f.z * size * 3);
+      this.worldAdditive.sprite(flash.position, size * 2.2, 0, FxCell.glow, REMOTE_FLASH_GLOW, 0.45);
+      this.worldAdditive.sprite(flash.position, size * 1.3, flash.rotation, FxCell.star, REMOTE_FLASH_CORE, 1, 1.4);
+      this.worldAdditive.streak(flash.position, this.flashTip, size * 0.8, FxCell.flame, REMOTE_FLASH_GLOW, 1, 1, 0.9);
+    }
+  }
+
   private fillFrame(): ViewmodelFrame {
     const combat = this.combat;
     const combatWeapon = combat.activeWeapon;
@@ -535,6 +640,67 @@ export class WeaponPresentation {
       }
     }
   }
+}
+
+/** Straight-line visual bullet of a remote shooter; the shooter's simulation decides hits (impact events stop it). */
+class RemoteProjectile implements Projectile {
+  id = 0;
+  shotId = 0;
+  weaponId: WeaponId = "rifle";
+  readonly position = new Vector3();
+  readonly velocity = new Vector3();
+  distance = 0;
+  age = 0;
+  active = false;
+  private readonly origin = new Vector3();
+  private readonly direction = new Vector3();
+  private readonly tmp = new Vector3();
+  private speed = 1;
+  private maxRange = 0;
+  private stopDistance = Infinity;
+
+  launch(id: number, shotId: number, def: WeaponDef, origin: Vec3, direction: Vec3): void {
+    this.id = id;
+    this.shotId = shotId;
+    this.weaponId = def.id;
+    this.speed = def.muzzleVelocity;
+    this.maxRange = def.maxRangeMeters;
+    this.origin.set(origin.x, origin.y, origin.z);
+    this.direction.set(direction.x, direction.y, direction.z);
+    this.velocity.copyFrom(this.direction).scaleInPlace(this.speed);
+    this.position.copyFrom(this.origin);
+    this.distance = 0;
+    this.age = 0;
+    this.stopDistance = Infinity;
+    this.active = true;
+  }
+
+  /** Ends the flight at `point` when it lies on this bullet's line (within 0.6 m) ahead of the muzzle. */
+  stopAt(point: Vector3): void {
+    point.subtractToRef(this.origin, this.tmp);
+    const along = Vector3.Dot(this.tmp, this.direction);
+    if (along < 0 || along > this.stopDistance) return;
+    if (this.tmp.lengthSquared() - along * along > 0.36) return;
+    this.stopDistance = along;
+  }
+
+  /** Returns false once the bullet is gone (hit or out of range). */
+  advance(dt: number): boolean {
+    this.age += dt;
+    this.distance = Math.min(this.distance + this.speed * dt, this.stopDistance);
+    if (this.distance >= this.stopDistance || this.distance > this.maxRange || this.age > 3) {
+      this.active = false;
+      return false;
+    }
+    this.position.copyFrom(this.direction).scaleInPlace(this.distance).addInPlace(this.origin);
+    return true;
+  }
+}
+
+function oldestRemote(projectiles: readonly RemoteProjectile[]): RemoteProjectile {
+  let oldest = projectiles[0]!;
+  for (const projectile of projectiles) if (projectile.age > oldest.age) oldest = projectile;
+  return oldest;
 }
 
 /** Straight-line stand-in for a combat projectile, used only by debugFire(). */

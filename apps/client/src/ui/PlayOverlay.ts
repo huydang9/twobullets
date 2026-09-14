@@ -27,6 +27,17 @@ const SYSTEM_CONTROLS: readonly ControlRow[] = [
 
 const CREDITS_PLACEHOLDER = "No third-party asset credits yet.";
 
+/** Offline bot match setup shown above "click to play" (`?bots=1`). */
+export interface MatchSetup {
+  readonly difficulties: readonly string[];
+  readonly difficulty: string;
+  onDifficulty(difficulty: string): void;
+  /** Replaces "CLICK TO PLAY". */
+  readonly playLabel?: string;
+  /** Small line under the picker ("Map v1 · 5 teams × 2 · seed 1234"). */
+  readonly details?: string;
+}
+
 /** If pointer lock hasn't arrived this long after a click, assume the browser refused it. */
 const LOCK_TIMEOUT_MS = 300;
 
@@ -34,6 +45,8 @@ const LOCK_TIMEOUT_MS = 300;
 export class PlayOverlay {
   private readonly node: HTMLDivElement;
   private readonly hint: HTMLDivElement;
+  private readonly play: HTMLDivElement;
+  private matchSetup: HTMLDivElement | null = null;
   private readonly creditsToggle: HTMLButtonElement;
   private readonly creditsSection: HTMLDivElement;
   private readonly creditsList: HTMLUListElement;
@@ -48,7 +61,7 @@ export class PlayOverlay {
     el("h1", "tb-title__name", "TWOBULLETS", header);
     el("div", "tb-title__tagline", "Prototype · Battle Royale", header);
 
-    el("div", "tb-play", "CLICK TO PLAY", panel);
+    this.play = el("div", "tb-play", "CLICK TO PLAY", panel);
     this.hint = el("div", "tb-hint", "Mouse lock was blocked. Wait a moment, then click again.", panel);
     this.hint.hidden = true;
 
@@ -93,6 +106,35 @@ export class PlayOverlay {
   set visible(visible: boolean) {
     this.node.hidden = !visible;
     if (!visible) this.hideHint();
+  }
+
+  /** Shows the difficulty picker for an offline bot match (null removes it). Clicks on it don't start the game. */
+  setMatchSetup(setup: MatchSetup | null): void {
+    this.matchSetup?.remove();
+    this.matchSetup = null;
+    this.play.textContent = setup?.playLabel ?? "CLICK TO PLAY";
+    if (!setup) return;
+    const root = el("div", "tb-matchsetup", undefined);
+    root.addEventListener("click", (event) => event.stopPropagation());
+    el("div", "tb-matchsetup__label", "Bot difficulty", root);
+    const group = el("div", "tb-matchsetup__group", undefined, root);
+    group.setAttribute("role", "radiogroup");
+    const buttons: HTMLButtonElement[] = [];
+    for (const difficulty of setup.difficulties) {
+      const button = el("button", "tb-matchsetup__option", difficulty, group);
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(difficulty === setup.difficulty));
+      button.addEventListener("click", () => {
+        for (const other of buttons) other.setAttribute("aria-checked", String(other === button));
+        button.blur();
+        setup.onDifficulty(difficulty);
+      });
+      buttons.push(button);
+    }
+    if (setup.details) el("div", "tb-matchsetup__details", setup.details, root);
+    this.play.before(root);
+    this.matchSetup = root;
   }
 
   /** Replaces the attribution lines (plain text). Rare, so the list is simply rebuilt. */

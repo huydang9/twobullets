@@ -12,6 +12,7 @@ import {
   createEquipmentWorld,
   createGroundLoot,
   createOfflineInventory,
+  createInventory,
   createPlayerEquipment,
   createTestLoot,
   cookProgress,
@@ -42,12 +43,14 @@ import {
   wantsAutoPickup,
   withArmor,
   type ConsumableItemId,
+  type DamageOutcome,
   type DamageRequest,
   type DropTarget,
   type EquipmentInput,
   type EquipmentModifiers,
   type EquipmentWorld,
   type EquipmentWorldEvent,
+  type FlashExposure,
   type GroundLoot,
   type InventoryState,
   type ItemInstance,
@@ -60,6 +63,7 @@ import {
   type RayHit,
   type RaycastFn,
   type ThrowEvent,
+  type ThrowRelease,
   type ThrowableKind,
   type ThrowableSnapshot,
   type Vec3,
@@ -116,10 +120,22 @@ export interface EquipmentInputSource {
   wheelDelta(): number;
 }
 
-/** A non-player damageable that grenades and fire can reach (practice soldiers). */
+/**
+ * A non-player damageable that grenades and fire can reach (practice soldiers, offline match bots). Its equipment
+ * entity id is its index in `targets()` + 1, so match bots list every slot 1..n in slot order (index = slot − 1).
+ */
 export interface EquipmentTarget extends Damageable {
   /** Feet position, world space. */
   readonly feet: Vec3;
+  /** Team for area effects (default: its own team, index + 1). */
+  readonly team?: number;
+  /** Posture for blast exposure (default stand). */
+  readonly posture?: WorldEntity["posture"];
+  /** Eye position and view direction for flashbang exposure (default: standing eye height, facing +Z). */
+  readonly eye?: Vec3;
+  readonly viewDir?: Vec3;
+  /** Flashbang exposure on this target (bots go blind and deaf). */
+  applyFlash?(exposure: FlashExposure): void;
 }
 
 export interface EquipmentOptions {
@@ -143,8 +159,8 @@ const ARC_POINTS = 96;
 /** Ticks between nearby-loot refreshes (10 Hz). */
 const LOOT_QUERY_TICKS = 6;
 const SMOKE_UPDATE_TICKS = 15;
-/** Equipment rays see static world only: not hitbox triggers, not player blockers. */
-const WORLD_COLLIDE_MASK = ~(CollisionLayer.hitbox | CollisionLayer.blocker);
+/** Equipment rays see static world only: not hitbox triggers, player blockers or character capsules. */
+const WORLD_COLLIDE_MASK = ~(CollisionLayer.hitbox | CollisionLayer.blocker | CollisionLayer.player);
 /** The client allows this much past INTERACT.reach for latency and eye jitter; the server re-checks. */
 const PICKUP_SLACK = 0.4;
 /** Items lying within this horizontal radius of the feet (and height band) are auto-picked up. */
@@ -209,6 +225,9 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
   /** Teammate the local player is reviving, and one in reach for the prompt. */
   private revivingTarget: ReviveTarget | null = null;
   private reviveCandidate: ReviveTarget | null = null;
+  /** Replace the constructor's `targets`/`teammates` options (offline match wiring after construction). */
+  private targetsSource: (() => readonly EquipmentTarget[]) | null = null;
+  private teammatesSource: (() => readonly ReviveTarget[]) | null = null;
 
   constructor(
     scene: Scene,
@@ -338,6 +357,55 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     this.reviverId = reviverId;
   }
 
+  /** Same as `damagePlayer`, returning the vitals outcome (null when nothing was dealt or absorbed). */
+  applyPlayerDamage(hit: PlayerDamage): DamageOutcome | null {
+    return this.damageLocal({ amount: hit.amount, kind: hit.kind, zone: hit.zone ?? null, sourceId: hit.sourceId }, hit.position);
+  }
+
+  /** Overrides the `targets` option: area-effect targets read every tick (offline match bots). Null restores it. */
+  setTargetsSource(source: (() => readonly EquipmentTarget[]) | null): void {
+    this.targetsSource = source;
+  }
+
+  /** Overrides the `teammates` option: downed teammates the local player can revive. Null restores it. */
+  setTeammatesSource(source: (() => readonly ReviveTarget[]) | null): void {
+    this.teammatesSource = source;
+  }
+
+  /** A throwable released by an actor the client doesn't step here (an offline match bot); `slot` is its entity id. */
+  spawnExternalRelease(release: ThrowRelease, slot: number): number {
+    return spawnRelease(this.world, release, slot, slot, this.raycaster.cast);
+  }
+
+  /**
+   * Death drop: the whole inventory (weapons with magazines, armor, backpack, stacks) as one ground pile around
+   * `position`, settled on the floor; the inventory is emptied. Returns the number of ground items.
+   */
+  dropInventoryAt(position: Vec3, pileId = -1): number {
+    const inv = this.state.inventory;
+    const items: ItemInstance[] = [];
+    for (const weapon of inv.weapons) if (weapon) items.push({ itemId: `weapon_${weapon.weaponId}`, quantity: 1, magazine: weapon.magazine });
+    if (inv.helmet) items.push({ itemId: `helmet_${inv.helmet.level}`, quantity: 1, durability: inv.helmet.durability });
+    if (inv.vest) items.push({ itemId: `vest_${inv.vest.level}`, quantity: 1, durability: inv.vest.durability });
+    if (inv.backpack > 0) items.push({ itemId: `backpack_${inv.backpack as 1 | 2 | 3}`, quantity: 1 });
+    for (const stack of inv.stacks) if (stack.quantity > 0) items.push({ itemId: stack.itemId, quantity: stack.quantity });
+    this.raycaster.ignoreBody = this.player.physicsBody;
+    const below = this.raycaster.cast({ x: position.x, y: position.y + 0.5, z: position.z }, { x: position.x, y: position.y - 30, z: position.z });
+    const floorY = below ? below.point.y : position.y;
+    items.forEach((item, k) => {
+      const angle = (k / Math.max(1, items.length)) * Math.PI * 2;
+      const r = items.length > 1 ? 0.35 + 0.05 * (k % 3) : 0;
+      dropGroundItem(this.groundLoot, item, [position.x + Math.sin(angle) * r, floorY, position.z + Math.cos(angle) * r], pileId);
+    });
+    this.cancelTeammateRevive();
+    this.state = { ...this.state, inventory: createInventory() };
+    this.inHandThrows.clear();
+    this.arc.visible = false;
+    this.arc.count = 0;
+    this.loadoutVersion++;
+    return items.length;
+  }
+
   resetLoadout(inventory: InventoryState = createOfflineInventory()): void {
     this.cancelTeammateRevive();
     this.state = createPlayerEquipment(inventory);
@@ -401,7 +469,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
 
     this.stepInteraction(input, ctx, dt);
 
-    const targets = this.options.targets?.() ?? [];
+    const targets = (this.targetsSource ?? this.options.targets)?.() ?? [];
     const entities = this.worldEntities(ctx, targets);
     this.worldEvents.length = 0;
     stepEquipmentWorld(this.world, dt, raycast, entities, this.worldEvents);
@@ -465,7 +533,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
   private findReviveCandidate(ctx: TickContext): ReviveTarget | null {
     let best: ReviveTarget | null = null;
     let bestDistance = Infinity;
-    for (const mate of this.options.teammates?.() ?? []) {
+    for (const mate of (this.teammatesSource ?? this.options.teammates)?.() ?? []) {
       if (mate.id === LOCAL_PLAYER_ID || mate.vitals.life !== "downed" || !this.inReviveReach(mate, ctx)) continue;
       const distance = len2(mate.feet.x - ctx.feet.x, mate.feet.z - ctx.feet.z);
       if (distance < bestDistance) {
@@ -526,7 +594,15 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     targets.forEach((target, index) => {
       if (!target.alive) return;
       const { x, y, z } = target.feet;
-      entities.push({ id: index + 1, team: index + 1, feet: { x, y, z }, posture: "stand", eye: { x, y: y + eyeHeightFor("stand"), z }, viewDir: { x: 0, y: 0, z: 1 } });
+      const posture = target.posture ?? "stand";
+      entities.push({
+        id: index + 1,
+        team: target.team ?? index + 1,
+        feet: { x, y, z },
+        posture,
+        eye: target.eye ?? { x, y: y + eyeHeightFor(posture === "stand" ? "stand" : "crouch"), z },
+        viewDir: target.viewDir ?? { x: 0, y: 0, z: 1 },
+      });
     });
     return entities;
   }
@@ -590,6 +666,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
         break;
       case "flashed":
         if (event.targetId === LOCAL_PLAYER_ID) this.flashLocal(event.exposure, ctx);
+        else targets[event.targetId - 1]?.applyFlash?.(event.exposure);
         break;
       case "damage": {
         const { request } = event;
@@ -613,11 +690,11 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
   }
 
   /** Every hit on the local player (grenades, fire, falls, later bullets): armor → health → knocked/eliminated. */
-  private damageLocal(hit: VitalsHit, position: Vec3): void {
+  private damageLocal(hit: VitalsHit, position: Vec3): DamageOutcome | null {
     const before = this.state.vitals;
     const worn = armorLoadout(this.state.inventory);
     const outcome = applyDamage(before, worn, hit, { canBeKnocked: this.canBeKnocked });
-    if (outcome.dealt <= 0 && outcome.armorResult.absorbed <= 0) return;
+    if (outcome.dealt <= 0 && outcome.armorResult.absorbed <= 0) return null;
     this.state = { ...this.state, vitals: outcome.vitals, inventory: withArmor(this.state.inventory, outcome.armor) };
 
     const armor = outcome.armorResult;
@@ -636,6 +713,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
       this.reviverId = null;
       this.onVitals.notifyObservers({ type: "eliminated", killerId: outcome.killerId, cause: hit.kind });
     }
+    return outcome;
   }
 
   private damageTarget(request: DamageRequest, target: EquipmentTarget | undefined): void {
@@ -643,7 +721,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     const feet = target.feet;
     const point = new Vector3(feet.x, feet.y + 1, feet.z);
     const direction = point.subtract(new Vector3(request.position.x, request.position.y, request.position.z)).normalize();
-    const result = target.applyDamage({ colliderId: `${target.id}/area`, zone: "body", amount: request.amount, kind: request.kind, point, direction });
+    const result = target.applyDamage({ colliderId: `${target.id}/area`, zone: "body", amount: request.amount, kind: request.kind, point, direction, sourceId: request.sourceId });
     if (!result) return;
     this.onAreaDamage.notifyObservers({
       targetId: target.id,

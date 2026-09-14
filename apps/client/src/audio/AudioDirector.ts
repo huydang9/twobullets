@@ -5,6 +5,7 @@ import type { EquipmentView } from "../equipment/types";
 import type { PlayerController } from "../player/PlayerController";
 import type { TargetRange } from "../targets/TargetRange";
 import type { ClipPlan } from "../viewmodel/clipPlans";
+import type { Vec3Like } from "./acoustics";
 import { AmbienceSystem } from "./AmbienceSystem";
 import { AudioDebug } from "./AudioDebug";
 import { AudioEngine } from "./AudioEngine";
@@ -35,6 +36,8 @@ export class AudioDirector {
   readonly debug: AudioDebug | null = null;
   /** Extra bullets to test for fly-bys (DEV fly-by generator; remote tracer sims later). */
   readonly flyBys: Projectile[] = [];
+  /** Bullets of actors the client doesn't simulate (offline match bots), for near-miss cracks. Owned by WeaponPresentation. */
+  readonly remoteShots: Projectile[] = [];
 
   private readonly nearMiss: NearMissDetector;
   private equipment: EquipmentAudio | null = null;
@@ -42,7 +45,7 @@ export class AudioDirector {
   private readonly forward = new Vector3();
   private readonly up = new Vector3();
   private readonly ownShots = { projectiles: [] as readonly Projectile[], own: true };
-  private readonly projectileLists = [this.ownShots, { projectiles: this.flyBys, own: false }];
+  private readonly projectileLists = [this.ownShots, { projectiles: this.flyBys, own: false }, { projectiles: this.remoteShots, own: false }];
 
   constructor(
     scene: Scene,
@@ -115,6 +118,19 @@ export class AudioDirector {
 
   hitConfirm(zone: HitZone, killed: boolean): void {
     this.audio.playHitConfirm({ zone, killed });
+  }
+
+  // --- Remote actors (offline match bots, remote players) -----------------------------------------------------------
+
+  /** Spatial gunshot with distance, occlusion and speed-of-sound delay (the remote-player mix). */
+  remoteShot(weaponId: WeaponId, muzzle: Vec3Like): void {
+    this.audio.playGunshot({ weaponId, position: muzzle, shooterIsLocal: false });
+  }
+
+  /** Remote bullet into the world or a character (flesh when `zone` is set). */
+  remoteImpact(weaponId: WeaponId, point: Vec3Like, normal: Vec3Like, zone: HitZone | null): void {
+    if (zone) this.audio.playImpact({ position: point, weaponId, surface: "flesh", zone });
+    else this.audio.playImpact({ position: point, normal, weaponId });
   }
 
   casing(weaponId: WeaponId, position: Vector3): void {

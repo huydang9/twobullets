@@ -7,7 +7,7 @@ import { CombatHud } from "./CombatHud";
 import { Crosshair } from "./Crosshair";
 import { el } from "./dom";
 import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEquipment";
-import { PlayOverlay } from "./PlayOverlay";
+import { PlayOverlay, type MatchSetup } from "./PlayOverlay";
 import { StatsPanel } from "./StatsPanel";
 import "./hud.css";
 
@@ -62,6 +62,7 @@ export class Hud {
   private audioCredits: readonly string[] = [];
   private scene: Scene | undefined;
   private locked = false;
+  private modal = false;
   private inspectorOpen = false;
   private forceVisible = false;
   private lastUpdate = -1;
@@ -82,6 +83,26 @@ export class Hud {
   setLocked(locked: boolean): void {
     this.locked = locked;
     this.overlay.setLocked(locked);
+    this.refreshVisibility();
+  }
+
+  /**
+   * Offline bot match: marks the HUD as match mode (hides the offline respawn recap and the local-only kill feed, which
+   * the match HUD replaces) and returns a layer for the match HUD above the combat HUD.
+   */
+  mountMatchLayer(): HTMLDivElement {
+    this.container.classList.add("tb-hud--match");
+    return el("div", "tb-match", undefined, this.container);
+  }
+
+  /** Difficulty picker on the play overlay (`?bots=1`); null removes it. */
+  setMatchSetup(setup: MatchSetup | null): void {
+    this.overlay.setMatchSetup(setup);
+  }
+
+  /** A match screen (death, result) with its own buttons is open: the click-to-play overlay stays hidden meanwhile. */
+  setModal(open: boolean): void {
+    this.modal = open;
     this.refreshVisibility();
   }
 
@@ -266,7 +287,7 @@ export class Hud {
 
   private refreshVisibility(): void {
     const playing = this.locked || this.forceVisible;
-    this.overlay.visible = !playing && !this.inspectorOpen;
+    this.overlay.visible = !playing && !this.inspectorOpen && !this.modal;
     this.crosshair.visible = playing;
     this.inspectorTag.hidden = !this.inspectorOpen || playing;
     this.container.classList.toggle("tb-hud--inspector", this.inspectorOpen);

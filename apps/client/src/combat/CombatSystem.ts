@@ -55,6 +55,11 @@ const SCOPE_ZOOM_START = 0.72;
 const SCOPE_ZOOM_END = 0.92;
 const SCOPE_PRE_ZOOM = 0.15;
 
+export interface CombatSystemOptions {
+  /** False skips the level's practice soldiers (offline bot match: bots are the targets). Default true. */
+  readonly targets?: boolean;
+}
+
 /**
  * Local player's weapons: ticks the shared weapon simulation in lockstep with movement, flies projectiles
  * against Havok, applies damage to practice soldiers, and drives ADS zoom and sensitivity on the player. Movement
@@ -100,6 +105,7 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     level: LevelData,
     environment: Environment,
     assets: AssetLibrary,
+    options: CombatSystemOptions = {},
   ) {
     this.inputQueue = new CombatInputQueue(input);
     this.raycaster = new WorldRaycaster(scene, {
@@ -107,7 +113,7 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
       shouldHitTriggers: true,
       colliderIdOf: (body) => this.hitboxes.colliderIdOf(body),
     });
-    this.targets = new TargetRange(scene, level.targets, this.hitboxes, environment, assets);
+    this.targets = new TargetRange(scene, options.targets === false ? [] : level.targets, this.hitboxes, environment, assets);
     this.targetsAlive = this.targets.dummies.map((dummy) => dummy.alive);
     if (globalThis.location && new URLSearchParams(globalThis.location.search).get("targetArmor") === "1") {
       this.targets.dummies.forEach((dummy, index) => this.targetArmor.issue(dummy.id, testTargetArmor(index)));
@@ -126,6 +132,11 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     this.loadoutVersion = -1;
     this.fireLatched = false;
     if (!equipment) this.weaponState = createWeaponState(DEFAULT_LOADOUT);
+  }
+
+  /** Bullet hitbox registry: other damageables (offline match bots) register their bone hitboxes here. */
+  get hitboxRegistry(): HitboxRegistry {
+    return this.hitboxes;
   }
 
   get activeWeapon(): WeaponDef {
@@ -293,9 +304,9 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
       killed: damage.killed,
       point,
       distance,
-      armorAbsorbed: armor.absorbed,
-      armorSlot: armor.slot,
-      armorDestroyed: armor.destroyed,
+      armorAbsorbed: damage.armorAbsorbed ?? armor.absorbed,
+      armorSlot: damage.armorSlot !== undefined ? damage.armorSlot : armor.slot,
+      armorDestroyed: damage.armorDestroyed ?? armor.destroyed,
     });
   }
 

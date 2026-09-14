@@ -7,6 +7,7 @@ import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";
 import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
 import { LootRenderer, presentationLootModels } from "../equipment/loot";
+import { OfflineMatch, readOfflineMatchOptions } from "../match";
 import { NET_MOVEMENT, NetGame, readNetConfig } from "../net/NetGame";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
@@ -45,6 +46,7 @@ export class Game {
     private readonly world: MapRuntime | null,
     private readonly perf: PerfTools | null,
     private readonly dynamicResolution: DynamicResolution | null,
+    private readonly match: OfflineMatch | null,
   ) {}
 
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement): Promise<Game> {
@@ -67,7 +69,10 @@ export class Game {
     // DEV: `?map=v1` loads the full Map v1; no query (or `?map=arena`) keeps the blockout arena.
     // DEV: `?net=` joins a match server (arena only in M3).
     const netConfig = import.meta.env.DEV && !benchmark ? readNetConfig(params) : null;
-    const mapV1 = import.meta.env.DEV && !netConfig && (params.get("map") === "v1" || benchmark === "v1");
+    // DEV: `?bots=1` runs the offline bot match (docs/bots/design.md §11); it implies `?map=v1`.
+    const matchOptions = readOfflineMatchOptions(window.location.search);
+    const botsMatch = import.meta.env.DEV && !benchmark && !netConfig && matchOptions.enabled;
+    const mapV1 = import.meta.env.DEV && !netConfig && (params.get("map") === "v1" || benchmark === "v1" || botsMatch);
     if (netConfig && params.get("map") === "v1") console.warn("[net] ?map=v1 is ignored in networked play (the M3 server runs the arena)");
     const environment = createEnvironment(scene, { largeWorld: mapV1 });
     // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
@@ -93,7 +98,7 @@ export class Game {
     scene.activeCamera = player.camera;
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
-    const combat = new CombatSystem(scene, input, player, levelData, environment, assets);
+    const combat = new CombatSystem(scene, input, player, levelData, environment, assets, { targets: !botsMatch });
     // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
     // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
     const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
@@ -124,9 +129,11 @@ export class Game {
     // Tab: releases pointer lock while open and asks for it again on close (the play overlay's click is the fallback).
     const inventory = new InventoryScreen(hudRoot, equipment, input);
     // DEV: `?teammate=1` simulates a standing teammate, so 0 HP knocks (revive with `__twobullets.life.revive()`).
-    const life = new PlayerLife(player, equipment, equipment, { teammate: import.meta.env.DEV && params.get("teammate") === "1" });
+    const life = new PlayerLife(player, equipment, equipment, { teammate: import.meta.env.DEV && params.get("teammate") === "1", respawn: !botsMatch });
 
     installDebugTools(scene, input, { hud });
+    // Builds the nav grid (≈0.5 s), pooled bot soldiers and the spawn plan; the match starts on the first pointer lock.
+    const match = botsMatch && world ? await OfflineMatch.create({ scene, input, player, combat, equipment, life, presentation, hud, world, assets, environment }, matchOptions) : null;
 
     // DEV: F4 or `?perf=1` stats panel, `?bench=v1` benchmark. Loaded on demand so production builds leave it out.
     let perf: PerfTools | null = null;
@@ -137,7 +144,7 @@ export class Game {
     // Off by default (`?opt=dynamicResolution:1&fps=120`); never during a benchmark, which measures fixed resolutions.
     const dynamicResolution = OPTIMIZATIONS.dynamicResolution && !benchmark ? new DynamicResolution(engine, { targetFps: Number(params.get("fps")) || 120 }) : null;
 
-    const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution);
+    const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution, match);
     if (net) {
       net.attach(scene, player, input, hudRoot, { assets, environment });
       game.net = net;
@@ -146,7 +153,7 @@ export class Game {
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, equipment, life, presentation, hud, loot, inventory, assets, world, perf, net } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, equipment, life, presentation, hud, loot, inventory, assets, world, perf, net, match: match?.createDevHandle() ?? null } });
     }
     game.start();
     return game;
@@ -160,6 +167,7 @@ export class Game {
       // The benchmark poses the camera itself.
       this.net?.update(dt);
       if (!perf?.drivesCamera) this.player.update(dt);
+      this.match?.update(dt);
       this.net?.lateUpdate(dt);
       this.combat.update(dt);
       this.equipment.update();

@@ -2,6 +2,8 @@ import { snapToDevicePixel, setText } from "./anim";
 import { el, textNode } from "./dom";
 
 const PX_PER_DEG = 4;
+/** Half the widest compass window (CSS max width 440px), px: markers beyond it clamp to the edge. */
+export const COMPASS_HALF_WIDTH_PX = 220;
 /**
  * The tape covers one full turn plus a margin on both sides, so any heading in [0, 360) can be centred without
  * wrapping. The margin must exceed half the visible window (CSS max width 440px / 4 px/deg / 2 = 55°).
@@ -68,6 +70,17 @@ export class Compass {
       setText(this.heading, heading.toString());
     }
   }
+}
+
+/**
+ * Horizontal offset from the compass centre, px, of a marker at `bearingDegrees` while the view heads `headingDegrees`
+ * (both 0 = north, 90 = east), clamped to ±`maxPx` (the zone marker and later pings sit on the same scale as the tape).
+ */
+export function compassMarkerOffset(bearingDegrees: number, headingDegrees: number, maxPx = COMPASS_HALF_WIDTH_PX): number {
+  let delta = normalizeDegrees(bearingDegrees - headingDegrees);
+  if (delta > 180) delta -= 360;
+  const px = delta * PX_PER_DEG;
+  return px < -maxPx ? -maxPx : px > maxPx ? maxPx : px;
 }
 
 function normalizeDegrees(deg: number): number {

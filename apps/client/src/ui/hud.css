@@ -1378,3 +1378,451 @@
     opacity: 1;
   }
 }
+
+/* ---------- Offline bot match (`?bots=1`, ui/match) ---------- */
+
+/* The match HUD replaces the local-only kill feed and the offline respawn recap. */
+.tb-hud--match .tb-combat .tb-feed,
+.tb-hud--match .tb-death {
+  display: none;
+}
+
+/* No z-index: the death/result screens (z 4) must stack against the play overlay (z 3). */
+.tb-match {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tb-mhud {
+  position: absolute;
+  inset: 0;
+}
+
+.tb-mhud__stats {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  display: flex;
+  gap: 2px;
+}
+
+.tb-mhud__stat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 9px;
+  background: var(--tb-panel);
+}
+
+.tb-mhud__stat-value {
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-mhud__stat-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tb-text-dim);
+}
+
+.tb-feed--match {
+  top: 46px;
+}
+
+.tb-mfeed__line[data-knock] {
+  color: var(--tb-text-faint);
+}
+
+.tb-mfeed__line[data-mine] {
+  color: var(--tb-text);
+}
+
+.tb-mfeed__line[data-lost] {
+  color: var(--tb-red);
+}
+
+.tb-mfeed__line[data-teamkill]::after {
+  content: " ⚠";
+  color: var(--tb-amber);
+}
+
+/* Zone timer under the compass heading readout. */
+.tb-mhud__zone {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 6px;
+  width: 260px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tb-text-dim);
+  transform: translateX(-50%);
+}
+
+.tb-mhud__zone-time {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text);
+}
+
+.tb-mhud__zone-bar {
+  width: 180px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.tb-mhud__zone-bar-fill {
+  height: 100%;
+  background: #6aa2ff;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.tb-mhud__outside {
+  position: absolute;
+  top: 104px;
+  left: 50%;
+  padding: 3px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #9cc0ff;
+  background: rgba(10, 24, 60, 0.45);
+  transform: translateX(-50%);
+  animation: tb-blink 1.6s ease-in-out infinite;
+}
+
+.tb-mhud__tint {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 48%, rgba(40, 90, 220, 0.34) 100%);
+  transition: opacity 400ms ease-out;
+}
+
+.tb-mhud__tint[data-on] {
+  opacity: 1;
+}
+
+/* Zone marker on the compass tape: same px-per-degree scale, centred under the compass window. */
+.tb-mhud__marker {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 0;
+  will-change: transform;
+}
+
+.tb-mhud__marker-icon {
+  width: 8px;
+  height: 8px;
+  margin-top: 11px;
+  background: #6aa2ff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  transform: rotate(45deg);
+}
+
+.tb-mhud__marker-distance {
+  margin-top: 4px;
+  font-size: 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #9cc0ff;
+}
+
+.tb-mhud__countdown {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  font-size: 64px;
+  font-weight: 300;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transform: translate3d(-50%, -50%, 0);
+}
+
+/* Teammate cards, bottom left. */
+.tb-mhud__team {
+  position: absolute;
+  bottom: 24px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 200px;
+}
+
+.tb-mate {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 8px 6px;
+  background: linear-gradient(90deg, rgba(8, 10, 12, 0.45), transparent);
+}
+
+.tb-mate__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.tb-mate__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-mate__status {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--tb-red);
+}
+
+.tb-mate__arrow {
+  width: 0;
+  height: 0;
+  margin-left: auto;
+  border: 4px solid transparent;
+  border-top: 0;
+  border-bottom: 7px solid var(--tb-text-dim);
+}
+
+.tb-mate__distance {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+.tb-mate__bar {
+  position: relative;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.tb-mate__fill,
+.tb-mate__bleed {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+}
+
+.tb-mate__fill {
+  background: var(--tb-text);
+}
+
+.tb-mate__bleed {
+  background: var(--tb-red);
+  transform: scaleX(0);
+}
+
+.tb-mate__revive {
+  height: 2px;
+  background: #9fd8a4;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.tb-mate[data-downed] .tb-mate__name {
+  color: var(--tb-red);
+}
+
+.tb-mate[data-dead] {
+  opacity: 0.45;
+}
+
+.tb-mhud__spectating {
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 18px;
+  white-space: nowrap;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.5) 20%, rgba(8, 10, 12, 0.5) 80%, transparent);
+  transform: translateX(-50%);
+}
+
+.tb-mhud__spectating-label,
+.tb-mhud__spectating-hint {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tb-text-faint);
+}
+
+.tb-mhud__spectating-hint::after {
+  content: " · Enter menu";
+}
+
+.tb-mhud__spectating-name {
+  font-size: 15px;
+}
+
+/* Death and result screens: above the play overlay's layer, the only clickable part of the match HUD. */
+.tb-mscreen {
+  position: absolute;
+  top: 24%;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 320px;
+  padding: 22px 48px 20px;
+  pointer-events: auto;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.72) 16%, rgba(8, 10, 12, 0.72) 84%, transparent);
+  transform: translateX(-50%);
+}
+
+.tb-mscreen__title {
+  padding-left: 0.3em;
+  font-size: 26px;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  white-space: nowrap;
+}
+
+.tb-mscreen__title[data-accent] {
+  font-weight: 500;
+  color: var(--tb-amber);
+}
+
+.tb-mscreen__subtitle {
+  font-size: 14px;
+  color: var(--tb-text-dim);
+}
+
+.tb-mscreen__stats {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 28px;
+  margin: 4px 0 6px;
+  font-size: 13px;
+}
+
+.tb-mscreen__label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tb-text-faint);
+}
+
+.tb-mscreen__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-mscreen__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.tb-mscreen__button {
+  padding: 8px 22px;
+  font: 500 13px var(--tb-font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tb-stroke);
+  cursor: pointer;
+}
+
+.tb-mscreen__button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-mscreen__button--primary {
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-mscreen__button:disabled {
+  color: var(--tb-text-faint);
+  cursor: default;
+}
+
+/* Difficulty picker on the play overlay. */
+.tb-matchsetup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+
+.tb-matchsetup__label {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--tb-text-faint);
+}
+
+.tb-matchsetup__group {
+  display: flex;
+  gap: 2px;
+}
+
+.tb-matchsetup__option {
+  min-width: 86px;
+  padding: 6px 14px;
+  font: 500 12px var(--tb-font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tb-text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tb-stroke);
+  cursor: pointer;
+}
+
+.tb-matchsetup__option:hover {
+  color: var(--tb-text);
+}
+
+.tb-matchsetup__option[aria-checked="true"] {
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-matchsetup__details {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--tb-text-faint);
+}
+
+/* DEV ?botDebug=1 labels. */
+.tb-botdebug {
+  position: absolute;
+  inset: 0;
+}
+
+.tb-botdebug__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 5px;
+  font: 11px/1.3 var(--tb-mono);
+  white-space: nowrap;
+  color: #ffe38a;
+  background: rgba(0, 0, 0, 0.55);
+  text-shadow: none;
+  will-change: transform;
+}

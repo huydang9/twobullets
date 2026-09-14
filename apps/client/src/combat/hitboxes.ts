@@ -1,12 +1,15 @@
 import type { PhysicsBody, Vector3 } from "@babylonjs/core";
-import type { DamageKind, HitZone } from "@twobullets/shared";
+import type { ArmorSlot, DamageKind, HitZone } from "@twobullets/shared";
 import { CollisionLayer } from "@twobullets/sim";
 
 /** Shape filter membership bits (hitbox, blocker, player), shared with the server through packages/sim. */
 export { CollisionLayer };
 
-/** Bullet raycast filter: everything except blockers, including trigger (hitbox) shapes. */
-export const BULLET_COLLIDE_MASK = ~CollisionLayer.blocker;
+/**
+ * Bullet raycast filter: everything except blockers and character capsules, including trigger (hitbox) shapes. Capsules
+ * (the local player's, offline bots') are movement proxies; the bone hitboxes inside them take the bullets.
+ */
+export const BULLET_COLLIDE_MASK = ~(CollisionLayer.blocker | CollisionLayer.player);
 
 export interface DamageHit {
   readonly colliderId: string;
@@ -19,12 +22,20 @@ export interface DamageHit {
   readonly point: Vector3;
   /** Unit bullet (or blast) direction, world space. */
   readonly direction: Vector3;
+  /** Attacker entity id (match slot) when known: grenades and fire from the equipment world. Bullets are the local player's. */
+  readonly sourceId?: number;
 }
 
 export interface DamageResult {
   readonly amount: number;
   readonly remainingHealth: number;
   readonly killed: boolean;
+  /** Armor the owner soaked itself (match bots wear looted armor); CombatSystem prefers it over TargetArmor. */
+  readonly armorAbsorbed?: number;
+  readonly armorSlot?: ArmorSlot | null;
+  readonly armorDestroyed?: boolean;
+  /** The hit knocked the owner down instead of killing it. */
+  readonly knocked?: boolean;
 }
 
 /** Anything bullets can hurt: practice soldiers now, remote players later. */
