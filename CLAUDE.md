@@ -9,7 +9,7 @@ Browser multiplayer first-person battle royale: **realistic, PUBG-like**. Up to 
 - **Map and match:** teams pick a landing spot, then glide down. Shrinking zone. Match length about 10–12 min. No vehicles.
 - **Order of work:** equipment built offline first, then offline bots on Map v1 (easy/normal/hard), then backend M3–M5 per `docs/backend/architecture.md`.
 
-**Start here:** [`docs/architecture-overview.md`](docs/architecture-overview.md) (stack, layout, frame loop, data flows) and [`docs/README.md`](docs/README.md) (docs index and how-tos).
+**Start here:** read [`docs/STATUS.md`](docs/STATUS.md) first (roadmap, uncommitted work, open feedback, next steps), then [`docs/architecture-overview.md`](docs/architecture-overview.md) (stack, layout, frame loop, data flows) and [`docs/README.md`](docs/README.md) (docs index and how-tos).
 
 ## Stack and layout
 - pnpm monorepo, TypeScript 7, Vite 8, **Babylon.js 9.26 + Havok**, vitest. Node 24.

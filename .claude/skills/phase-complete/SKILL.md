@@ -12,9 +12,8 @@ description: Close out a finished twobullets phase — verify, commit only that 
    - Exclude in-progress work of other running agents and `docs/devlog` (unless the user asked).
    - Message: a summary line plus bullets, ending with the co-author trailer from the system reminder.
    - If a committed file depends on uncommitted work, say so and commit the rest as soon as it lands.
-4. **Update memory** in `~/.claude/projects/-Users-huydang-Documents-02-Huy-twobullets/memory/`:
-   - `project-status-snapshot.md`: the new commit, what's in flight, next steps.
-   - `project-twobullets-direction.md`: any new product decision.
+4. **Update [`docs/STATUS.md`](../../../docs/STATUS.md):** roadmap row and commit hash, uncommitted work, open feedback, pending user actions, next steps. Commit it together with the phase (or right after). Record new product decisions in `CLAUDE.md` as well.
+   Memory in `~/.claude/projects/-Users-huydang-Documents-02-Huy-twobullets/memory/` holds only personal/workflow notes plus a pointer to STATUS.md; update it only if the workflow or the user's preferences changed.
 5. **Update the devlog.** Spawn a `fork` writing agent to update `docs/devlog/` in Vietnamese:
    - a new chapter plus the `00-tong-quan.md` timeline and outline, and `bai-hoc.md` lessons
    - author voice "mình"
