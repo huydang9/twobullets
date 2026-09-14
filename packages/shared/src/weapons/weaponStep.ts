@@ -20,10 +20,12 @@ const TIMER_EPSILON = 1e-6;
 const MAX_MOVE_PENALTY_SCALE = 1.5;
 const DEG_TO_RAD = Math.PI / 180;
 
-export function createWeaponState(loadout: readonly WeaponId[]): WeaponState {
+/** Full magazines and spawn reserve per weapon; null entries are empty slots. Starts on the first filled slot. */
+export function createWeaponState(loadout: readonly (WeaponId | null)[]): WeaponState {
+  const slots = loadout.map((id) => (id === null ? null : { id, magazine: WEAPONS[id].magazineSize, reserve: WEAPONS[id].reserveAmmo }));
   return {
-    slots: loadout.map((id) => ({ id, magazine: WEAPONS[id].magazineSize, reserve: WEAPONS[id].reserveAmmo })),
-    activeIndex: 0,
+    slots,
+    activeIndex: Math.max(0, slots.findIndex((slot) => slot !== null)),
     phase: "ready",
     phaseTimer: 0,
     cooldown: 0,
@@ -143,6 +145,22 @@ export function stepWeapon(state: WeaponState, input: CombatInput, ctx: WeaponCo
     shots,
     events,
   };
+}
+
+/**
+ * The filled slot `steps` notches away from `from` (positive = next), skipping empty slots and wrapping around, or
+ * null when no filled slot exists. Wheel cycling uses it one notch at a time.
+ */
+export function cycleWeaponSlot(slots: readonly (WeaponSlotState | null)[], from: number, steps: number): number | null {
+  const count = slots.length;
+  if (count === 0 || !slots.some((slot) => slot !== null)) return null;
+  const direction = Math.sign(steps);
+  let index = from;
+  for (let notch = 0; notch < Math.abs(steps); notch++) {
+    do index = (((index + direction) % count) + count) % count;
+    while (!slots[index]);
+  }
+  return index;
 }
 
 /** Current spread half-angle in degrees for the active weapon (drives the dynamic crosshair). */

@@ -12,7 +12,7 @@ import {
   type PhysicsShape,
   type Scene,
 } from "@babylonjs/core";
-import { MOVEMENT, computeDesiredVelocity, type MoveInput, type MoveState, type Stance, type Vec3 } from "@twobullets/shared";
+import { MOVEMENT, capsuleHeightFor, capsuleRadiusFor, computeDesiredVelocity, type MoveInput, type MoveState, type Stance, type Vec3 } from "@twobullets/shared";
 
 const DOWN = new Vector3(0, -1, 0);
 const IDENTITY = Quaternion.Identity();
@@ -26,12 +26,12 @@ const BLOCKED_RATIO = 0.9;
 const STEP_PROBE_AHEAD = 0.1;
 /** Rises smaller than this are left to the capsule's rounded bottom, m. */
 const MIN_STEP_RISE = 0.02;
-
-const heightOf = (stance: Stance): number => (stance === "crouch" ? MOVEMENT.crouchHeight : MOVEMENT.standHeight);
+/** The headroom probe starts at least this far above the capsule bottom, so a low (prone) start doesn't touch the floor, m. */
+const HEAD_PROBE_FLOOR_CLEARANCE = 0.1;
 
 /**
  * Engine side of player movement: wraps Havok's PhysicsCharacterController (support queries, collide-and-slide,
- * slope limits), ground snapping, step climbing and the crouch capsule. Feet positions are ground-contact points.
+ * slope limits), ground snapping, step climbing and the crouch/prone capsules. Feet positions are ground-contact points.
  */
 export class CharacterBody {
   private readonly controller: PhysicsCharacterController;
@@ -44,7 +44,7 @@ export class CharacterBody {
     averageAngularSurfaceVelocity: new Vector3(),
   };
   private readonly gravity = new Vector3(0, -MOVEMENT.gravity, 0);
-  /** Swept upward to test whether a standing capsule fits; slightly thinner than the capsule so wall contact doesn't count. */
+  /** Swept upward to test whether a taller capsule fits; slightly thinner than the capsule so wall contact doesn't count. */
   private readonly headProbe: PhysicsShapeSphere;
   private readonly ray = new PhysicsRaycastResult();
   private readonly castInput = new ShapeCastResult();
@@ -110,7 +110,8 @@ export class CharacterBody {
       {
         supported: this.surface.supportedState === CharacterSupportedState.SUPPORTED,
         groundNormal: { x: n.x, y: n.y, z: n.z },
-        canStand: state.stance === "crouch" && !input.crouch ? this.canStand() : true,
+        canStand: state.stance !== "stand" && !input.crouch && !input.crawl ? this.fits("stand") : true,
+        canCrouch: state.stance === "prone" && !input.crawl ? this.fits("crouch") : true,
       },
       dt,
     );
@@ -132,14 +133,18 @@ export class CharacterBody {
     return { ...next, velocity: this.getVelocity() };
   }
 
-  /** True when a standing capsule would fit at the current feet position. */
-  private canStand(): boolean {
-    if (this.currentStance === "stand") return true;
+  /** True when the capsule of a taller `stance` would fit at the current feet position. */
+  private fits(stance: Stance): boolean {
+    const height = capsuleHeightFor(stance);
+    const currentHeight = capsuleHeightFor(this.currentStance);
+    if (height <= currentHeight) return true;
     const r = MOVEMENT.capsuleRadius;
+    const probeRadius = r - KEEP_DISTANCE;
     const center = this.controller.getPosition();
     const bottom = center.y - this.controller.footOffset;
-    const from = this.tmpA.set(center.x, bottom + MOVEMENT.crouchHeight - r, center.z);
-    const to = this.tmpVelocity.set(center.x, bottom + MOVEMENT.standHeight - r + KEEP_DISTANCE, center.z);
+    const fromY = Math.max(bottom + currentHeight - r, bottom + probeRadius + HEAD_PROBE_FLOOR_CLEARANCE);
+    const from = this.tmpA.set(center.x, fromY, center.z);
+    const to = this.tmpVelocity.set(center.x, bottom + height - r + KEEP_DISTANCE, center.z);
     return !this.shapeCast(this.headProbe, from, to);
   }
 
@@ -150,7 +155,7 @@ export class CharacterBody {
   private setStance(stance: Stance): void {
     if (stance === this.currentStance) return;
     this.currentStance = stance;
-    this.controller.setShapeOptions({ capsuleHeight: heightOf(stance), capsuleRadius: MOVEMENT.capsuleRadius }, true);
+    this.controller.setShapeOptions({ capsuleHeight: capsuleHeightFor(stance), capsuleRadius: capsuleRadiusFor(stance) }, true);
   }
 
   dispose(): void {
@@ -189,7 +194,7 @@ export class CharacterBody {
     if (achieved >= wanted * BLOCKED_RATIO) return false;
 
     const feetY = center.y - cc.footOffset - KEEP_DISTANCE;
-    const reach = MOVEMENT.capsuleRadius + STEP_PROBE_AHEAD;
+    const reach = capsuleRadiusFor(this.currentStance) + STEP_PROBE_AHEAD;
     const probeX = center.x + dirX * reach;
     const probeZ = center.z + dirZ * reach;
     this.plugin.raycast(
@@ -225,7 +230,7 @@ export class CharacterBody {
   }
 
   private centerFor(feet: Vec3, stance: Stance, result: Vector3): Vector3 {
-    return result.set(feet.x, feet.y + KEEP_DISTANCE + heightOf(stance) / 2, feet.z);
+    return result.set(feet.x, feet.y + KEEP_DISTANCE + capsuleHeightFor(stance) / 2, feet.z);
   }
 
   /** The player's own physics body, for queries (e.g. bullet raycasts) that must ignore it. */

@@ -36,6 +36,23 @@ export type SoundId =
   | "impact.wood"
   | "impact.dirt"
   | "impact.flesh"
+  | "throw.pin"
+  | "throw.spoon"
+  | "throw.swish"
+  | "throw.bounce"
+  | "explosion.near"
+  | "explosion.far"
+  | "explosion.debris"
+  | "flash.bang"
+  | "smoke.burst"
+  | "molotov.shatter"
+  | "fire.loop"
+  | "use.paper"
+  | "use.tape"
+  | "use.slosh"
+  | "use.rattle"
+  | "armor.hit"
+  | "armor.break"
   | "amb.wind"
   | "amb.birds"
   | "amb.birdCall";
@@ -64,15 +81,15 @@ export const AUDIO_FORMATS = [
 export const AUDIO_ROOT = "assets/audio/";
 
 export const AUDIO_MANIFEST: Readonly<Record<SoundId, SoundAsset>> = {
-  "shot.rifle.near": { channels: 2, load: "eager", variants: [{ file: "shot.rifle.near.0", duration: 1.1000 }, { file: "shot.rifle.near.1", duration: 1.1000 }, { file: "shot.rifle.near.2", duration: 1.1000 }, { file: "shot.rifle.near.3", duration: 1.1000 }, { file: "shot.rifle.near.4", duration: 1.1000 }] },
-  "shot.rifle.far": { channels: 1, load: "eager", variants: [{ file: "shot.rifle.far.0", duration: 2.6000 }, { file: "shot.rifle.far.1", duration: 2.5790 }, { file: "shot.rifle.far.2", duration: 2.6000 }, { file: "shot.rifle.far.3", duration: 2.6000 }] },
-  "shot.shotgun.near": { channels: 2, load: "eager", variants: [{ file: "shot.shotgun.near.0", duration: 1.3000 }, { file: "shot.shotgun.near.1", duration: 1.3000 }, { file: "shot.shotgun.near.2", duration: 1.3000 }, { file: "shot.shotgun.near.3", duration: 1.3000 }, { file: "shot.shotgun.near.4", duration: 1.3000 }, { file: "shot.shotgun.near.5", duration: 1.3000 }] },
-  "shot.shotgun.far": { channels: 1, load: "eager", variants: [{ file: "shot.shotgun.far.0", duration: 2.6000 }, { file: "shot.shotgun.far.1", duration: 2.6000 }, { file: "shot.shotgun.far.2", duration: 2.6000 }, { file: "shot.shotgun.far.3", duration: 2.6000 }, { file: "shot.shotgun.far.4", duration: 2.6000 }, { file: "shot.shotgun.far.5", duration: 2.6000 }] },
-  "shot.pistol.near": { channels: 2, load: "eager", variants: [{ file: "shot.pistol.near.0", duration: 0.9000 }, { file: "shot.pistol.near.1", duration: 0.9000 }, { file: "shot.pistol.near.2", duration: 0.9000 }, { file: "shot.pistol.near.3", duration: 0.9000 }, { file: "shot.pistol.near.4", duration: 0.9000 }] },
-  "shot.pistol.far": { channels: 1, load: "eager", variants: [{ file: "shot.pistol.far.0", duration: 2.2000 }, { file: "shot.pistol.far.1", duration: 2.2000 }, { file: "shot.pistol.far.2", duration: 2.2000 }, { file: "shot.pistol.far.3", duration: 2.2000 }] },
-  "shot.sniper.near": { channels: 2, load: "eager", variants: [{ file: "shot.sniper.near.0", duration: 1.8000 }, { file: "shot.sniper.near.1", duration: 1.8000 }, { file: "shot.sniper.near.2", duration: 1.8000 }, { file: "shot.sniper.near.3", duration: 1.8000 }, { file: "shot.sniper.near.4", duration: 1.8000 }, { file: "shot.sniper.near.5", duration: 1.8000 }] },
-  "shot.sniper.far": { channels: 1, load: "eager", variants: [{ file: "shot.sniper.far.0", duration: 3.2000 }, { file: "shot.sniper.far.1", duration: 3.2000 }, { file: "shot.sniper.far.2", duration: 3.2000 }, { file: "shot.sniper.far.3", duration: 3.2000 }, { file: "shot.sniper.far.4", duration: 3.2000 }, { file: "shot.sniper.far.5", duration: 3.2000 }] },
-  "shot.sniper.tail": { channels: 2, load: "eager", variants: [{ file: "shot.sniper.tail.0", duration: 2.5000 }, { file: "shot.sniper.tail.1", duration: 2.5000 }, { file: "shot.sniper.tail.2", duration: 2.5000 }, { file: "shot.sniper.tail.3", duration: 2.5000 }, { file: "shot.sniper.tail.4", duration: 2.5000 }, { file: "shot.sniper.tail.5", duration: 2.5000 }] },
+  "shot.rifle.near": { channels: 2, load: "eager", variants: [{ file: "shot.rifle.near.0", duration: 1.1065 }, { file: "shot.rifle.near.1", duration: 1.1065 }, { file: "shot.rifle.near.2", duration: 1.1065 }, { file: "shot.rifle.near.3", duration: 1.1065 }, { file: "shot.rifle.near.4", duration: 1.1065 }] },
+  "shot.rifle.far": { channels: 1, load: "eager", variants: [{ file: "shot.rifle.far.0", duration: 2.6065 }, { file: "shot.rifle.far.1", duration: 2.5855 }, { file: "shot.rifle.far.2", duration: 2.6065 }, { file: "shot.rifle.far.3", duration: 2.6065 }] },
+  "shot.shotgun.near": { channels: 2, load: "eager", variants: [{ file: "shot.shotgun.near.0", duration: 1.3065 }, { file: "shot.shotgun.near.1", duration: 1.3065 }, { file: "shot.shotgun.near.2", duration: 1.3065 }, { file: "shot.shotgun.near.3", duration: 1.3065 }, { file: "shot.shotgun.near.4", duration: 1.3065 }, { file: "shot.shotgun.near.5", duration: 1.3065 }] },
+  "shot.shotgun.far": { channels: 1, load: "eager", variants: [{ file: "shot.shotgun.far.0", duration: 2.6065 }, { file: "shot.shotgun.far.1", duration: 2.6065 }, { file: "shot.shotgun.far.2", duration: 2.6065 }, { file: "shot.shotgun.far.3", duration: 2.6065 }, { file: "shot.shotgun.far.4", duration: 2.6065 }, { file: "shot.shotgun.far.5", duration: 2.6065 }] },
+  "shot.pistol.near": { channels: 2, load: "eager", variants: [{ file: "shot.pistol.near.0", duration: 0.9065 }, { file: "shot.pistol.near.1", duration: 0.9065 }, { file: "shot.pistol.near.2", duration: 0.9065 }, { file: "shot.pistol.near.3", duration: 0.9065 }, { file: "shot.pistol.near.4", duration: 0.9065 }] },
+  "shot.pistol.far": { channels: 1, load: "eager", variants: [{ file: "shot.pistol.far.0", duration: 2.2065 }, { file: "shot.pistol.far.1", duration: 2.2065 }, { file: "shot.pistol.far.2", duration: 2.2065 }, { file: "shot.pistol.far.3", duration: 2.2065 }] },
+  "shot.sniper.near": { channels: 2, load: "eager", variants: [{ file: "shot.sniper.near.0", duration: 1.8065 }, { file: "shot.sniper.near.1", duration: 1.8065 }, { file: "shot.sniper.near.2", duration: 1.8065 }, { file: "shot.sniper.near.3", duration: 1.8065 }, { file: "shot.sniper.near.4", duration: 1.8065 }, { file: "shot.sniper.near.5", duration: 1.8065 }] },
+  "shot.sniper.far": { channels: 1, load: "eager", variants: [{ file: "shot.sniper.far.0", duration: 3.2065 }, { file: "shot.sniper.far.1", duration: 3.2065 }, { file: "shot.sniper.far.2", duration: 3.2065 }, { file: "shot.sniper.far.3", duration: 3.2065 }, { file: "shot.sniper.far.4", duration: 3.2065 }, { file: "shot.sniper.far.5", duration: 3.2065 }] },
+  "shot.sniper.tail": { channels: 2, load: "eager", variants: [{ file: "shot.sniper.tail.0", duration: 2.5065 }, { file: "shot.sniper.tail.1", duration: 2.5065 }, { file: "shot.sniper.tail.2", duration: 2.5065 }, { file: "shot.sniper.tail.3", duration: 2.5065 }, { file: "shot.sniper.tail.4", duration: 2.5065 }, { file: "shot.sniper.tail.5", duration: 2.5065 }] },
   "mech.rifle.magOut": { channels: 1, load: "eager", variants: [{ file: "mech.rifle.magOut.0", duration: 0.4565 }] },
   "mech.rifle.magIn": { channels: 1, load: "eager", variants: [{ file: "mech.rifle.magIn.0", duration: 0.5065 }] },
   "mech.pistol.magOut": { channels: 1, load: "eager", variants: [{ file: "mech.pistol.magOut.0", duration: 0.3565 }] },
@@ -99,6 +116,23 @@ export const AUDIO_MANIFEST: Readonly<Record<SoundId, SoundAsset>> = {
   "impact.wood": { channels: 1, load: "eager", variants: [{ file: "impact.wood.0", duration: 0.4565 }, { file: "impact.wood.1", duration: 0.4565 }, { file: "impact.wood.2", duration: 0.4565 }, { file: "impact.wood.3", duration: 0.4565 }, { file: "impact.wood.4", duration: 0.4565 }] },
   "impact.dirt": { channels: 1, load: "eager", variants: [{ file: "impact.dirt.0", duration: 0.1216 }, { file: "impact.dirt.1", duration: 0.1869 }, { file: "impact.dirt.2", duration: 0.1388 }, { file: "impact.dirt.3", duration: 0.1438 }, { file: "impact.dirt.4", duration: 0.1507 }] },
   "impact.flesh": { channels: 1, load: "eager", variants: [{ file: "impact.flesh.0", duration: 0.3565 }, { file: "impact.flesh.1", duration: 0.3565 }, { file: "impact.flesh.2", duration: 0.3565 }, { file: "impact.flesh.3", duration: 0.3565 }, { file: "impact.flesh.4", duration: 0.3565 }] },
+  "throw.pin": { channels: 1, load: "eager", variants: [{ file: "throw.pin.0", duration: 0.3500 }, { file: "throw.pin.1", duration: 0.2515 }] },
+  "throw.spoon": { channels: 1, load: "eager", variants: [{ file: "throw.spoon.0", duration: 0.2353 }, { file: "throw.spoon.1", duration: 0.3000 }, { file: "throw.spoon.2", duration: 0.2709 }] },
+  "throw.swish": { channels: 1, load: "eager", variants: [{ file: "throw.swish.0", duration: 0.1688 }, { file: "throw.swish.1", duration: 0.1130 }, { file: "throw.swish.2", duration: 0.1607 }] },
+  "throw.bounce": { channels: 1, load: "eager", variants: [{ file: "throw.bounce.0", duration: 0.4000 }, { file: "throw.bounce.1", duration: 0.4000 }, { file: "throw.bounce.2", duration: 0.4000 }, { file: "throw.bounce.3", duration: 0.3260 }] },
+  "explosion.near": { channels: 1, load: "eager", variants: [{ file: "explosion.near.0", duration: 1.2713 }, { file: "explosion.near.1", duration: 1.4464 }, { file: "explosion.near.2", duration: 1.3842 }, { file: "explosion.near.3", duration: 1.1292 }] },
+  "explosion.far": { channels: 1, load: "eager", variants: [{ file: "explosion.far.0", duration: 4.0000 }, { file: "explosion.far.1", duration: 2.9898 }] },
+  "explosion.debris": { channels: 1, load: "eager", variants: [{ file: "explosion.debris.0", duration: 0.9000 }, { file: "explosion.debris.1", duration: 0.7869 }, { file: "explosion.debris.2", duration: 0.6813 }, { file: "explosion.debris.3", duration: 0.9000 }, { file: "explosion.debris.4", duration: 0.8646 }] },
+  "flash.bang": { channels: 1, load: "eager", variants: [{ file: "flash.bang.0", duration: 1.2000 }, { file: "flash.bang.1", duration: 0.8304 }, { file: "flash.bang.2", duration: 0.8764 }] },
+  "smoke.burst": { channels: 1, load: "eager", variants: [{ file: "smoke.burst.0", duration: 0.3936 }, { file: "smoke.burst.1", duration: 0.4169 }] },
+  "molotov.shatter": { channels: 1, load: "eager", variants: [{ file: "molotov.shatter.0", duration: 1.1000 }, { file: "molotov.shatter.1", duration: 0.7537 }, { file: "molotov.shatter.2", duration: 0.7318 }, { file: "molotov.shatter.3", duration: 0.9158 }] },
+  "fire.loop": { channels: 1, load: "eager", variants: [{ file: "fire.loop.0", duration: 2.3000 }] },
+  "use.paper": { channels: 1, load: "eager", variants: [{ file: "use.paper.0", duration: 0.3540 }, { file: "use.paper.1", duration: 0.4980 }, { file: "use.paper.2", duration: 0.5074 }, { file: "use.paper.3", duration: 0.5556 }] },
+  "use.tape": { channels: 1, load: "eager", variants: [{ file: "use.tape.0", duration: 0.3500 }, { file: "use.tape.1", duration: 0.3500 }, { file: "use.tape.2", duration: 0.3500 }] },
+  "use.slosh": { channels: 1, load: "eager", variants: [{ file: "use.slosh.0", duration: 0.6000 }, { file: "use.slosh.1", duration: 0.6000 }] },
+  "use.rattle": { channels: 1, load: "eager", variants: [{ file: "use.rattle.0", duration: 0.2500 }, { file: "use.rattle.1", duration: 0.2258 }, { file: "use.rattle.2", duration: 0.2500 }, { file: "use.rattle.3", duration: 0.2381 }] },
+  "armor.hit": { channels: 1, load: "eager", variants: [{ file: "armor.hit.0", duration: 0.4500 }, { file: "armor.hit.1", duration: 0.4500 }, { file: "armor.hit.2", duration: 0.4500 }, { file: "armor.hit.3", duration: 0.4500 }, { file: "armor.hit.4", duration: 0.4500 }] },
+  "armor.break": { channels: 1, load: "eager", variants: [{ file: "armor.break.0", duration: 0.5223 }, { file: "armor.break.1", duration: 0.5971 }, { file: "armor.break.2", duration: 0.4555 }] },
   "amb.wind": { channels: 2, load: "lazy", variants: [{ file: "amb.wind.0", duration: 45.0065 }] },
   "amb.birds": { channels: 2, load: "lazy", variants: [{ file: "amb.birds.0", duration: 45.0065 }] },
   "amb.birdCall": { channels: 1, load: "lazy", variants: [{ file: "amb.birdCall.0", duration: 3.0065 }, { file: "amb.birdCall.1", duration: 2.0717 }, { file: "amb.birdCall.2", duration: 3.0065 }, { file: "amb.birdCall.3", duration: 3.0065 }, { file: "amb.birdCall.4", duration: 3.0065 }, { file: "amb.birdCall.5", duration: 3.0065 }, { file: "amb.birdCall.6", duration: 3.0158 }] },

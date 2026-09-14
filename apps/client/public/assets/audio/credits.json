@@ -100,7 +100,8 @@
         "impact.metal",
         "impact.wood",
         "impact.dirt",
-        "impact.flesh"
+        "impact.flesh",
+        "armor.hit"
       ],
       "files": [
         "foley.casing.0 ← Audio/impactMetal_light_000.ogg@0.000s",
@@ -152,7 +153,12 @@
         "impact.flesh.1 ← Audio/impactPunch_medium_001.ogg@0.004s",
         "impact.flesh.2 ← Audio/impactPunch_medium_002.ogg@0.019s",
         "impact.flesh.3 ← Audio/impactPunch_medium_003.ogg@0.007s",
-        "impact.flesh.4 ← Audio/impactPunch_medium_004.ogg@0.012s"
+        "impact.flesh.4 ← Audio/impactPunch_medium_004.ogg@0.012s",
+        "armor.hit.0 ← Audio/impactPlate_medium_000.ogg@0.000s",
+        "armor.hit.1 ← Audio/impactPlate_medium_001.ogg@0.000s",
+        "armor.hit.2 ← Audio/impactPlate_medium_002.ogg@0.000s",
+        "armor.hit.3 ← Audio/impactPlate_medium_003.ogg@0.000s",
+        "armor.hit.4 ← Audio/impactPlate_medium_004.ogg@0.000s"
       ]
     },
     {
@@ -272,7 +278,8 @@
       "sounds": [
         "mech.bolt.open",
         "mech.bolt.close",
-        "mech.charge"
+        "mech.charge",
+        "use.tape"
       ],
       "files": [
         "mech.bolt.open.0 ← equipment_clicks3.wav@0.208s",
@@ -286,7 +293,10 @@
         "mech.charge.0 ← equipment_clicks3.wav@9.617s",
         "mech.charge.1 ← equipment_clicks3.wav@11.430s",
         "mech.charge.2 ← equipment_clicks3.wav@19.658s",
-        "mech.charge.3 ← equipment_clicks3.wav@20.850s"
+        "mech.charge.3 ← equipment_clicks3.wav@20.850s",
+        "use.tape.0 ← equipment_clicks3.wav@13.118s",
+        "use.tape.1 ← equipment_clicks3.wav@14.639s",
+        "use.tape.2 ← equipment_clicks3.wav@18.809s"
       ]
     },
     {
@@ -379,13 +389,161 @@
       "url": "https://opengameart.org/content/swishes-sound-pack",
       "download": "https://opengameart.org/sites/default/files/swishes.zip",
       "sounds": [
-        "foley.cloth"
+        "foley.cloth",
+        "throw.swish"
       ],
       "files": [
         "foley.cloth.0 ← swishes/swish-1.wav@0.024s",
         "foley.cloth.1 ← swishes/swish-2.wav@0.020s",
         "foley.cloth.2 ← swishes/swish-3.wav@0.032s",
-        "foley.cloth.3 ← swishes/swish-4.wav@0.032s"
+        "foley.cloth.3 ← swishes/swish-4.wav@0.032s",
+        "throw.swish.0 ← swishes/swish-7.wav@0.019s",
+        "throw.swish.1 ← swishes/swish-8.wav@0.041s",
+        "throw.swish.2 ← swishes/swish-9.wav@0.036s"
+      ]
+    },
+    {
+      "id": "bangs",
+      "title": "25 CC0 bang / firework SFX",
+      "authors": [
+        "rubberduck"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/25-cc0-bang-firework-sfx",
+      "download": "https://opengameart.org/sites/default/files/25-CC0-bang-sfx.zip",
+      "sounds": [
+        "explosion.near",
+        "explosion.far",
+        "flash.bang"
+      ],
+      "files": [
+        "explosion.near.0 ← bang_03.ogg@0.074s",
+        "explosion.near.1 ← cannon_01.ogg@0.081s",
+        "explosion.near.2 ← bang_09.ogg@0.000s",
+        "explosion.near.3 ← cannon_04.ogg@0.015s",
+        "explosion.far.1 ← cannon_02.ogg@0.001s",
+        "flash.bang.0 ← bang_06.ogg@0.007s",
+        "flash.bang.1 ← cannon_03.ogg@0.035s",
+        "flash.bang.2 ← cannon_05.ogg@0.041s"
+      ]
+    },
+    {
+      "id": "distantExplosion",
+      "title": "Muffled Distant Explosion",
+      "authors": [
+        "NenadSimic"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/muffled-distant-explosion",
+      "download": "https://opengameart.org/sites/default/files/NenadSimic%20-%20Muffled%20Distant%20Explosion.wav",
+      "sounds": [
+        "explosion.far"
+      ],
+      "files": [
+        "explosion.far.0 ← muffled-distant-explosion.wav@0.008s"
+      ]
+    },
+    {
+      "id": "fireCrackle",
+      "title": "Fire Crackling",
+      "authors": [
+        "AntumDeluge"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/fire-crackling",
+      "download": "https://opengameart.org/sites/default/files/fire-1.wav",
+      "sounds": [
+        "fire.loop"
+      ],
+      "files": [
+        "fire.loop.0 ← fire-crackling.wav@0.1s+2.3s loop"
+      ]
+    },
+    {
+      "id": "glassBreak",
+      "title": "Glass Break",
+      "authors": [
+        "Till Behrend"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/glass-break",
+      "download": "https://opengameart.org/sites/default/files/glass_breaking.wav",
+      "sounds": [
+        "molotov.shatter"
+      ],
+      "files": [
+        "molotov.shatter.0 ← glass-breaking.wav@0.036s"
+      ]
+    },
+    {
+      "id": "breakingFalling",
+      "title": "75 CC0 breaking / falling / hit sfx",
+      "authors": [
+        "rubberduck"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx",
+      "download": "https://opengameart.org/sites/default/files/sfx_breaking_and_falling.zip",
+      "sounds": [
+        "throw.spoon",
+        "throw.bounce",
+        "explosion.debris",
+        "molotov.shatter",
+        "use.rattle",
+        "armor.break"
+      ],
+      "files": [
+        "throw.spoon.0 ← bfh1_metal_hit_01.ogg@0.003s",
+        "throw.spoon.1 ← bfh1_metal_hit_06.ogg@0.000s",
+        "throw.bounce.0 ← bfh1_metal_hit_02.ogg@0.002s",
+        "throw.bounce.1 ← bfh1_metal_hit_03.ogg@0.032s",
+        "throw.bounce.2 ← bfh1_metal_hit_04.ogg@0.000s",
+        "throw.bounce.3 ← bfh1_metal_hit_05.ogg@0.004s",
+        "explosion.debris.0 ← bfh1_rock_falling_01.ogg@0.013s",
+        "explosion.debris.1 ← bfh1_rock_falling_03.ogg@0.064s",
+        "explosion.debris.2 ← bfh1_rock_falling_09.ogg@0.003s",
+        "explosion.debris.3 ← bfh1_breaking_01.ogg@0.000s",
+        "explosion.debris.4 ← bfh1_rock_breaking_02.ogg@0.000s",
+        "molotov.shatter.1 ← bfh1_glass_breaking_01.ogg@0.007s",
+        "molotov.shatter.2 ← bfh1_glass_breaking_04.ogg@0.032s",
+        "molotov.shatter.3 ← bfh1_glass_breaking_06.ogg@0.000s",
+        "use.rattle.0 ← bfh1_hit_05.ogg@0.002s",
+        "use.rattle.1 ← bfh1_hit_09.ogg@0.036s",
+        "use.rattle.2 ← bfh1_hit_11.ogg@0.005s",
+        "use.rattle.3 ← bfh1_misc_05.ogg@0.000s",
+        "armor.break.0 ← bfh1_breaking_02.ogg@0.019s",
+        "armor.break.1 ← bfh1_breaking_03.ogg@0.015s",
+        "armor.break.2 ← bfh1_rock_breaking_03.ogg@0.000s"
+      ]
+    },
+    {
+      "id": "sfx100",
+      "title": "100 CC0 SFX",
+      "authors": [
+        "rubberduck"
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/100-cc0-sfx",
+      "download": "https://opengameart.org/sites/default/files/100-CC0-SFX_0.zip",
+      "sounds": [
+        "throw.pin",
+        "throw.spoon",
+        "smoke.burst",
+        "use.paper",
+        "use.slosh"
+      ],
+      "files": [
+        "throw.pin.0 ← key_open_01.ogg@0.038s",
+        "throw.pin.1 ← key_open_02.ogg@0.085s",
+        "throw.spoon.2 ← metal_02.ogg@0.016s",
+        "smoke.burst.0 ← noise_01.ogg@0.018s",
+        "smoke.burst.1 ← noise_02.ogg@0.091s",
+        "use.paper.0 ← paper_01.ogg@0.073s",
+        "use.paper.1 ← paper_02.ogg@0.050s",
+        "use.paper.2 ← paper_03.ogg@0.042s",
+        "use.paper.3 ← paper_04.ogg@0.053s",
+        "use.slosh.0 ← splash_01.ogg@0.004s",
+        "use.slosh.1 ← splash_02.ogg@0.006s"
       ]
     }
   ]

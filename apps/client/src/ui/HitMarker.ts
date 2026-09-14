@@ -30,9 +30,13 @@ export class HitMarker {
     this.kill = prepareAnimation(cross, HIT_KEYFRAMES, { duration: 380 });
   }
 
-  /** @param now performance.now() timestamp, ms. */
-  show(killed: boolean, now: number): void {
+  /**
+   * @param now performance.now() timestamp, ms.
+   * @param armor the target's helmet or vest absorbed part of the hit.
+   */
+  show(killed: boolean, now: number, armor = false): void {
     if (!killed && now - this.killedAt < KILL_PRIORITY_MS) return;
+    if (armor !== this.node.hasAttribute("data-armor")) this.node.toggleAttribute("data-armor", armor);
     const kind: MarkerKind = killed ? "kill" : "hit";
     if (kind !== this.kind) {
       this.kind = kind;

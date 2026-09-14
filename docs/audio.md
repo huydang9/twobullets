@@ -1,6 +1,6 @@
 # Audio
 
-Realistic, PUBG-style game audio built from free CC0 recordings: spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, and an outdoor ambience bed.
+Realistic, PUBG-style game audio built from free CC0 recordings: spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
 
 > **Ambience is currently switched off** (`AMBIENCE_ENABLED = false` in `apps/client/src/audio/AudioSettings.ts`, by request).
 > - The gate wins over any saved ambience volume.
@@ -49,14 +49,23 @@ All shipped audio is **CC0**. Attribution isn't required, but every file is cred
 | [Handgun Reload Sound Effect](https://opengameart.org/content/handgun-reload-sound-effect) | zer0_sol | Pistol mag out/in, slide |
 | [Shotgun Reload Sound effects](https://opengameart.org/content/shotgun-reload-sound-effects) | zer0_sol | Pump rack, shell inserts |
 | [Gun reload sounds](https://opengameart.org/content/gun-reload-sounds) | SpringySpringo | Rifle/sniper mag out/in |
-| [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | artisticdude | Cloth (equip, jump) |
+| [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | artisticdude | Cloth (equip, jump), grenade throw whoosh, molotov ignition whoosh (pitched down) |
+| [25 CC0 bang / firework SFX](https://opengameart.org/content/25-cc0-bang-firework-sfx) | rubberduck | Frag explosion close layer (bangs and cannon shots slowed to 80 % with a low shelf), flashbang bang, far-explosion variant |
+| [Muffled Distant Explosion](https://opengameart.org/content/muffled-distant-explosion) | NenadSimic | Down-range explosion layer |
+| [Fire Crackling](https://opengameart.org/content/fire-crackling) | AntumDeluge | Molotov fire crackle loop |
+| [Glass Break](https://opengameart.org/content/glass-break) | Till Behrend | Molotov bottle shatter |
+| [75 CC0 breaking / falling / hit sfx](https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx) | rubberduck | Explosion debris rain, grenade canister bounces, spoon ping, glass shatter variants, pill rattle, armor breaking |
+| [100 CC0 SFX](https://opengameart.org/content/100-cc0-sfx) | rubberduck | Grenade pin pull, spoon, bandage paper, drink slosh, smoke gas burst |
 
 Not used:
 - **OGA "Footsteps on different surfaces" (CC-BY 3.0).** The CC0 packs above cover the same surfaces.
 - **Freesound.** It needs a login.
+- **OGA "2 High Quality Explosions", "Big Explosion", "Rumble/explosion" and "Breaking Bottle".** They are CC-BY 3.0; the CC0 packs above cover the same needs.
 - **Sonniss #GameAudioGDC bundles.** They are multi-GB, and the license forbids redistributing the sounds as loose files. They are the best future upgrade for gun tails, bullet cracks and explosions, but only if the files are baked into non-extractable sprites and the license is re-checked.
 
 The Free Firearm library ships only gunshots. Its "near" takes are recorded beside the shooter, and the "mid" takes down range with the natural outdoor tail. It has no reload foley, which is why the mechanics come from the smaller packs.
+
+Equipment sounds that no CC0 recording covers are synthesized at runtime: the smoke gas hiss loop (procedural band-limited noise with a periodic sputter), fire pops on top of the crackle loop, the explosion pressure sub, the tinnitus tones, the zipper (medkit, backpack), gulps, the antiseptic spray, the heartbeat and the knocked/eliminated stings. The bandage tape reuses the tape-measure pulls from LFA's equipment clicks III.
 
 ## Format and budget
 
@@ -74,11 +83,11 @@ The Free Firearm library ships only gunshots. Its "near" takes are recorded besi
 
   | | Opus | AAC |
   |---|---|---|
-  | Total | 2.24 MB | 3.34 MB |
-  | Eager (decoded before the first click) | 1.12 MB | |
+  | Total | 2.68 MB | 4.04 MB |
+  | Eager (decoded before the first click) | 1.56 MB | |
   | Lazy (ambience, fetched on first use, so never while ambience is off) | the rest | |
 
-  37 sounds, 150 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
+  55 sounds, 210 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
 - **Loudness:**
   - Each variation is measured with ffmpeg `loudnorm` (EBU R128 integrated loudness).
   - Short clips are padded with silence, which R128 gating ignores.
@@ -90,6 +99,8 @@ The Free Firearm library ships only gunshots. Its "near" takes are recorded besi
     | Guns | per weapon, see below |
     | Mechanics and impacts | −18 LUFS |
     | Footsteps | −20 LUFS |
+    | Explosion and flashbang bangs | −19 / −21 LUFS, lookahead limiter ≤ 3–6 dB |
+    | Throwable and consumable foley, armor | −20 to −26 LUFS; peaky hits may shave ≤ 3–5 dB |
     | Ambience | −24/−26 LUFS |
 
   - Relative mix levels live in `soundDesign.ts` and `weaponMix.ts`.
@@ -111,8 +122,11 @@ Raw WebAudio, not Babylon's AudioEngineV2. The v9.26 `StaticSound` API offers pa
 voice: buffer sources ─ layer gain/LP ─→ voice low-pass ─→ voice gain ─→ [HRTF panner] ─→ bus input
                                                                   ├→ room send ─→ bus room tap ─→ convolver (0.9 s) ─→ indoor return ─┐
                                                                   └→ echo send ─→ bus echo tap ─→ slapback + valley echo ─→ outdoor return ─┤
-bus input ─ [weapons: glue compressor] ─→ duck gain ─→ fader (settings) ─→ master ─→ limiter (−3 dB, 20:1) ─→ out ◄──────────┘
+bus input ─ [weapons: glue compressor] ─→ duck gain ─→ fader (settings) ─→ master ─→ muffle low-pass ─→ limiter (−1 dB, 20:1) ─→ out ◄──┘
+overlay voices (ear ringing) ─→ overlay gain (master volume) ──────────────────────────────────────────→ limiter
 ```
+
+The **muffle** is a master low-pass (open at 22 kHz) that `AudioEngine.muffle()` closes for flashbang ringing, close frag overpressure, knocks and eliminations. **Overlay** voices skip the buses and the muffle, so the tinnitus stays clear while everything else is dulled.
 
 | File | Role |
 |---|---|
@@ -124,7 +138,11 @@ bus input ─ [weapons: glue compressor] ─→ duck gain ─→ fader (settings
 | `NearMissDetector.ts` | Segment-vs-head closest approach per bullet per frame, ≤ 3 m → crack (> 343 m/s) or whiz |
 | `AmbienceSystem.ts` | Wind loop (louder with height), birdsong loop (thinner with height), spatial bird calls, indoor damping |
 | `WeaponAudio.ts` | First-person mechanics scheduled from viewmodel `ClipPlan` cues (tags cancel reloads and cycles) |
-| `AudioDirector.ts` | Composition root created by `WeaponPresentation`. Per-frame listener/probe/footsteps/near-miss/ambience |
+| `AudioDirector.ts` | Composition root created by `WeaponPresentation`. Per-frame listener/probe/footsteps/near-miss/ambience; `attachEquipment(view)` (called from `Game.ts`) |
+| `equipment/EquipmentAudio.ts` | `EquipmentView` events and state → `GameAudio` calls: throw handling, bounces, detonations, smoke/fire loops (levels from cloud age / burning share), flash ringing, item-use foley, pickups, armor, heartbeat, knocked/revive/eliminated |
+| `equipment/foley.ts` | Item-use cue layers and the synthesized equipment sounds (gas hiss loop buffer, fire pops, zipper, gulps, spray) |
+| `equipmentMix.ts` | Dependency-free blast recipe by distance (`blastLayers`), echo and duck curves, loop levels, tinnitus model, item-use cue timelines (rendered by `verify.ts`) |
+| `audioCredits.ts` | Loads `credits.json` into lines the HUD's credits list appends |
 | `acoustics.ts` | Pure model (unit-checked by `verify.ts`) |
 | `surfaces.ts` | `SurfaceProvider`, terrain/building/arena material → acoustic surface |
 | `soundDesign.ts` | All mix constants per weapon, surface and stance |
@@ -145,6 +163,14 @@ First-person shot at bus level, mean of all variations. "Before" is the previous
 | Rifle AR-4 | −29.1 | −2.1 dBTP | −28.9 | −24.4 | −5.2 dBTP | 0 |
 | Shotgun S-12 | −30.8 | −1.4 dBTP | −28.2 | −20.4 | −1.6 dBTP | +0.7 LU (momentary +4) |
 | Sniper K-98 | −29.7 | −0.9 dBTP | −23.9 | −16.6 | −1.2 dBTP | **+5.0 LU** (was −0.6) |
+
+**Explosions sit above the sniper.** `verify.ts` renders `blastLayers()` at 4 m (inside the reference distance, so at full voice level) for every variation and requires a frag ≥ 3 LU over the first-person sniper with a bigger momentary max, a flashbang ≥ 0.5 LU over it, and peaks ≤ −1 dBTP:
+
+| At 4 m | LUFS | Momentary max | Peak |
+|---|---|---|---|
+| Sniper K-98 (first person) | −24.0 | −16.4 | −1.2 dBTP |
+| Frag (4 variations) | −19.0 … −19.7 | −13.4 … −14.9 | ≤ −1.7 dBTP |
+| Flashbang (3 variations) | −19.2 … −22.9 | −14.0 … −17.3 | ≤ −2.3 dBTP |
 
 Before, the sniper was quieter than the rifle. All takes are equally hot, the old first-person gains were nearly equal, and the glue compressor took the most off the sniper (−3.8 dB).
 
@@ -223,7 +249,17 @@ Pistol and shotgun sit either side of the rifle.
 | Footstep | `step.concrete/dirt/grass/gravel/wood/metal`, gain/rate by stance |
 | Jump / land | step + `foley.cloth` / `foley.land` + double step, scaled by fall speed |
 | Near miss | Synthesized crack or whiz |
-| Explosion (placeholder) | Shotgun/sniper reports pitched down + noise rumble + sub tone; heavy ducking |
+| Frag explosion (`onDetonate` frag) | `explosion.near` + slowed/darkened copy (body) crossfading (10 → 140 m) into `explosion.far` (pitched down past 120 m), 70 → 28 Hz sub, low rumble, `explosion.debris` + dirt raining over 1.5 s within 45 m; 343 m/s delay, air absorption, occlusion, echo send 0.5 → 1.2 with distance; direct route under 80 m; ducks the other buses by up to 16 dB (scaled by distance); under 14 m the master muffles briefly, under 5 m the ears ring |
+| Flashbang bang | `flash.bang` + short bright snap, lighter sub; same distance model (range 300 m) |
+| Flashbang exposure (`onFlash`) | Tinnitus (3.65/3.71/7.3 kHz, overlay route) at the bang's arrival, fading over `deafSeconds`; all other buses ducked 6–26 dB and the master low-passed to 5.3 kHz → 350 Hz by exposure strength, both recovering over the ringing |
+| Pin pull / cook / throw (`onThrow`) | `throw.pin` + latch (molotov: flint strike and flame catch); cook = `throw.spoon`; throw = `throw.swish` (underhand softer) + cloth, spoon flying off for smoke/flash; pin return = latch; draw/holster = cloth |
+| Grenade bounce (`onThrowableBounce`) | `throw.bounce` canister clunk pitched per kind and surface (wood duller, metal brighter) + the surface's footstep sample; soft ground uses a dirt thud; level by impact speed; 35 m |
+| Smoke | Detonation: 150 → 60 Hz pop + `smoke.burst`; then a procedural hiss loop per cloud, loud while venting (0–9 s), gone by 16 s; nearest 3 clouds play |
+| Molotov | `molotov.shatter` + slowed swish and noise whoosh of the fuel catching; `fire.loop` per patch (two detuned offset copies) with random crackle pops, level by burning share, nearest 4 patches play |
+| Item use (`onUse`) | One tagged voice scheduling the item's cue timeline over its use time: bandage paper/tape/cloth; first aid zip/paper/tape; medkit zip/pill rattle/spray/tape/zip; energy drink can open (click + pssht), gulps, slosh; painkiller rattle, cap clicks, water, gulps. Cancel stops it (25 ms fade) |
+| Pickup / drop (`onItem`) | Cloth + by kind: ammo casings rattle, weapon latch, armor strap/buckle clank, backpack zip, consumable paper, throwable clink; drop adds a soft thud |
+| Armor absorbs (`onArmor`) | `armor.hit` plate clank by absorbed damage; destroyed adds `armor.break` |
+| Knocked / revive / eliminated (`onVitals`) | Knock: low sting, thud, brief muffle; heartbeat while knocked or under 25 HP (faster as it drains); revive: cloth rustles every ~0.7 s; eliminated: low sting and a 4 s muffle |
 | Ambience | `amb.wind` + `amb.birds` loops, `amb.birdCall` one-shots 25–80 m away |
 
 Surfaces are resolved in this order:
@@ -242,7 +278,15 @@ audio.playNearMiss({ position /* closest point */, velocity, weaponId })        
 audio.playFootstep({ position, surface?, stance: "crouch"|"walk"|"run"|"sprint", isLocal })
 audio.playLanding({ position, fallSpeed, surface?, isLocal })  audio.playJump({ position, surface?, isLocal })
 audio.playImpact({ position, normal?, surface?: AcousticSurface | "flesh", weaponId?, age? })
-audio.playExplosion({ position, power?, age? })                                  // Detonate (placeholder sound)
+audio.playExplosion({ position, kind?: "frag"|"flash", power?, age? })            // Detonate
+audio.playThrowableBounce({ kind, position, normal?, impactSpeed, surface? })     // derived from local stepThrowables
+audio.playThrowAction({ action: "draw"|"pinPull"|"spoon"|"throw"|"pinReturn"|"holster", kind, style?, position /* null = first person */ })
+audio.playSmokePop({ position, age? })  audio.playMolotovShatter({ position, age? })   // Detonate / AreaEffectStart
+audio.playSmokeHiss(areaId, position, level?)  audio.playFire(areaId, position, level?)  audio.stopArea(areaId)   // AreaEffectStart/End
+audio.updateAreas(dt)                                                              // per frame (AudioDirector does it)
+audio.playFlashRing({ strength, seconds?, delay? })                                // local flash exposure
+audio.playItemUse({ itemId, seconds, elapsed?, position, tag })  audio.stopItemUse(tag)   // actionKind + phaseStart
+audio.playPickup(kind | "drop", position?)  audio.playArmorHit({ absorbed, destroyed, position })   // PlayerHit armor flag
 audio.playMechanical({ kind, weaponId, position /* null = first person */, delay?, span?, tag? })  // remote reload = spatial, 12 m
 audio.playHitConfirm({ zone, killed })                                            // HitConfirm
 ```
@@ -268,7 +312,12 @@ __audio.nearMiss("shotgun", 1.5, 90)   // subsonic whiz sweeping past
 __audio.footsteps("gravel", "sprint", 10, 180)   // enemy running behind you
 __audio.footsteps("metal", "crouch", 4, -90)
 __audio.impact("metal", 12, 30)
-__audio.explosion(40, 0)
+__audio.explosion(40, 0)             // frag; __audio.explosion(15, 90, "flash") for the bang
+__audio.explosion(4); __audio.explosion(250, -30)   // close overpressure + ringing vs distant rolling boom
+__audio.flashRing(1)                   // full tinnitus: mix ducked and dulled, recovering over 6 s
+__audio.smoke(12, 30); __audio.fire(8, -40)
+__audio.bounce("wood", 5, 45, 7, "smoke"); __audio.throw("pinPull"); __audio.throw("throw")
+__audio.useItem("medkit"); __audio.cancelUse(); __audio.pickup("armor"); __audio.armor(true)
 __audio.mech("pump", "shotgun"); __audio.hit("head", true)
 __audio.ambience(true)   // ambience is off by default; this turns wind/birds on for the session
 __audio.indoor(1)   // force room reverb; __audio.indoor(null) restores the probe
@@ -289,6 +338,10 @@ The cut points were chosen by transient analysis and spectrograms, **not by ear*
 6. **Loop seams.** Listen at 45 s for `amb.wind` / `amb.birds`, especially in Safari, which uses the AAC fallback.
 7. **HRTF front/back.** Use `__audio.footsteps("concrete", "run", 6, 0)` against bearing 180.
 8. **Indoor.** Under the central platform, the room reverb should replace the slapback.
+9. **Explosions.** `__audio.explosion(d)` for d = 4, 20, 60, 150, 400: a frag must be clearly bigger than `__audio.ab("sniper", "rifle")`, the near → far handover shouldn't jump, and the debris shouldn't sound like crockery (swap `explosion.debris` cuts in `clips.ts`). The near layer is a firework/cannon bang slowed to 80 %; if it reads as a firework, try `rate: 0.7`.
+10. **Flashbang.** `__audio.explosion(8, 0, "flash")` then `__audio.flashRing(1)`: the ring must stay audible while the rest is dull, and recover smoothly.
+11. **Loops.** `__audio.smoke()` hiss should not sound like tape noise; `__audio.fire()` crackle loop is 2.3 s, so listen for repetition.
+12. **Pin, spoon, tape.** The pin pull uses key-in-lock recordings and the bandage tape uses tape-measure pulls; both were chosen by spectrum. Replace the cuts if they don't read as intended.
 
 ## Known limitations
 
@@ -296,4 +349,6 @@ The cut points were chosen by transient analysis and spectrograms, **not by ear*
 - Enclosure is a heuristic. Near tall walls it reads partly indoor.
 - Surface resolution on building floors falls back to the terrain provider unless building meshes set `metadata.surface`.
 - The ambience height factor uses absolute Y. On the 1×1 km terrain it should use height above ground.
-- Explosions and near-miss cracks are synthesized placeholders.
+- Near-miss cracks are synthesized. The explosion close layer is a firework/cannon recording, not a real grenade.
+- Smoke and fire loops sit on the ambience bus (volume slider "ambience"), which is otherwise idle while ambience is switched off.
+- Grenade bounces on players aren't simulated (grenades collide with the static world only), so there is no body-hit bounce sound.

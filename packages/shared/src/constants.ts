@@ -17,6 +17,10 @@ export const MOVEMENT = {
   walkSpeed: 6.5,
   sprintSpeed: 9.5,
   crouchSpeed: 3.2,
+  /** Knocked-down crawl speed, m/s. */
+  crawlSpeed: 1.2,
+  /** Upper bound on MoveInput.speedScale: room for the boost bonus (×1.06), not for real speed hacks. */
+  maxSpeedScale: 1.1,
   /** Sprint only engages when the normalized wish direction's forward component is at least this (0.5 = within 60° of forward). */
   sprintMinForward: 0.5,
 
@@ -40,14 +44,27 @@ export const MOVEMENT = {
   capsuleRadius: 0.35,
   standHeight: 1.8,
   crouchHeight: 1.1,
+  /** Knocked-down crawl capsule. Narrower than standing, since a capsule is never shorter than 2 × its radius. */
+  proneHeight: 0.62,
+  proneRadius: 0.3,
   /** Eye height above the feet, m. */
   standEyeHeight: 1.65,
   crouchEyeHeight: 0.95,
+  proneEyeHeight: 0.35,
 
   /** Tallest ledge climbed automatically, m (stairs are ≤ 0.3). */
   maxStepHeight: 0.35,
   /** Steepest walkable slope, degrees. Steeper surfaces make the player slide. */
   maxSlopeDegrees: 50,
+} as const;
+
+/** Landing damage from downward speed at touchdown (gravity 24 m/s²: 12 m/s ≈ a 3 m drop, 25 m/s ≈ 13 m). */
+export const FALL_DAMAGE = {
+  /** Landings slower than this are harmless, m/s. */
+  minSpeed: 12,
+  /** Landing at this speed deals `lethalDamage`, m/s. Damage grows with impact energy (v²) in between. */
+  lethalSpeed: 25,
+  lethalDamage: 100,
 } as const;
 
 export const CAMERA = {

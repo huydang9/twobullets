@@ -64,12 +64,68 @@ export interface ImpactAudioEvent {
   readonly age?: number;
 }
 
-/** Placeholder for grenades (M4 `Detonate`). */
+/** Frag or flashbang detonation (netcode `Detonate`). */
 export interface ExplosionAudioEvent {
   readonly position: Vec3Like;
-  /** 1 = frag grenade. */
+  /** Recording and mix: frag (default) or the sharper, lighter flashbang bang. */
+  readonly kind?: "frag" | "flash";
+  /** Level and range scale; 1 = one grenade. */
   readonly power?: number;
   readonly age?: number;
+}
+
+export type ThrowableAudioKind = "frag" | "smoke" | "flash" | "molotov";
+
+/** A thrown grenade or canister hitting the world (derived from the local `stepThrowables` bounce flag). */
+export interface ThrowableBounceAudioEvent {
+  readonly kind: ThrowableAudioKind;
+  readonly position: Vec3Like;
+  readonly normal?: Vec3Like;
+  /** Speed into the surface, m/s. */
+  readonly impactSpeed: number;
+  readonly surface?: AcousticSurface;
+}
+
+/**
+ * Handling a throwable. `position` null = the listener's own hands (first person); otherwise spatial (remote pin
+ * pull from `flags.cooking`, throw whoosh from `ThrowStart`).
+ */
+export interface ThrowActionAudioEvent {
+  readonly action: "draw" | "pinPull" | "spoon" | "throw" | "pinReturn" | "holster";
+  readonly kind: ThrowableAudioKind;
+  readonly style?: "overhand" | "underhand";
+  readonly position: Vec3Like | null;
+}
+
+/** A smoke canister going off or a molotov bursting (`Detonate` / `AreaEffectStart`). */
+export interface AreaStartAudioEvent {
+  readonly position: Vec3Like;
+  readonly age?: number;
+}
+
+export type UseItemAudioId = "bandage" | "first_aid" | "medkit" | "energy_drink" | "painkiller";
+
+/** Healing or boosting foley timed across the use (netcode: derived from `actionKind` + `phaseStart`). */
+export interface ItemUseAudioEvent {
+  readonly itemId: UseItemAudioId;
+  /** Total use time, s; cues are spread across it. */
+  readonly seconds: number;
+  /** Seconds already elapsed (late join for remote players). */
+  readonly elapsed?: number;
+  /** null = the listener (first person). */
+  readonly position: Vec3Like | null;
+  /** Cancellation tag for {@link GameAudio.stopItemUse}. */
+  readonly tag: string;
+}
+
+export type PickupAudioKind = "ammo" | "weapon" | "armor" | "backpack" | "consumable" | "throwable";
+
+export interface ArmorHitAudioEvent {
+  /** Damage the piece absorbed. */
+  readonly absorbed: number;
+  readonly destroyed: boolean;
+  /** null = the listener's own armor. */
+  readonly position: Vec3Like | null;
 }
 
 /** A bullet passing the listener (derived client-side from `Shot` trajectories). */

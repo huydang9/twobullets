@@ -1,6 +1,7 @@
-import { Vector3, type Scene } from "@babylonjs/core";
+import { Vector3, type Observer, type Scene } from "@babylonjs/core";
 import type { HitZone, Projectile, WeaponId } from "@twobullets/shared";
-import type { CombatView } from "../combat/types";
+import type { CombatView, DamageEvent } from "../combat/types";
+import type { EquipmentView } from "../equipment/types";
 import type { PlayerController } from "../player/PlayerController";
 import type { TargetRange } from "../targets/TargetRange";
 import type { ClipPlan } from "../viewmodel/clipPlans";
@@ -9,6 +10,7 @@ import { AudioDebug } from "./AudioDebug";
 import { AudioEngine } from "./AudioEngine";
 import { AudioSettings } from "./AudioSettings";
 import { AudioWorldProbe } from "./AudioWorldProbe";
+import { EquipmentAudio } from "./equipment/EquipmentAudio";
 import { FootstepSystem, type FootstepEmitterSource } from "./FootstepSystem";
 import { GameAudio } from "./GameAudio";
 import { NearMissDetector } from "./NearMissDetector";
@@ -35,6 +37,8 @@ export class AudioDirector {
   readonly flyBys: Projectile[] = [];
 
   private readonly nearMiss: NearMissDetector;
+  private equipment: EquipmentAudio | null = null;
+  private readonly damageObserver: Observer<DamageEvent>;
   private readonly forward = new Vector3();
   private readonly up = new Vector3();
   private readonly ownShots = { projectiles: [] as readonly Projectile[], own: true };
@@ -53,6 +57,10 @@ export class AudioDirector {
     this.nearMiss = new NearMissDetector(this.audio);
     const targets = targetFootsteps(combat);
     if (targets) this.footsteps.sources.push(targets);
+    // Armor on the target: a plate clank where the bullet struck (and a crack when the piece breaks).
+    this.damageObserver = combat.onDamage.add((event) => {
+      if (event.armorAbsorbed > 0) this.audio.playArmorHit({ absorbed: event.armorAbsorbed, destroyed: event.armorDestroyed, position: event.point });
+    });
     if (import.meta.env.DEV) this.debug = new AudioDebug(this);
   }
 
@@ -72,7 +80,18 @@ export class AudioDirector {
     this.ownShots.projectiles = this.combat.projectiles;
     this.nearMiss.update(this.projectileLists, head);
     this.ambience.update(dt, head);
+    if (this.equipment) this.equipment.update(dt);
+    else this.audio.updateAreas(dt);
     this.debug?.update(dt);
+  }
+
+  /**
+   * Throwables, smoke/fire loops, flashbang ringing, healing, pickups, armor and knocked/eliminated sounds for the
+   * local player's equipment. Call once after EquipmentSystem exists (Game.ts); a second call replaces the first.
+   */
+  attachEquipment(view: EquipmentView): void {
+    this.equipment?.dispose();
+    this.equipment = new EquipmentAudio(this.audio, view);
   }
 
   // --- Local combat events ------------------------------------------------------------------------------------------
@@ -104,6 +123,8 @@ export class AudioDirector {
   }
 
   dispose(): void {
+    this.damageObserver.remove();
+    this.equipment?.dispose();
     this.debug?.dispose();
     this.ambience.stop();
     this.engine.dispose();

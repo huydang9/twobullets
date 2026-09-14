@@ -150,7 +150,7 @@ export function removeStack(inventory: InventoryState, itemId: StackItemId, quan
 /**
  * Picks up a ground item.
  * - Stack items: as much as fits; the rest stays on the ground.
- * - Weapons: the first empty slot of the right class; otherwise replaces `replaceSlot` (a primary for primaries,
+ * - Weapons: `replaceSlot` if it is an empty slot of the right class, else the first empty one; otherwise replaces `replaceSlot` (a primary for primaries,
  *   default primary 1; always the sidearm slot for sidearms) and drops the old weapon with its magazine.
  * - Helmet/vest/backpack: equips and drops the worn one. A smaller backpack can't replace a bigger one while its
  *   contents wouldn't fit.
@@ -172,7 +172,9 @@ export function pickUp(inventory: InventoryState, item: ItemInstance, replaceSlo
     case "weapon": {
       const weapon: WeaponItemState = { weaponId: def.weaponId, magazine: item.magazine ?? 0 };
       const candidates: WeaponSlot[] = def.weaponClass === "sidearm" ? [SIDEARM_SLOT] : [0, 1];
-      const empty = candidates.find((slot) => inventory.weapons[slot] === null);
+      // A requested slot that is empty wins (inventory drag onto slot 2); otherwise the first empty one of the class.
+      const requested = replaceSlot !== undefined && candidates.includes(replaceSlot) && inventory.weapons[replaceSlot] === null ? replaceSlot : undefined;
+      const empty = requested ?? candidates.find((slot) => inventory.weapons[slot] === null);
       const slot = empty ?? (def.weaponClass === "sidearm" ? SIDEARM_SLOT : replaceSlot === 1 ? 1 : 0);
       const old = inventory.weapons[slot];
       const weapons = replaceWeapon(inventory.weapons, slot, weapon);
@@ -271,6 +273,16 @@ export function consumeAmmo(inventory: InventoryState, weaponId: WeaponId, round
   if (rounds <= 0) return inventory;
   const ammo = ammoForWeapon(weaponId);
   return setCount(inventory, ammo, Math.max(0, countItem(inventory, ammo) - rounds));
+}
+
+/**
+ * PUBG-style auto pickup: ammo for a carried weapon, heals, boosts and throwables, when at least one unit fits. Gear
+ * that swaps (weapons, armor, backpacks) always needs an explicit pickup.
+ */
+export function wantsAutoPickup(inventory: InventoryState, itemId: ItemId): boolean {
+  const def = ITEMS[itemId];
+  if (def.category === "ammo" && !inventory.weapons.some((weapon) => weapon !== null && ammoForWeapon(weapon.weaponId) === def.id)) return false;
+  return isStackItem(itemId) && maxAddable(inventory, itemId) > 0;
 }
 
 export function weaponSlotOf(inventory: InventoryState, weaponId: WeaponId): WeaponSlot | null {

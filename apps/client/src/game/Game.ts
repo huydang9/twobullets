@@ -4,17 +4,22 @@ import { ARENA_LEVEL, MOVEMENT, buildLevel } from "@twobullets/shared";
 import { AssetLibrary, installAssetDevTools, type AssetLoadProgress, type Credit } from "../assets";
 import { CombatSystem } from "../combat/CombatSystem";
 import { installDebugTools } from "../debug/debugTools";
+import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
+import { LootRenderer, presentationLootModels } from "../equipment/loot";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
 import { DynamicResolution } from "../perf/DynamicResolution";
 import { OPTIMIZATIONS } from "../perf/flags";
+import { loadGraphicsSettings } from "../perf/graphicsSettings";
 import type { PerfTools } from "../perf/PerfTools";
 import { PlayerController } from "../player/PlayerController";
+import { PlayerLife } from "../player/PlayerLife";
 import { Hud } from "../ui/Hud";
+import { InventoryScreen } from "../ui/inventory";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
 
-/** Top-level wiring: engine, physics, assets, world, player, combat, HUD. Owns the frame loop. */
+/** Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop. */
 export class Game {
   private constructor(
     private readonly engine: Engine,
@@ -22,8 +27,11 @@ export class Game {
     private readonly input: InputManager,
     private readonly player: PlayerController,
     private readonly combat: CombatSystem,
+    private readonly equipment: EquipmentSystem,
     private readonly presentation: WeaponPresentation,
     private readonly hud: Hud,
+    private readonly loot: LootRenderer,
+    private readonly inventory: InventoryScreen,
     private readonly world: MapRuntime | null,
     private readonly perf: PerfTools | null,
     private readonly dynamicResolution: DynamicResolution | null,
@@ -33,7 +41,11 @@ export class Game {
     const params = new URLSearchParams(window.location.search);
     // DEV: `?bench=v1` runs the Map v1 benchmark (docs/perf/benchmark.md); it implies `?map=v1`.
     const benchmark = import.meta.env.DEV ? params.get("bench") : null;
-    const engine = new Engine(canvas, true, { stencil: true, preserveDrawingBuffer: false }, true);
+    // The canvas's multisampling can't change after creation, so the saved AA mode (or DEV `?aa=`) decides it here.
+    // A benchmark keeps it on: its MSAA/FXAA variants switch the pass at runtime.
+    const aa = import.meta.env.DEV ? params.get("aa") : null;
+    const msaa = benchmark !== null || (aa === "msaa" || aa === "fxaa" ? aa : loadGraphicsSettings().antiAliasing) === "msaa";
+    const engine = new Engine(canvas, msaa, { stencil: true, preserveDrawingBuffer: false }, true);
     const scene = new Scene(engine);
     // Aiming uses pointer lock and Havok raycasts; Babylon's per-mousemove picking has nothing to find.
     scene.skipPointerMovePicking = OPTIMIZATIONS.skipPointerMovePicking;
@@ -67,14 +79,36 @@ export class Game {
 
     // Combat subscribes to player.onTick, so weapons step in lockstep with movement.
     const combat = new CombatSystem(scene, input, player, levelData, environment, assets);
+    // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
+    // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
+    const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
+    const equipment = new EquipmentSystem(scene, input, player, {
+      ...(world ? { map: { pois: world.map.pois, buildings: world.layout.buildings } } : {}),
+      targets: () => targets,
+    });
+    player.setMoveGates(() => equipment.modifiers);
+    combat.attachEquipment(equipment);
+
+    // Owns the equipment presentation (hands, grenades, smoke, fire, flash) and the audio director.
     const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
+    presentation.attachEquipment(equipment);
+    presentation.audio.attachEquipment(equipment);
     world?.attach(player, presentation.audio.probe);
+    // Ground loot shares the presentation's throwable and consumable meshes (and their materials).
+    const loot = new LootRenderer(scene, equipment, { assets, skyFill: environment.skyFill, models: presentationLootModels(presentation.itemMeshes) });
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
     input.onLockChange((locked) => hud.setLocked(locked));
     hud.setLocked(input.isLocked);
     hud.attachCombat(combat, scene);
     void loadCredits(assets).then((lines) => hud.setCredits(lines));
+
+    // Equipment HUD (armor, boost, rings, prompts, pickup feed, death recap) lives in the combat HUD.
+    hud.attachEquipment(equipment);
+    // Tab: releases pointer lock while open and asks for it again on close (the play overlay's click is the fallback).
+    const inventory = new InventoryScreen(hudRoot, equipment, input);
+    // DEV: `?teammate=1` simulates a standing teammate, so 0 HP knocks (revive with `__twobullets.life.revive()`).
+    const life = new PlayerLife(player, equipment, equipment, { teammate: import.meta.env.DEV && params.get("teammate") === "1" });
 
     installDebugTools(scene, input, { hud });
 
@@ -87,11 +121,11 @@ export class Game {
     // Off by default (`?opt=dynamicResolution:1&fps=120`); never during a benchmark, which measures fixed resolutions.
     const dynamicResolution = OPTIMIZATIONS.dynamicResolution && !benchmark ? new DynamicResolution(engine, { targetFps: Number(params.get("fps")) || 120 }) : null;
 
-    const game = new Game(engine, scene, input, player, combat, presentation, hud, world, perf, dynamicResolution);
+    const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution);
     if (import.meta.env.DEV) {
       installAssetDevTools(assets);
       // Console/automation handle for debugging; stripped from production builds.
-      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, presentation, hud, assets, world, perf } });
+      Object.assign(window, { __twobullets: { engine, scene, input, player, combat, equipment, life, presentation, hud, loot, inventory, assets, world, perf } });
     }
     game.start();
     return game;
@@ -105,12 +139,16 @@ export class Game {
       // The benchmark poses the camera itself.
       if (!perf?.drivesCamera) this.player.update(dt);
       this.combat.update(dt);
+      this.equipment.update();
       this.presentation.update(dt);
+      this.loot.update();
       this.world?.update(dt);
       perf?.beforeRender();
       this.scene.render();
       perf?.afterRender();
+      this.hud.setFlashWhiteout(this.presentation.equipment.flashWhiteout);
       this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
+      this.inventory.update();
       this.input.endFrame();
       this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
       perf?.endFrame();

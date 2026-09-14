@@ -1,11 +1,13 @@
 import { Camera, Vector3, type IObserver, type Scene } from "@babylonjs/core";
-import type { WeaponEvent } from "@twobullets/shared";
+import type { Vec3, WeaponEvent } from "@twobullets/shared";
 import type { CombatView, DamageEvent, ShotEvent } from "../combat/types";
+import type { AreaDamageEvent, EquipmentView } from "../equipment/types";
 import { AmmoPanel } from "./AmmoPanel";
 import { Compass } from "./Compass";
 import type { Crosshair } from "./Crosshair";
 import { DamageNumbers, type DamageHit } from "./DamageNumbers";
 import { el } from "./dom";
+import { EquipmentHud, type EquipmentHudHost } from "./equipment/EquipmentHud";
 import { HealthPanel } from "./HealthPanel";
 import { HitMarker } from "./HitMarker";
 import { KillFeed } from "./KillFeed";
@@ -30,9 +32,15 @@ interface ReloadPreview {
   readonly seconds: number;
 }
 
-/** Every combat-driven HUD element, wired to a {@link CombatView}. Lives in one layer that the Hud shows/hides. */
-export class CombatHud {
-  private readonly layer: HTMLDivElement;
+/**
+ * Every combat-driven HUD element, wired to a {@link CombatView}, plus the equipment HUD once an equipment view is
+ * bound. Lives in one layer that the Hud shows/hides.
+ */
+export class CombatHud implements EquipmentHudHost {
+  readonly layer: HTMLDivElement;
+  readonly dock: HTMLDivElement;
+  readonly health: HealthPanel;
+  readonly slots: WeaponSlots;
   private readonly scope: ScopeOverlay;
   private readonly compass: Compass;
   private readonly hitMarker: HitMarker;
@@ -40,9 +48,8 @@ export class CombatHud {
   private readonly reload: ReloadIndicator;
   private readonly killFeed: KillFeed;
   private readonly killNotice: KillNotice;
-  private readonly health: HealthPanel;
-  private readonly slots: WeaponSlots;
   private readonly ammo: AmmoPanel;
+  private readonly equipment: EquipmentHud;
   private readonly observers: IObserver[];
   private readonly forwardAxis: Vector3;
   private readonly forward = new Vector3();
@@ -72,10 +79,11 @@ export class CombatHud {
     this.killFeed = new KillFeed(this.layer);
     this.killNotice = new KillNotice(this.layer);
 
-    const dock = el("div", "tb-dock", undefined, this.layer);
-    this.slots = new WeaponSlots(dock);
-    this.health = new HealthPanel(dock, vignettes);
-    this.ammo = new AmmoPanel(dock);
+    this.dock = el("div", "tb-dock", undefined, this.layer);
+    this.slots = new WeaponSlots(this.dock);
+    this.health = new HealthPanel(this.dock, vignettes);
+    this.ammo = new AmmoPanel(this.dock);
+    this.equipment = new EquipmentHud(this);
 
     this.observers = [
       combat.onShot.add(this.handleShot),
@@ -90,6 +98,17 @@ export class CombatHud {
 
   get visible(): boolean {
     return !this.layer.hidden;
+  }
+
+  /** Drives health, boost, armor, throwables, prompts and the death recap from equipment (null detaches). */
+  bindEquipment(view: EquipmentView | null): void {
+    this.equipment.bind(view);
+  }
+
+  /** 0..1: fades the whole combat layer out under a flashbang whiteout (1 = hidden). */
+  set whiteout(amount: number) {
+    const opacity = amount >= 0.999 ? "0" : amount <= 0.001 ? "" : (1 - amount).toFixed(2);
+    if (this.layer.style.opacity !== opacity) this.layer.style.opacity = opacity;
   }
 
   /** Per frame, after scene.render(). */
@@ -117,9 +136,11 @@ export class CombatHud {
     this.compass.update(this.bearingOverride ?? this.cameraBearing(camera));
 
     const active = state.slots[state.activeIndex];
+    this.ammo.visible = active !== null && active !== undefined;
     if (active) this.ammo.update(active, weapon, state.phase);
-    this.slots.update(state);
-    this.health.update(this.healthOverride ?? combat.health, combat.maxHealth);
+    this.slots.update(state, this.equipment.throwableInHand);
+    if (this.equipment.bound) this.equipment.update(now, this.healthOverride);
+    else this.health.update(this.healthOverride ?? combat.health, combat.maxHealth);
 
     const preview = this.reloadPreview;
     if (preview) {
@@ -137,13 +158,29 @@ export class CombatHud {
   dispose(): void {
     for (const observer of this.observers) observer.remove();
     this.observers.length = 0;
+    this.equipment.dispose();
     this.layer.remove();
   }
 
-  /** Shows a hit exactly as a real `onDamage` event would. */
-  showHit(hit: DamageHit, weaponName: string, distance: number): void {
+  viewerPosition(): Vec3 | null {
+    return mainCamera(this.scene)?.globalPosition ?? null;
+  }
+
+  showAreaKill(event: AreaDamageEvent, weaponName: string): void {
     const now = performance.now();
-    this.hitMarker.show(hit.killed, now);
+    const viewer = this.viewerPosition();
+    const p = event.point;
+    const distance = viewer ? Math.hypot(p.x - viewer.x, p.y - viewer.y, p.z - viewer.z) : 0;
+    const kill = { targetId: event.targetName ?? event.targetId, headshot: false, weaponName, distance };
+    this.hitMarker.show(true, now);
+    this.killFeed.push(kill, now);
+    this.killNotice.notify(kill);
+  }
+
+  /** Shows a hit exactly as a real `onDamage` event would. */
+  showHit(hit: DamageHit, weaponName: string, distance: number, armorAbsorbed = 0): void {
+    const now = performance.now();
+    this.hitMarker.show(hit.killed, now, armorAbsorbed > 0);
     this.damageNumbers?.add(hit, now);
     if (hit.killed) {
       const kill = { targetId: hit.targetId, headshot: hit.zone === "head", weaponName, distance };
@@ -188,7 +225,7 @@ export class CombatHud {
   };
 
   private readonly handleDamage = (event: DamageEvent): void => {
-    this.showHit(event, event.weapon.name, event.distance);
+    this.showHit(event, event.weapon.name, event.distance, event.armorAbsorbed);
   };
 }
 

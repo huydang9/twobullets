@@ -24,6 +24,10 @@ const MIN_EQUIP_SECONDS_FOR_HIDE = 0.45;
 /** The fire clips already kick the gun at the hip; procedural recoil only adds variation there. */
 const ANIMATED_HIP_RECOIL_SCALE = 0.4;
 const FORWARD = new Vector3(0, 0, 1);
+/** Time to lower the gun out of view when a throwable or item takes the hands. */
+const STOW_SECONDS = 0.2;
+/** Draw time when the gun comes back. */
+const UNSTOW_SECONDS = 0.45;
 
 let suppressed = false;
 
@@ -55,6 +59,12 @@ export class Viewmodel {
   /** Visual camera kick (radians) for the caller to forward to the player camera. */
   readonly punch = new Vector3();
 
+  /**
+   * Camera-space node carrying only the shared hand motion (look sway, bob, breathing, landing), no weapon offsets.
+   * Other first-person rigs (throwable hands) parent here so they move like the gun would.
+   */
+  readonly motion: TransformNode;
+
   /** Parented to the camera; scaled in X/Y to cancel FOV changes. */
   private readonly fovRoot: TransformNode;
   private readonly pose: TransformNode;
@@ -83,6 +93,9 @@ export class Viewmodel {
   private wasGrounded = true;
   private airVelocityY = 0;
   private hidden = false;
+  /** 0 = gun in hand, 1 = fully lowered out of view. */
+  private stow = 0;
+  private stowTarget = false;
 
   private readonly recoilBack = new Spring(11, 0.5);
   private readonly recoilUp = new Spring(11, 0.5);
@@ -116,6 +129,8 @@ export class Viewmodel {
     this.fovRoot.parent = camera;
     this.pose = new TransformNode("vm_pose", scene);
     this.pose.parent = this.fovRoot;
+    this.motion = new TransformNode("vm_motion", scene);
+    this.motion.parent = this.fovRoot;
     this.redDot = new RedDot(scene, camera);
 
     let placeholderMaterial: Material | null = null;
@@ -134,7 +149,7 @@ export class Viewmodel {
         rig = WeaponRig.placeholder(scene, id, placeholderMaterial);
       }
       rig.attach.parent = this.pose;
-      for (const mesh of rig.meshes) prepareMesh(mesh, environment);
+      for (const mesh of rig.meshes) prepareViewmodelMesh(mesh, environment);
       rig.setEnabled(false);
       rigs[id] = rig;
     }
@@ -156,9 +171,32 @@ export class Viewmodel {
     return (this.pendingRig ?? this.rig).id;
   }
 
-  /** False while a scoped weapon is fully aimed. */
+  /** False while a scoped weapon is fully aimed or the gun is stowed. */
   get visible(): boolean {
     return !this.hidden;
+  }
+
+  /** True while the gun is lowered or on its way down (see setStowed). */
+  get stowed(): boolean {
+    return this.stowTarget;
+  }
+
+  /**
+   * Lowers the gun out of view (throwable or item in hand, knocked) or brings it back with a draw. Idempotent; call
+   * every frame with the desired state.
+   */
+  setStowed(stowed: boolean): void {
+    if (stowed === this.stowTarget) return;
+    this.stowTarget = stowed;
+    if (stowed) {
+      this.completeSwitch();
+      this.reloadSeconds = 0;
+      this.rig.playFor("hide", STOW_SECONDS, "hold");
+      return;
+    }
+    // The next update un-hides the rig; the draw clip (or the placeholder's equip curve) brings it up.
+    this.stow = 0;
+    this.equip(this.weaponId, UNSTOW_SECONDS);
   }
 
   get activeProfile(): ViewmodelProfile {
@@ -260,7 +298,8 @@ export class Viewmodel {
 
     const scoped = frame.def.ads.scoped;
     const ads = smoothstep(0, 1, frame.adsBlend);
-    this.setHidden(suppressed || (scoped && frame.adsBlend > SCOPE_HIDE_BLEND));
+    if (this.stowTarget) this.stow = Math.min(1, this.stow + dt / STOW_SECONDS);
+    this.setHidden(suppressed || this.stow >= 1 || (scoped && frame.adsBlend > SCOPE_HIDE_BLEND));
     const reloading = frame.phase === "reloading";
 
     // FOV compensation: scaling camera-space X/Y by the tangent ratio projects exactly like the reference FOV.
@@ -339,6 +378,13 @@ export class Viewmodel {
       reload = this.reload.update(dt, p < 1 ? smoothstep(0, 0.12, p) * (1 - smoothstep(0.86, 1, p)) : 0);
     }
 
+    // The hide clip lowers animated guns; this carries placeholders (and anything the clip leaves in view) out.
+    const stowDown = smoothstep(0, 1, this.stow);
+    equipDown = Math.max(equipDown, stowDown);
+
+    this.motion.position.set(swayX + bobX + breatheX, swayY + bobY + breatheY + landY, 0);
+    this.motion.rotation.set(swayPitch + bobPitch + breathePitch + landPitch, swayYaw, swayRoll + bobRoll);
+
     // --- Compose: the pose origin is the sight point ------------------------------------------------------------
     const hip = profile.hipSight;
     const hipRotation = profile.hipRotation;
@@ -359,6 +405,7 @@ export class Viewmodel {
     );
 
     this.fovRoot.computeWorldMatrix(true);
+    this.motion.computeWorldMatrix(true);
     this.pose.computeWorldMatrix(true);
     rig.stabilize(ads);
     rig.updateSockets();
@@ -389,6 +436,7 @@ export class Viewmodel {
     for (const id of WEAPON_IDS) this.rigs[id].dispose();
     this.placeholderMaterial?.dispose();
     this.redDot.dispose();
+    this.motion.dispose();
     this.pose.dispose();
     this.fovRoot.dispose();
   }
@@ -422,7 +470,8 @@ export class Viewmodel {
   }
 }
 
-function prepareMesh(mesh: AbstractMesh, environment: Environment): void {
+/** Render setup shared by every first-person mesh: viewmodel group, no fog/shadows/culling, IBL-only ambient. */
+export function prepareViewmodelMesh(mesh: AbstractMesh, environment: Pick<Environment, "skyFill">): void {
   mesh.renderingGroupId = VIEWMODEL_RENDERING_GROUP;
   mesh.isPickable = false;
   mesh.receiveShadows = false;

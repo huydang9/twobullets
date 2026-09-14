@@ -84,7 +84,11 @@ export type WeaponPhase = "ready" | "equipping" | "reloading";
 
 /** Per-player weapon simulation state. Plain data: snapshot, send and replay like MoveState. */
 export interface WeaponState {
-  readonly slots: readonly WeaponSlotState[];
+  /**
+   * One entry per slot; the index is the slot (inventory weapon slots: primary 1, primary 2, sidearm). Null is an
+   * empty slot: it can't be selected, and an empty active slot means unarmed (nothing fires, aims or reloads).
+   */
+  readonly slots: readonly (WeaponSlotState | null)[];
   /** Index into slots. */
   readonly activeIndex: number;
   readonly phase: WeaponPhase;

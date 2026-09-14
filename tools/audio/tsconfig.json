@@ -6,5 +6,5 @@
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["**/*.ts", "../../apps/client/src/audio/acoustics.ts", "../../apps/client/src/audio/audioManifest.ts", "../../apps/client/src/audio/weaponMix.ts"]
+  "include": ["**/*.ts", "../../apps/client/src/audio/acoustics.ts", "../../apps/client/src/audio/audioManifest.ts", "../../apps/client/src/audio/weaponMix.ts", "../../apps/client/src/audio/equipmentMix.ts"]
 }

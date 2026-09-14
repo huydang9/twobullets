@@ -1,19 +1,26 @@
 import { Observable, Vector3, type Observer, type Scene } from "@babylonjs/core";
 import {
   DEFAULT_LOADOUT,
+  commitWeaponsToInventory,
   computeDamage,
   createWeaponState,
   currentSpreadDegrees,
+  gateCombatInput,
   getWeaponDef,
   spawnProjectiles,
   stepProjectiles,
   stepWeapon,
+  syncWeaponsFromInventory,
+  weaponStateFromInventory,
   type LevelData,
   type Projectile,
   type ProjectileImpact,
   type WeaponContext,
   type WeaponDef,
   type WeaponEvent,
+  type WeaponId,
+  type WeaponLoadoutOptions,
+  type WeaponSlot,
   type WeaponState,
 } from "@twobullets/shared";
 import type { AssetLibrary } from "../assets";
@@ -24,9 +31,16 @@ import type { Environment } from "../world/environment";
 import { CombatInputQueue } from "./CombatInputQueue";
 import { HavokRaycaster } from "./HavokRaycaster";
 import { HitboxRegistry } from "./hitboxes";
-import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "./types";
+import { TargetArmor, testTargetArmor } from "./TargetArmor";
+import type { CombatEquipmentLink, CombatView, DamageEvent, ImpactEvent, ShotEvent } from "./types";
 
 const PLAYER_MAX_HEALTH = 100;
+/**
+ * With equipment attached, weapon reserve is the ammo items in the bag and reloads consume them
+ * (docs/equipment/inventory.md §2). False keeps the old per-weapon reserve from WeaponDef.reserveAmmo.
+ */
+export const AMMO_FROM_INVENTORY = true;
+const LOADOUT_OPTIONS: WeaponLoadoutOptions = { ammoFromInventory: AMMO_FROM_INVENTORY };
 /**
  * The simulated ADS blend moves in 60 Hz steps; the rendered blend chases it at slightly above the sim's own rate,
  * which reads as continuous motion on high refresh screens while lagging at most about a tick.
@@ -50,12 +64,17 @@ export class CombatSystem implements CombatView {
   weaponState: WeaponState = createWeaponState(DEFAULT_LOADOUT);
   spreadDegrees = 0;
   projectiles: readonly Projectile[] = [];
-  health = PLAYER_MAX_HEALTH;
-  readonly maxHealth = PLAYER_MAX_HEALTH;
   /** Render-smoothed ADS blend, 0..1 (weaponState.adsBlend only changes at the tick rate). */
   adsBlend = 0;
+  /**
+   * Weapon gate read every tick (design.md §10.2.1). Defaults to the attached equipment's modifiers; set it to override
+   * (e.g. a menu that blocks shooting).
+   */
+  gate: (() => { readonly allowWeapons: boolean }) | null = null;
 
   readonly targets: TargetRange;
+  /** Helmets and vests on practice soldiers; bullets and explosions go through it before the soldier's health. */
+  readonly targetArmor = new TargetArmor();
   private readonly hitboxes = new HitboxRegistry();
   private readonly raycaster: HavokRaycaster;
   private readonly inputQueue: CombatInputQueue;
@@ -63,6 +82,11 @@ export class CombatSystem implements CombatView {
   private readonly eye = new Vector3();
   private nextProjectileId = 1;
   private readonly allocateProjectileId = (): number => this.nextProjectileId++;
+  private equipment: CombatEquipmentLink | null = null;
+  private loadoutVersion = -1;
+  private fireLatched = false;
+  private lastWeaponId: WeaponId = DEFAULT_LOADOUT[0]!;
+  private readonly targetsAlive: boolean[];
 
   constructor(
     scene: Scene,
@@ -75,13 +99,40 @@ export class CombatSystem implements CombatView {
     this.inputQueue = new CombatInputQueue(input);
     this.raycaster = new HavokRaycaster(scene, this.hitboxes);
     this.targets = new TargetRange(scene, level.targets, this.hitboxes, environment, assets);
+    this.targetsAlive = this.targets.dummies.map((dummy) => dummy.alive);
+    if (globalThis.location && new URLSearchParams(globalThis.location.search).get("targetArmor") === "1") {
+      this.targets.dummies.forEach((dummy, index) => this.targetArmor.issue(dummy.id, testTargetArmor(index)));
+    }
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
+  }
+
+  /**
+   * Takes weapons, magazines and ammo from the equipment inventory (slots 1–3: primary 1, primary 2, sidearm), gates
+   * weapons on the equipment state and reads health from its vitals. Without it combat runs the standalone 4-weapon
+   * loadout. Game wiring: `combat.attachEquipment(equipment)`.
+   */
+  attachEquipment(equipment: CombatEquipmentLink | null): void {
+    this.equipment = equipment;
+    this.loadoutVersion = -1;
+    this.fireLatched = false;
+    if (!equipment) this.weaponState = createWeaponState(DEFAULT_LOADOUT);
   }
 
   get activeWeapon(): WeaponDef {
     const slot = this.weaponState.slots[this.weaponState.activeIndex];
-    if (!slot) throw new Error("No active weapon slot");
-    return getWeaponDef(slot.id);
+    return getWeaponDef(slot?.id ?? this.lastWeaponId);
+  }
+
+  get armed(): boolean {
+    return !!this.weaponState.slots[this.weaponState.activeIndex];
+  }
+
+  get health(): number {
+    return this.equipment?.vitals.health ?? PLAYER_MAX_HEALTH;
+  }
+
+  get maxHealth(): number {
+    return this.equipment?.maxHealth ?? PLAYER_MAX_HEALTH;
   }
 
   get phaseProgress(): number | null {
@@ -95,7 +146,7 @@ export class CombatSystem implements CombatView {
   /** Per render frame, after player.update: queues untaken input, ADS zoom/modifiers and dummy animation. */
   update(dt: number): void {
     const state = this.weaponState;
-    this.inputQueue.endFrame(state.activeIndex, state.slots.length);
+    this.inputQueue.endFrame(state.activeIndex, state.slots);
 
     const def = this.activeWeapon;
     const maxStep = (ADS_SMOOTH_RATE_SCALE * dt) / Math.max(def.ads.seconds, 1e-3);
@@ -110,6 +161,7 @@ export class CombatSystem implements CombatView {
     this.player.setZoom(def.ads.fovDegrees, zoom);
 
     this.targets.update(dt);
+    this.restoreRespawnedArmor();
   }
 
   dispose(): void {
@@ -134,10 +186,31 @@ export class CombatSystem implements CombatView {
       sprinting: move.sprinting,
     };
 
-    const input = this.inputQueue.take(this.weaponState.activeIndex, this.weaponState.slots.length);
-    const result = stepWeapon(this.weaponState, input, ctx, dt);
+    const equipment = this.equipment;
+    let state = this.weaponState;
+    if (equipment) {
+      if (equipment.loadoutVersion !== this.loadoutVersion) {
+        this.loadoutVersion = equipment.loadoutVersion;
+        state = weaponStateFromInventory(equipment.inventory, LOADOUT_OPTIONS);
+      }
+      const synced = syncWeaponsFromInventory(state, equipment.inventory, LOADOUT_OPTIONS);
+      state = synced.state;
+      for (const event of synced.events) this.onWeaponEvent.notifyObservers(event);
+    }
+
+    const raw = this.inputQueue.take(state.activeIndex, state.slots);
+    const gate = this.gate?.() ?? equipment?.modifiers;
+    const gated = gateCombatInput(raw, gate?.allowWeapons ?? true, this.fireLatched);
+    this.fireLatched = gated.fireLatched;
+    const result = stepWeapon(state, gated.input, ctx, dt);
     this.weaponState = result.state;
     this.spreadDegrees = currentSpreadDegrees(result.state, ctx);
+    const active = result.state.slots[result.state.activeIndex];
+    if (active) this.lastWeaponId = active.id;
+    if (equipment) {
+      const inventory = commitWeaponsToInventory(state, result.state, equipment.inventory, LOADOUT_OPTIONS);
+      equipment.commitWeapons(inventory, active ? (result.state.activeIndex as WeaponSlot) : null);
+    }
 
     for (const event of result.events) this.onWeaponEvent.notifyObservers(event);
 
@@ -175,11 +248,15 @@ export class CombatSystem implements CombatView {
 
     const { owner, zone } = hitbox;
     this.onImpact.notifyObservers({ weapon, point, normal, surface: "target", targetId: owner.id, zone });
+    if (!owner.alive) return;
     const v = projectile.velocity;
+    // Helmet (head) or vest (body) soaks its share first; limbs are unprotected.
+    const armor = this.targetArmor.absorb(owner.id, computeDamage(weapon, zone, distance), "bullet", zone);
     const damage = owner.applyDamage({
       colliderId: hitbox.colliderId,
       zone,
-      amount: computeDamage(weapon, zone, distance),
+      amount: armor.amount,
+      kind: "bullet",
       point,
       direction: new Vector3(v.x, v.y, v.z).normalize(),
     });
@@ -194,6 +271,18 @@ export class CombatSystem implements CombatView {
       killed: damage.killed,
       point,
       distance,
+      armorAbsorbed: armor.absorbed,
+      armorSlot: armor.slot,
+      armorDestroyed: armor.destroyed,
+    });
+  }
+
+  /** Practice soldiers come back with the armor they were issued. */
+  private restoreRespawnedArmor(): void {
+    this.targets.dummies.forEach((dummy, index) => {
+      const alive = dummy.alive;
+      if (alive && !this.targetsAlive[index]) this.targetArmor.restore(dummy.id);
+      this.targetsAlive[index] = alive;
     });
   }
 }

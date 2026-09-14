@@ -3,7 +3,9 @@ import {
   MOVEMENT,
   SIMULATION,
   getWeaponDef,
+  type ConsumableItemId,
   type FiredShot,
+  type ThrowableKind,
   type HitZone,
   type Projectile,
   type WeaponDef,
@@ -13,6 +15,9 @@ import {
 import type { AssetLibrary } from "../assets";
 import { AudioDirector } from "../audio/AudioDirector";
 import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "../combat/types";
+import { EquipmentPresentation } from "../equipment/presentation/EquipmentPresentation";
+import type { ItemMeshLibrary } from "../equipment/presentation/itemMeshes";
+import type { EquipmentView } from "../equipment/types";
 import type { PlayerController } from "../player/PlayerController";
 import type { TargetRange } from "../targets/TargetRange";
 import { VIEWMODEL_RENDERING_GROUP, Viewmodel, type ViewmodelFrame } from "../viewmodel/Viewmodel";
@@ -76,6 +81,10 @@ export class WeaponPresentation {
   private readonly casings: ShellCasings;
   /** All game audio (DEV console: `__audio.help()`). */
   readonly audio: AudioDirector;
+  /** Throwables, items, smoke, fire and flash visuals (DEV console: `__twobullets.presentation.equipment`). */
+  readonly equipment: EquipmentPresentation;
+  /** DEV/settings hook: lowers the gun (holster) regardless of equipment state. */
+  weaponLowered = false;
 
   private readonly shotObserver: Observer<ShotEvent>;
   private readonly weaponObserver: Observer<WeaponEvent>;
@@ -182,7 +191,27 @@ export class WeaponPresentation {
       this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone, event.targetId),
     );
     this.damageObserver = combat.onDamage.add((event) => this.handleDamage(event.zone, event.killed, event.targetId));
+    this.equipment = new EquipmentPresentation({
+      scene,
+      camera: player.camera,
+      onTick: player.onTick,
+      getEyeToRef: (result) => player.getEyeToRef(result),
+      physicsBody: player.physicsBody,
+      handsParent: this.viewmodel.motion,
+      environment,
+      assets,
+    });
     this.renderObserver = scene.onBeforeRenderObservable.add(() => this.afterAnimations());
+  }
+
+  /** Connects the local player's equipment: hands, grenades, smoke, fire, flash (Game.ts wiring). */
+  attachEquipment(equipment: EquipmentView): void {
+    this.equipment.attach(equipment);
+  }
+
+  /** Procedural throwable and consumable models, shared with the loot renderer (`presentationLootModels`). */
+  get itemMeshes(): ItemMeshLibrary {
+    return this.equipment.items;
   }
 
   /** Per render frame, after combat.update and before scene.render. */
@@ -190,6 +219,8 @@ export class WeaponPresentation {
     this.time += dt;
     this.dt = dt;
     const frame = this.fillFrame();
+    this.equipment.update(dt);
+    this.viewmodel.setStowed(this.equipment.handsBusy || !this.combat.armed || this.weaponLowered);
     this.viewmodel.advance(dt);
 
     for (let i = 0; i < this.pendingShotCount; i++) {
@@ -215,6 +246,7 @@ export class WeaponPresentation {
     this.combat.onDamage.remove(this.damageObserver);
     this.scene.onBeforeRenderObservable.remove(this.renderObserver);
     this.player.setCameraPunch(0, 0, 0);
+    this.equipment.dispose();
     this.viewmodel.dispose();
     this.worldAdditive.dispose();
     this.worldAlpha.dispose();
@@ -301,6 +333,34 @@ export class WeaponPresentation {
     console.info("[blood]", { ...bloodSettings }, this.blood.stats());
   }
 
+  // Equipment previews (the full set, including `debugFire` for fire patches, is on `presentation.equipment`).
+
+  /** Draw, pin, (cook,) throw on the hands and a real-physics preview grenade from the camera. */
+  debugThrow(kind: ThrowableKind = "frag", style: "overhand" | "underhand" = "overhand", cook = false): void {
+    this.equipment.debugThrow(kind, style, cook);
+  }
+
+  debugSmoke(distance?: number): void {
+    this.equipment.debugSmoke(distance);
+  }
+
+  /** Molotov fire patch preview (`debugFire` already fires the gun). */
+  debugMolotov(distance?: number): void {
+    this.equipment.debugFire(distance);
+  }
+
+  debugFlash(strength?: number, seconds?: number): void {
+    this.equipment.debugFlash(strength, seconds);
+  }
+
+  debugExplosion(kind?: ThrowableKind, distance?: number): void {
+    this.equipment.debugExplosion(kind, distance);
+  }
+
+  debugUse(itemId?: ConsumableItemId, seconds?: number): void {
+    this.equipment.debugUse(itemId, seconds);
+  }
+
   // --- Frame steps --------------------------------------------------------------------------------------------------
 
   /** scene.onBeforeRender: animations for this frame are applied, world matrices are not yet computed. */
@@ -310,9 +370,10 @@ export class WeaponPresentation {
     this.viewmodel.update(this.frame);
     this.viewmodel.getMuzzleToRef(this.muzzle, this.muzzleForward);
     this.viewmodel.getCameraAxesToRef(this.right, this.up, this.forward);
-    const punch = this.viewmodel.punch;
-    this.player.setCameraPunch(punch.x, punch.y, punch.z);
-    this.lastPunch.copyFrom(punch);
+    // Explosion shake layers on the weapon's own punch; both are visual only.
+    const shake = this.equipment.render(dt);
+    this.lastPunch.copyFrom(this.viewmodel.punch).addInPlace(shake);
+    this.player.setCameraPunch(this.lastPunch.x, this.lastPunch.y, this.lastPunch.z);
 
     for (let i = 0; i < this.pendingShotCount; i++) {
       const shot = this.pendingShots[i] as FiredShot;

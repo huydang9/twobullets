@@ -15,6 +15,16 @@ import {
   strideLength,
 } from "../../apps/client/src/audio/acoustics.ts";
 import { AUDIO_FORMATS, AUDIO_MANIFEST, type SoundId } from "../../apps/client/src/audio/audioManifest.ts";
+import {
+  BLAST_SOUNDS,
+  USE_CUES,
+  blastDuckDb,
+  blastEcho,
+  blastLayers,
+  fireLevel,
+  flashRing,
+  smokeHissLevel,
+} from "../../apps/client/src/audio/equipmentMix.ts";
 import { WEAPON_SOUNDS, firstPersonShot, type GunId } from "../../apps/client/src/audio/weaponMix.ts";
 import { CLIPS } from "./clips.ts";
 import { measureMix } from "./lib/mixdown.ts";
@@ -156,6 +166,51 @@ check("first-person loudness hierarchy", () => {
   for (const [gun, m] of Object.entries(mix)) assert.ok(m.truePeak <= -0.9, `${gun} first-person peak ${m.truePeak.toFixed(1)} dBTP above -1 dBTP`);
   const sniperDesign = WEAPON_SOUNDS.sniper;
   assert.ok(sniperDesign.range >= WEAPON_SOUNDS.rifle.range * 1.5 && sniperDesign.rolloff < WEAPON_SOUNDS.rifle.rolloff, "sniper must carry farther");
+});
+
+// --- Equipment mix -------------------------------------------------------------------------------------------------------
+
+check("blast layers by distance", () => {
+  const frag = BLAST_SOUNDS.frag;
+  const gain = (d: number, sound: SoundId) => blastLayers(frag, d).reduce((sum, l) => sum + (l.kind === "sample" && l.sound === sound ? l.gain : 0), 0);
+  assert.ok(gain(3, frag.near) > gain(3, frag.far), "close: the near bang dominates");
+  assert.ok(gain(200, frag.near) === 0 && gain(200, frag.far) > 0, "far: only the down-range take");
+  assert.ok(blastEcho(frag, 300) > blastEcho(frag, 5), "echo grows with distance");
+  assert.ok(blastDuckDb(frag, frag.reference) >= frag.duckDb - 1e-9 && blastDuckDb(frag, frag.range) === 0, "duck scales down with distance");
+  assert.ok(frag.range >= BLAST_SOUNDS.flash.range, "frag carries at least as far as a flashbang");
+});
+check("loops and ringing", () => {
+  assert.ok(smokeHissLevel(0) === 0 && smokeHissLevel(3) > 0.5 && smokeHissLevel(20) === 0, "hiss vents, then stops");
+  assert.ok(fireLevel(0) === 0 && fireLevel(1) > fireLevel(0.2), "fire follows the burning share");
+  const weak = flashRing(0.2);
+  const full = flashRing(1);
+  assert.ok(full.tone > weak.tone && full.duckDb > weak.duckDb && full.lowpass < weak.lowpass, "ringing scales with exposure");
+});
+check("use cues", () => {
+  for (const [item, cues] of Object.entries(USE_CUES)) {
+    let last = -1;
+    for (const [at] of cues) {
+      assert.ok(at >= 0 && at < 1 && at >= last, `${item} cue at ${at} out of order`);
+      last = at;
+    }
+  }
+});
+check("loudness hierarchy: explosions over the sniper", () => {
+  const resolve = (variant: number) => (sound: string) => {
+    const asset = AUDIO_MANIFEST[sound as SoundId];
+    return { file: path.join(OUT_DIR, `${asset.variants[variant % asset.variants.length]?.file}.ogg`), channels: asset.channels };
+  };
+  const sniper = measureMix(firstPersonShot(WEAPON_SOUNDS.sniper), resolve(0));
+  for (const [kind, design] of Object.entries(BLAST_SOUNDS)) {
+    for (let variant = 0; variant < AUDIO_MANIFEST[design.near].variants.length; variant++) {
+      // 4 m: inside the reference distance, so the voice plays the recipe at full level.
+      const blast = measureMix(blastLayers(design, 4), resolve(variant));
+      const margin = kind === "frag" ? 3 : 0.5;
+      assert.ok(blast.lufs - sniper.lufs >= margin, `${kind} v${variant} only ${(blast.lufs - sniper.lufs).toFixed(1)} LU over the sniper`);
+      if (kind === "frag") assert.ok(blast.momentary > sniper.momentary, `frag v${variant} blast not bigger than the sniper's`);
+      assert.ok(blast.truePeak <= -0.9, `${kind} v${variant} peak ${blast.truePeak.toFixed(1)} dBTP above -1 dBTP`);
+    }
+  }
 });
 
 const mb = (bytes: number | undefined) => `${((bytes ?? 0) / 1e6).toFixed(2)} MB`;

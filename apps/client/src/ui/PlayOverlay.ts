@@ -11,7 +11,11 @@ const CONTROLS: readonly ControlRow[] = [
   [["LMB"], "Fire"],
   [["RMB"], "Aim"],
   [["R"], "Reload"],
-  [["1–4", "Wheel"], "Switch weapon"],
+  [["1–3", "Wheel"], "Switch weapon"],
+  [["5", "G"], "Throwable · cycle"],
+  [["R"], "Cook frag (pin pulled)"],
+  [["F"], "Pick up · revive"],
+  [["7", "8", "9", "0"], "Heal · boost"],
 ];
 
 const SYSTEM_CONTROLS: readonly ControlRow[] = [

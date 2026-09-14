@@ -1,5 +1,5 @@
 import type { PhysicsBody, Vector3 } from "@babylonjs/core";
-import type { HitZone } from "@twobullets/shared";
+import type { DamageKind, HitZone } from "@twobullets/shared";
 
 /**
  * Shape filter membership bits. Level geometry keeps Havok's default (all bits).
@@ -17,10 +17,13 @@ export const BULLET_COLLIDE_MASK = ~CollisionLayer.blocker;
 export interface DamageHit {
   readonly colliderId: string;
   readonly zone: HitZone;
+  /** Damage after armor. */
   readonly amount: number;
+  /** What caused it (bullet when omitted): explosion deaths, no blood spray for fire. */
+  readonly kind?: DamageKind;
   /** World-space hit point. */
   readonly point: Vector3;
-  /** Unit bullet direction, world space. */
+  /** Unit bullet (or blast) direction, world space. */
   readonly direction: Vector3;
 }
 

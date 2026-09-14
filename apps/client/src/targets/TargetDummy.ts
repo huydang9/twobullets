@@ -19,6 +19,9 @@ const DEFAULT_STRAFE_SPEED = 3;
 
 const BLOCKER_RADIUS = 0.3;
 
+/** Fire ticks every 0.5 s; flinch at most this often while burning, s. */
+const BURN_FLINCH_INTERVAL = 1.2;
+
 type Phase = "alive" | "down" | "reviving";
 
 /**
@@ -32,6 +35,7 @@ export class TargetDummy implements Damageable {
   private currentHealth = DUMMY_MAX_HEALTH;
   private phase: Phase = "alive";
   private phaseTime = 0;
+  private flinchCooldown = 0;
 
   /** Static dummies only: a teleporting blocker would pass through a standing player rather than push them. */
   private readonly blocker: PhysicsBody | null = null;
@@ -96,10 +100,13 @@ export class TargetDummy implements Damageable {
     this.currentHealth = Math.max(0, this.currentHealth - hit.amount);
     const killed = this.currentHealth <= 0;
     if (killed) {
+      // For blasts the direction runs from the explosion, so it picks death_front/back the same way a shot does.
       this.soldier.die(hit.direction);
       this.setPhase("down");
       if (this.blocker?.shape) this.blocker.shape.filterMembershipMask = 0;
-    } else {
+    } else if (hit.kind !== "fire" || this.flinchCooldown <= 0) {
+      // Bullets and blasts flinch every time; burning flinches now and then instead of on every fire tick.
+      if (hit.kind === "fire") this.flinchCooldown = BURN_FLINCH_INTERVAL;
       this.soldier.hit();
     }
     return { amount: hit.amount, remainingHealth: this.currentHealth, killed };
@@ -107,6 +114,7 @@ export class TargetDummy implements Damageable {
 
   update(dt: number): void {
     this.phaseTime += dt;
+    this.flinchCooldown = Math.max(0, this.flinchCooldown - dt);
     if (this.phase === "down" && this.phaseTime >= RESPAWN_SECONDS) {
       this.currentHealth = this.maxHealth;
       this.soldier.revive();

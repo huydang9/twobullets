@@ -1,0 +1,349 @@
+/*
+ * Inventory screen (Tab). Same language as the HUD: thin strokes, translucent dark panels, light condensed text,
+ * amber for warnings. Lives inside .tb-hud so its tokens apply.
+ */
+
+/* The play overlay would cover the screen while the pointer is released for the inventory. */
+.tb-hud:has(> .tb-inv:not([hidden])) > .tb-overlay {
+  display: none !important;
+}
+
+.tb-inv {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 7vh 24px 24px;
+  pointer-events: auto;
+  cursor: default;
+  background: linear-gradient(180deg, rgba(6, 8, 10, 0.72), rgba(6, 8, 10, 0.5) 60%, rgba(6, 8, 10, 0.7));
+}
+
+.tb-inv__panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(240px, 320px) minmax(280px, 380px);
+  gap: 18px;
+  width: min(1040px, 100%);
+  min-height: 0;
+  max-height: calc(100% - 64px);
+}
+
+.tb-inv__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px 12px;
+  background: var(--tb-panel);
+  border: 1px solid transparent;
+  transition: border-color 100ms;
+}
+
+.tb-inv__col[data-over],
+.tb-inv__weapon[data-over] {
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-inv__title,
+.tb-inv__label {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--tb-text-dim);
+}
+
+.tb-inv__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.tb-inv__empty {
+  padding: 8px 2px;
+  font-size: 12px;
+  color: var(--tb-text-faint);
+}
+
+.tb-inv__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: grab;
+}
+
+.tb-inv__row:hover,
+.tb-inv__weapon:hover,
+.tb-inv__cell:hover,
+.tb-inv__chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tb-inv__row-detail {
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+/* ---------- Capacity ---------- */
+
+.tb-inv__capacity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+.tb-inv__bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tb-inv__bar--thin {
+  flex: none;
+  height: 2px;
+  margin-top: 4px;
+}
+
+.tb-inv__bar-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--tb-text);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.tb-inv__bar-fill[data-full],
+.tb-inv__bar-fill[data-low] {
+  background: var(--tb-amber);
+}
+
+/* ---------- Equipment ---------- */
+
+.tb-inv__weapons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tb-inv__weapon {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "head head"
+    "name ammo";
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  cursor: grab;
+}
+
+.tb-inv__weapon-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tb-inv__weapon-name {
+  grid-area: name;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.tb-inv__weapon-ammo {
+  grid-area: ammo;
+  justify-self: end;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+  white-space: pre;
+}
+
+.tb-inv__weapon[data-empty] {
+  cursor: default;
+  background: transparent;
+  border: 1px dashed var(--tb-stroke);
+}
+
+.tb-inv__weapon[data-empty] .tb-inv__weapon-name {
+  color: var(--tb-text-faint);
+}
+
+.tb-inv__gear {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.tb-inv__cell {
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: grab;
+}
+
+.tb-inv__cell-name {
+  font-size: 15px;
+}
+
+.tb-inv__cell[data-empty] {
+  cursor: default;
+  background: transparent;
+  outline: 1px dashed var(--tb-stroke);
+  outline-offset: -1px;
+}
+
+.tb-inv__cell[data-empty] .tb-inv__cell-name {
+  color: var(--tb-text-faint);
+}
+
+.tb-inv__throwables {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tb-inv__chip {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.tb-inv__chip[data-selected] {
+  background: var(--tb-panel);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-inv__chip[data-empty] {
+  color: var(--tb-text-faint);
+  pointer-events: none;
+}
+
+.tb-inv__chip-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+/* ---------- Footer, notice, split popover ---------- */
+
+.tb-inv__footer {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--tb-text-faint);
+}
+
+.tb-inv__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tb-text-dim);
+  cursor: pointer;
+}
+
+.tb-inv__toggle input {
+  margin: 0;
+  accent-color: #d9d9d2;
+}
+
+.tb-inv__notice {
+  position: absolute;
+  bottom: 12vh;
+  left: 50%;
+  padding: 5px 14px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--tb-amber);
+  background: var(--tb-panel-strong);
+  transform: translateX(-50%);
+}
+
+.tb-inv__split {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 260px;
+  padding: 12px 14px;
+  background: var(--tb-panel-strong);
+  border: 1px solid var(--tb-stroke);
+  transform: translate(-50%, -50%);
+  text-shadow: none;
+}
+
+.tb-inv__split-title {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.tb-inv__split-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tb-inv__split-range {
+  flex: 1;
+  accent-color: #d9d9d2;
+}
+
+.tb-inv__split-number {
+  width: 56px;
+  padding: 3px 4px;
+  font: 13px var(--tb-font);
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--tb-stroke);
+}
+
+.tb-inv__split-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.tb-inv__button {
+  padding: 4px 14px;
+  font: 500 12px var(--tb-font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--tb-stroke-strong);
+  cursor: pointer;
+}
+
+.tb-inv__button--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--tb-text-dim);
+}
+
+@media (max-width: 860px) {
+  .tb-inv__panel {
+    grid-template-columns: 1fr 1fr;
+  }
+  .tb-inv__col--gear {
+    grid-column: span 2;
+  }
+}

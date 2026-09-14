@@ -15,3 +15,4 @@ export * from "./smoke";
 export * from "./throw";
 export * from "./throwables";
 export * from "./vitals";
+export * from "./weaponLoadout";

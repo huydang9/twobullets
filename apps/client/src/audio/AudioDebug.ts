@@ -1,8 +1,17 @@
-import { MOVEMENT, getWeaponDef, type HitZone, type Projectile, type WeaponId } from "@twobullets/shared";
+import { ITEMS, MOVEMENT, getWeaponDef, type HitZone, type Projectile, type WeaponId } from "@twobullets/shared";
 import { gainToDb, strideLength, type Vec3Like } from "./acoustics";
+import { smokeHissLevel } from "./equipmentMix";
 import type { AudioDirector } from "./AudioDirector";
 import type { AudioVolumeKey } from "./AudioSettings";
-import type { AcousticSurface, FootstepStance, MechanicalAudioEvent } from "./types";
+import type {
+  AcousticSurface,
+  FootstepStance,
+  MechanicalAudioEvent,
+  PickupAudioKind,
+  ThrowableAudioKind,
+  ThrowActionAudioEvent,
+  UseItemAudioId,
+} from "./types";
 
 const OVERLAY_INTERVAL = 0.25;
 const FLY_BY_START = 80;
@@ -20,6 +29,7 @@ export class AudioDebug {
   private overlayRoot: HTMLDivElement | null = null;
   private overlayTimer = 0;
   private nextFlyById = -1_000_000;
+  private nextAreaId = -1;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly director: AudioDirector) {
@@ -65,7 +75,14 @@ export class AudioDebug {
             "__audio.nearMiss(weapon='rifle', miss=1.5, fromBearing=0)",
             "__audio.footsteps(surface='concrete', stance='run', distance=8, bearing=90, steps=8)",
             "__audio.impact(surface='metal', distance=15, bearing=-30)   // surface='flesh' takes a 4th arg zone='head'",
-            "__audio.explosion(distance=60, bearing=0, power=1)",
+            "__audio.explosion(distance=60, bearing=0, kind='frag')   // kind 'flash' for the flashbang bang",
+            "__audio.flashRing(strength=1, seconds=6)   // tinnitus, ducks and dulls the mix",
+            "__audio.smoke(distance=12, bearing=30, seconds=12)   // pop + hiss loop",
+            "__audio.fire(distance=8, bearing=-40, seconds=10)   // molotov shatter + crackle loop",
+            "__audio.bounce(surface='concrete', distance=6, bearing=0, speed=6, kind='frag')",
+            "__audio.throw(action='pinPull', kind='frag')   // draw | pinPull | spoon | throw | pinReturn | holster",
+            "__audio.useItem('medkit')  __audio.cancelUse()   // bandage | first_aid | medkit | energy_drink | painkiller",
+            "__audio.pickup('ammo')  __audio.armor(destroyed=false)",
             "__audio.mech(kind='boltOpen', weapon='sniper')",
             "__audio.hit(zone='head', killed=false)",
             "__audio.landing(fallSpeed=10)",
@@ -100,7 +117,35 @@ export class AudioDebug {
       },
       impact: (surface: AcousticSurface | "flesh" = "concrete", distance = 15, bearing = 0, zone: HitZone = "body") =>
         audio.playImpact({ position: this.around(distance, bearing, -1), surface, weaponId: "rifle", zone }),
-      explosion: (distance = 60, bearing = 0, power = 1) => audio.playExplosion({ position: this.around(distance, bearing, -1.5), power }),
+      explosion: (distance = 60, bearing = 0, kind: "frag" | "flash" = "frag") => audio.playExplosion({ position: this.around(distance, bearing, -1.5), kind }),
+      flashRing: (strength = 1, seconds = 6 * strength) => audio.playFlashRing({ strength, seconds }),
+      smoke: (distance = 12, bearing = 30, seconds = 12) => {
+        const position = this.around(distance, bearing, -MOVEMENT.standEyeHeight);
+        const id = this.nextAreaId--;
+        audio.playSmokePop({ position });
+        const start = performance.now();
+        const step = () => {
+          const age = (performance.now() - start) / 1000;
+          if (age >= seconds) return audio.stopArea(id);
+          audio.playSmokeHiss(id, position, smokeHissLevel(Math.min(age, 8)));
+          this.later(0.25, step);
+        };
+        this.later(0.3, step);
+      },
+      fire: (distance = 8, bearing = -40, seconds = 10) => {
+        const position = this.around(distance, bearing, -MOVEMENT.standEyeHeight);
+        const id = this.nextAreaId--;
+        audio.playMolotovShatter({ position });
+        this.later(0.15, () => audio.playFire(id, position, 1));
+        this.later(seconds, () => audio.stopArea(id));
+      },
+      bounce: (surface: AcousticSurface = "concrete", distance = 6, bearing = 0, speed = 6, kind: ThrowableAudioKind = "frag") =>
+        audio.playThrowableBounce({ kind, position: this.around(distance, bearing, -MOVEMENT.standEyeHeight), impactSpeed: speed, surface }),
+      throw: (action: ThrowActionAudioEvent["action"] = "pinPull", kind: ThrowableAudioKind = "frag") => audio.playThrowAction({ action, kind, style: "overhand", position: null }),
+      useItem: (itemId: UseItemAudioId = "medkit") => audio.playItemUse({ itemId, seconds: ITEMS[itemId].useSeconds, position: null, tag: "debug.use" }),
+      cancelUse: () => audio.stopItemUse("debug.use"),
+      pickup: (kind: PickupAudioKind | "drop" = "ammo") => audio.playPickup(kind),
+      armor: (destroyed = false) => audio.playArmorHit({ absorbed: 15, destroyed, position: null }),
       mech: (kind: MechanicalAudioEvent["kind"] = "boltOpen", weaponId: WeaponId = "sniper") => audio.playMechanical({ kind, weaponId, position: null, span: 0.3 }),
       hit: (zone: HitZone = "body", killed = false) => audio.playHitConfirm({ zone, killed }),
       landing: (fallSpeed = 10) => audio.playLanding({ position: this.around(0, 0, -MOVEMENT.standEyeHeight), fallSpeed, isLocal: true }),

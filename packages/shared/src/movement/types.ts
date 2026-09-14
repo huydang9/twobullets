@@ -14,15 +14,22 @@ export interface MoveInput {
   readonly jump: boolean;
   readonly sprint: boolean;
   readonly crouch: boolean;
-  /** Multiplier on target ground speed (e.g. 0.6 while aiming down sights). 1 = unmodified. */
+  /** Multiplier on target ground speed (e.g. 0.6 while aiming down sights, ×1.06 at high boost). 1 = unmodified; clamped to 0..MOVEMENT.maxSpeedScale. */
   readonly speedScale: number;
+  /**
+   * Tick-derived gates from the player's state (healing, knocked), not raw intent: the server derives the same values.
+   * `allowJump` false ignores jump presses (default true). `crawl` forces the prone stance with no sprint or jump (default false).
+   */
+  readonly allowJump?: boolean;
+  readonly crawl?: boolean;
   /** Look yaw in radians (around +Y, 0 = facing +Z, positive turns right). */
   readonly yaw: number;
   /** Look pitch in radians (+ = look down, Babylon convention). */
   readonly pitch: number;
 }
 
-export type Stance = "stand" | "crouch";
+/** `prone` is the knocked-down crawl. */
+export type Stance = "stand" | "crouch" | "prone";
 
 /** Simulation state carried between ticks. Plain data so it can be snapshotted, sent and replayed. */
 export interface MoveState {
@@ -39,6 +46,11 @@ export interface MoveState {
   readonly jumpBufferTimer: number;
   /** Seconds left during which ground support is ignored right after a jump. */
   readonly groundIgnoreTimer: number;
+  /**
+   * Downward speed this tick before collision, while airborne (0 when grounded), m/s. The collision-resolved velocity
+   * is already ~0 on the tick that hits the ground, so landings read this from the last airborne tick.
+   */
+  readonly fallSpeed: number;
 }
 
 /** Results of engine-side queries for this tick, fed into the pure movement step. */
@@ -47,8 +59,10 @@ export interface MoveEnvironment {
   readonly supported: boolean;
   /** Average normal of the supporting surface; only meaningful when supported. */
   readonly groundNormal: Vec3;
-  /** A standing capsule fits at the current position. Only consulted while crouched with crouch released. */
+  /** A standing capsule fits at the current position. Only consulted when leaving crouch or prone toward standing. */
   readonly canStand: boolean;
+  /** A crouching capsule fits (default true). Only consulted when leaving prone. */
+  readonly canCrouch?: boolean;
 }
 
 export interface PlayerDebugState {

@@ -1,5 +1,5 @@
 import type { Observable, Vector3 } from "@babylonjs/core";
-import type { FiredShot, HitZone, Projectile, WeaponDef, WeaponEvent, WeaponState } from "@twobullets/shared";
+import type { ArmorSlot, FiredShot, HitZone, InventoryState, Projectile, WeaponDef, WeaponEvent, WeaponSlot, WeaponState } from "@twobullets/shared";
 
 export interface ShotEvent {
   readonly weapon: WeaponDef;
@@ -29,6 +29,11 @@ export interface DamageEvent {
   readonly point: Vector3;
   /** Distance travelled by the bullet, m. */
   readonly distance: number;
+  /** Damage the target's helmet or vest soaked up (0 without armor), and which piece. */
+  readonly armorAbsorbed: number;
+  readonly armorSlot: ArmorSlot | null;
+  /** The piece broke on this hit. */
+  readonly armorDestroyed: boolean;
 }
 
 /**
@@ -42,7 +47,13 @@ export interface CombatView {
   readonly onDamage: Observable<DamageEvent>;
 
   readonly weaponState: WeaponState;
+  /**
+   * Weapon in hand. While unarmed (every slot empty) it stays the last weapon held, so check `armed` before drawing a
+   * viewmodel or ammo readout.
+   */
   readonly activeWeapon: WeaponDef;
+  /** A weapon is in the active slot. False when every inventory weapon slot is empty. */
+  readonly armed: boolean;
   /** Current spread half-angle, degrees (dynamic crosshair). */
   readonly spreadDegrees: number;
   /** 0..1 progress of the current reload or equip, or null when ready. */
@@ -55,7 +66,23 @@ export interface CombatView {
   /** Bullets in flight (tracers). */
   readonly projectiles: readonly Projectile[];
 
-  /** Local player health; players can't take damage until milestone 4, but the HUD shows it. */
+  /** Local player health: equipment vitals once equipment is attached (one source for the HUD), else a full placeholder. */
   readonly health: number;
   readonly maxHealth: number;
+}
+
+/**
+ * What CombatSystem needs from the equipment side; EquipmentSystem implements it. Weapons and their magazines live in
+ * the inventory; combat mirrors them into WeaponState every tick and writes magazines and spent ammo back.
+ */
+export interface CombatEquipmentLink {
+  readonly inventory: InventoryState;
+  /** Tick-derived gates; `allowWeapons` false blocks fire, aim and reload. */
+  readonly modifiers: { readonly allowWeapons: boolean };
+  readonly vitals: { readonly health: number };
+  readonly maxHealth: number;
+  /** Changes when the whole kit is replaced (respawn), so the weapon state restarts from the new inventory. */
+  readonly loadoutVersion: number;
+  /** Tick-time write-back: magazines and consumed ammo, plus the active slot (null while unarmed) for pickup swaps. */
+  commitWeapons(inventory: InventoryState, activeSlot: WeaponSlot | null): void;
 }

@@ -65,6 +65,11 @@ export class AmmoPanel {
     this.dryAnim = prepareAnimation(this.counts, DRY_KEYFRAMES, { duration: 200 });
   }
 
+  /** Hidden while unarmed (every weapon slot empty). */
+  set visible(visible: boolean) {
+    if (this.root.hidden === visible) this.root.hidden = !visible;
+  }
+
   update(slot: WeaponSlotState, weapon: WeaponDef, phase: WeaponPhase): void {
     setText(this.name, weapon.name);
     if (weapon.fireMode !== this.shownMode) {

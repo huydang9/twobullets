@@ -475,6 +475,11 @@
   color: rgba(255, 255, 255, 0.95);
 }
 
+/* Armor soaked part of the hit: a cool grey-blue marker. */
+.tb-hitmarker[data-armor] {
+  color: #9ec3e6;
+}
+
 .tb-hitmarker[data-kind="kill"] {
   --hm-len: 8px;
   color: var(--tb-red);
@@ -764,9 +769,14 @@
   transform: translateX(-50%);
 }
 
-.tb-slots {
+.tb-slots,
+.tb-slots__weapons {
   display: flex;
   gap: 2px;
+}
+
+.tb-slot--throwable {
+  margin-left: 10px;
 }
 
 .tb-slot {
@@ -798,6 +808,29 @@
   text-decoration-color: rgba(224, 74, 60, 0.7);
 }
 
+.tb-slot[data-vacant] {
+  color: rgba(236, 236, 230, 0.28);
+}
+
+.tb-slot__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-slot__hint {
+  align-self: center;
+  min-width: 8px;
+  margin-left: 2px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 12px;
+  border-color: var(--tb-stroke);
+  color: var(--tb-text-faint);
+}
+
+.tb-slot[data-active] .tb-slot__hint {
+  color: var(--tb-text-dim);
+}
+
 .tb-health {
   position: relative;
   display: flex;
@@ -812,9 +845,52 @@
   height: 3px;
 }
 
+/* flex-grow is set per segment from the boost tier ranges. */
 .tb-boost__segment {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.2);
+  position: relative;
+  flex: 1 1 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.tb-boost__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--tb-amber);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 200ms ease-out;
+}
+
+.tb-health__knocked {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--tb-red);
+}
+
+.tb-health[data-downed] .tb-health__knocked {
+  display: block;
+  animation: tb-blink 1.1s ease-in-out infinite;
+}
+
+.tb-health[data-downed] .tb-boost {
+  visibility: hidden;
+}
+
+.tb-health[data-downed] .tb-health__fill {
+  background: var(--tb-red);
+  animation: none;
+  transition: transform 250ms linear;
+}
+
+.tb-health[data-downed] .tb-health__value {
+  color: var(--tb-red);
 }
 
 .tb-health__bar {
@@ -959,7 +1035,85 @@
   border: 1px solid var(--tb-stroke);
 }
 
-/* Narrow screens: the ammo readout moves above the dock instead of beside it. */
+/* ---------- Armor (beside the health bar) ---------- */
+
+.tb-armor {
+  position: absolute;
+  right: calc(100% + 40px);
+  bottom: -2px;
+  display: flex;
+  gap: 8px;
+}
+
+.tb-armor__piece {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--tb-text);
+}
+
+.tb-armor__badge {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.tb-armor__icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+}
+
+.tb-armor__level {
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+.tb-armor__bar {
+  position: relative;
+  width: 24px;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.tb-armor__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--tb-text);
+  transform-origin: 0 50%;
+  transition: transform 150ms ease-out;
+}
+
+.tb-armor__piece[data-condition="low"] .tb-armor__fill {
+  background: var(--tb-amber);
+}
+
+.tb-armor__piece[data-state="destroyed"] {
+  color: var(--tb-red);
+}
+
+/* Diagonal strike through a broken piece. */
+.tb-armor__piece[data-state="destroyed"]::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 26px;
+  height: 1.5px;
+  margin-left: -13px;
+  background: var(--tb-red);
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.7);
+  transform: rotate(-35deg);
+}
+
+/* Narrow screens: the ammo readout and armor move above the dock instead of beside it. */
 @media (max-width: 900px) {
   .tb-ammo {
     right: 0;
@@ -967,6 +1121,240 @@
     left: auto;
     align-items: flex-end;
   }
+
+  .tb-armor {
+    right: auto;
+    bottom: calc(100% + 12px);
+    left: 0;
+  }
+}
+
+/* ---------- Equipment: rings, prompt, pickups, death recap ---------- */
+
+.tb-equip {
+  position: absolute;
+  inset: 0;
+}
+
+.tb-ring {
+  display: block;
+  overflow: visible;
+  /* Start the arc at 12 o'clock. */
+  transform: rotate(-90deg);
+}
+
+.tb-ring circle {
+  fill: none;
+}
+
+.tb-ring__track {
+  stroke: rgba(0, 0, 0, 0.3);
+}
+
+.tb-ring__arc {
+  stroke: rgba(255, 255, 255, 0.92);
+}
+
+.tb-cook {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.tb-cook__seconds {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-cook[data-level="warn"] .tb-ring__arc {
+  stroke: var(--tb-amber);
+}
+
+.tb-cook[data-level="warn"] .tb-cook__seconds {
+  color: var(--tb-amber);
+}
+
+.tb-cook[data-level="danger"] .tb-ring__arc {
+  stroke: var(--tb-red);
+}
+
+.tb-cook[data-level="danger"] {
+  color: var(--tb-red);
+  animation: tb-blink 0.35s steps(2, jump-none) infinite;
+}
+
+.tb-use {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.tb-use__text {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.tb-use__label {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+.tb-use__seconds {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tb-text-dim);
+}
+
+.tb-use[data-tone="revive"] .tb-use__label {
+  color: #9fd8a4;
+}
+
+.tb-use__message {
+  position: absolute;
+  top: calc(50% + 46px);
+  left: 50%;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+  color: var(--tb-amber);
+  opacity: 0;
+  transform: translateX(-50%);
+}
+
+.tb-prompt {
+  position: absolute;
+  top: calc(50% + 18px);
+  left: calc(50% + 64px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.tb-prompt__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px 3px 4px;
+  font-size: 14px;
+  white-space: nowrap;
+  background: linear-gradient(90deg, rgba(8, 10, 12, 0.42) 70%, transparent);
+}
+
+.tb-prompt__line[data-blocked] {
+  opacity: 0.55;
+}
+
+.tb-prompt__verb {
+  color: var(--tb-text-dim);
+}
+
+.tb-prompt__name {
+  font-weight: 500;
+}
+
+.tb-prompt__notice {
+  padding-left: 4px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--tb-amber);
+  opacity: 0;
+}
+
+.tb-pickups {
+  position: absolute;
+  top: 58%;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.tb-pickups__line {
+  padding: 2px 8px 2px 22px;
+  font-size: 13px;
+  white-space: nowrap;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.38) 20px);
+  opacity: 0;
+}
+
+.tb-pickups__plus {
+  color: var(--tb-text-dim);
+}
+
+.tb-death {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 18px 34px 16px;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.62) 18%, rgba(8, 10, 12, 0.62) 82%, transparent);
+  transform: translateX(-50%);
+}
+
+.tb-death__title {
+  padding-left: 0.3em;
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  color: var(--tb-red);
+}
+
+.tb-death__cause {
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+.tb-death__stats {
+  display: grid;
+  gap: 3px;
+  min-width: 220px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.tb-death__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: 12px;
+}
+
+.tb-death__label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tb-text-faint);
+}
+
+.tb-death__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-death__respawn {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--tb-text-dim);
 }
 
 @keyframes tb-fade-in {

@@ -63,6 +63,9 @@ const kenney = (name: string, indices: readonly number[]): CutSpec[] =>
 const fantozzi = (kind: "Stone" | "Sand"): CutSpec[] =>
   ["L1", "L2", "L3", "R1", "R2", "R3"].map((side) => ({ source: "fantozziSteps", file: `Fantozzi-footsteps/flac/Fantozzi-${kind}${side}.flac`, at: "whole" }));
 
+const sfx100 = (names: readonly string[]): CutSpec[] => names.map((name) => ({ source: "sfx100", file: `${name}.ogg`, at: "whole" }));
+const breaking = (names: readonly string[]): CutSpec[] => names.map((name) => ({ source: "breakingFalling", file: `bfh1_${name}.ogg`, at: "whole" }));
+
 const GUN_NEAR = { channels: 2, load: "eager", fadeOut: 0.5, kbps: 128, highpass: 30, limitDb: 2 } as const;
 const GUN_FAR = { channels: 1, load: "eager", fadeOut: 0.4, kbps: 64, highpass: 30, limitDb: 2 } as const;
 
@@ -274,6 +277,100 @@ export const CLIPS: readonly ClipSpec[] = [
   { id: "impact.wood", ...ONE_SHOT, maxSeconds: 0.45, cuts: kenney("impactPlank_medium", [0, 1, 2, 3, 4]) },
   { id: "impact.dirt", ...ONE_SHOT, maxSeconds: 0.4, cuts: kenney("impactSoft_medium", [0, 1, 2, 3, 4]) },
   { id: "impact.flesh", ...ONE_SHOT, maxSeconds: 0.35, cuts: kenney("impactPunch_medium", [0, 1, 2, 3, 4]) },
+
+  // --- Throwables. Explosions and the flashbang are real bangs (fireworks/cannon recordings), pitched down and
+  // weighted for a frag; the runtime adds the sub, debris and distance layers (equipmentMix.ts).
+  { id: "throw.pin", ...MECH, lufs: -20, maxSeconds: 0.35, cuts: sfx100(["key_open_01", "key_open_02"]) },
+  {
+    id: "throw.spoon",
+    ...MECH,
+    lufs: -22,
+    limitDb: 3,
+    maxSeconds: 0.3,
+    cuts: [...breaking(["metal_hit_01", "metal_hit_06"]), ...sfx100(["metal_02"])],
+  },
+  {
+    id: "throw.swish",
+    ...ONE_SHOT,
+    lufs: -20,
+    maxSeconds: 0.3,
+    cuts: [7, 8, 9].map((i): CutSpec => ({ source: "swishes", file: `swishes/swish-${i}.wav`, at: "whole" })),
+  },
+  { id: "throw.bounce", ...ONE_SHOT, lufs: -22, limitDb: 4, maxSeconds: 0.4, cuts: breaking(["metal_hit_02", "metal_hit_03", "metal_hit_04", "metal_hit_05"]) },
+  {
+    id: "explosion.near",
+    channels: 1,
+    load: "eager",
+    maxSeconds: 2,
+    fadeOut: 0.55,
+    lufs: -19,
+    limitDb: 3,
+    kbps: 64,
+    highpass: 25,
+    // Bangs slowed to 80 % sound like a heavier charge; the shelf restores the chest thump fireworks lack.
+    filters: ["bass=g=5:f=90:w=0.8"],
+    cuts: ["bang_03", "cannon_01", "bang_09", "cannon_04"].map((name): CutSpec => ({ source: "bangs", file: `${name}.ogg`, at: "whole", rate: 0.8 })),
+  },
+  {
+    id: "explosion.far",
+    channels: 1,
+    load: "eager",
+    maxSeconds: 4,
+    fadeOut: 0.45,
+    lufs: -20,
+    limitDb: 2,
+    kbps: 56,
+    highpass: 25,
+    filters: ["lowpass=f=3200"],
+    cuts: [
+      { source: "distantExplosion", file: "muffled-distant-explosion.wav", at: "whole" },
+      { source: "bangs", file: "cannon_02.ogg", at: "whole", rate: 0.6 },
+    ],
+  },
+  { id: "explosion.debris", ...ONE_SHOT, lufs: -25, limitDb: 4, maxSeconds: 0.9, cuts: breaking(["rock_falling_01", "rock_falling_03", "rock_falling_09", "breaking_01", "rock_breaking_02"]) },
+  {
+    id: "flash.bang",
+    channels: 1,
+    load: "eager",
+    maxSeconds: 1.2,
+    fadeOut: 0.5,
+    lufs: -21,
+    limitDb: 6,
+    kbps: 64,
+    highpass: 60,
+    cuts: ["bang_06", "cannon_03", "cannon_05"].map((name): CutSpec => ({ source: "bangs", file: `${name}.ogg`, at: "whole" })),
+  },
+  { id: "smoke.burst", ...ONE_SHOT, lufs: -23, limitDb: 3, maxSeconds: 0.5, cuts: sfx100(["noise_01", "noise_02"]) },
+  {
+    id: "molotov.shatter",
+    ...ONE_SHOT,
+    lufs: -20,
+    limitDb: 4,
+    maxSeconds: 1.1,
+    cuts: [{ source: "glassBreak", file: "glass-breaking.wav", at: "whole" }, ...breaking(["glass_breaking_01", "glass_breaking_04", "glass_breaking_06"])],
+  },
+  {
+    id: "fire.loop",
+    channels: 1,
+    load: "eager",
+    maxSeconds: 2.3,
+    fadeOut: 0,
+    lufs: -24,
+    limitDb: 3,
+    kbps: 56,
+    // The fireplace recording carries room rumble under the crackle.
+    highpass: 120,
+    loop: { source: "fireCrackle", file: "fire-crackling.wav", start: 0.1, length: 2.3, crossfade: 0.4 },
+  },
+
+  // --- Consumables, armor.
+  { id: "use.paper", ...ONE_SHOT, lufs: -24, maxSeconds: 0.6, cuts: sfx100(["paper_01", "paper_02", "paper_03", "paper_04"]) },
+  // The tape-measure pulls from equipment clicks III double as bandage tape.
+  { id: "use.tape", ...MECH, lufs: -23, limitDb: 3, maxSeconds: 0.35, cuts: [{ source: "lfaClicks3", file: "equipment_clicks3.wav", at: [13.15, 14.66, 18.95] }] },
+  { id: "use.slosh", ...ONE_SHOT, lufs: -24, maxSeconds: 0.6, cuts: sfx100(["splash_01", "splash_02"]) },
+  { id: "use.rattle", ...ONE_SHOT, lufs: -26, limitDb: 3, maxSeconds: 0.25, cuts: breaking(["hit_05", "hit_09", "hit_11", "misc_05"]) },
+  { id: "armor.hit", ...ONE_SHOT, lufs: -22, limitDb: 4, maxSeconds: 0.45, cuts: kenney("impactPlate_medium", [0, 1, 2, 3, 4]) },
+  { id: "armor.break", ...ONE_SHOT, lufs: -24, limitDb: 5, maxSeconds: 0.6, cuts: breaking(["breaking_02", "breaking_03", "rock_breaking_03"]) },
 
   // --- Ambience (lazy).
   {

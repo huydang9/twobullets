@@ -1,10 +1,15 @@
-import type { CombatInput } from "@twobullets/shared";
+import { cycleWeaponSlot, type CombatInput, type WeaponSlotState } from "@twobullets/shared";
 import type { Action } from "../input/bindings";
 import type { InputManager } from "../input/InputManager";
 
 const SLOT_ACTIONS: readonly Action[] = ["slot1", "slot2", "slot3", "slot4"];
 
 const IDLE: CombatInput = { fire: false, aim: false, reload: false, selectIndex: null };
+
+type Slots = readonly (WeaponSlotState | null)[];
+
+/** The parts of InputManager the queue reads (a stand-in drives headless checks). */
+export type CombatInputSource = Pick<InputManager, "isLocked" | "isActionDown" | "wasActionPressed" | "wheelDelta">;
 
 /**
  * Turns per-frame input into per-tick CombatInput. At high refresh rates most render frames run no tick, so
@@ -16,7 +21,7 @@ export class CombatInputQueue {
   private selectQueued: number | null = null;
   private polledThisFrame = false;
 
-  constructor(private readonly input: InputManager) {}
+  constructor(private readonly input: CombatInputSource) {}
 
   get isFireHeld(): boolean {
     return this.input.isLocked && this.input.isActionDown("fire");
@@ -28,9 +33,10 @@ export class CombatInputQueue {
 
   /**
    * Queues this frame's one-shot input exactly once, whether the first tick of the frame or the end-of-frame
-   * update gets there first. `activeIndex`/`slotCount` resolve wheel cycling relative to any pending selection.
+   * update gets there first. Number keys only queue filled slots; wheel notches cycle over filled slots, relative to
+   * any pending selection.
    */
-  poll(activeIndex: number, slotCount: number): void {
+  poll(activeIndex: number, slots: Slots): void {
     if (this.polledThisFrame) return;
     this.polledThisFrame = true;
     const input = this.input;
@@ -42,25 +48,25 @@ export class CombatInputQueue {
     if (input.wasActionPressed("reload")) this.reloadQueued = true;
 
     SLOT_ACTIONS.forEach((action, index) => {
-      if (index < slotCount && input.wasActionPressed(action)) this.selectQueued = index;
+      if (slots[index] && input.wasActionPressed(action)) this.selectQueued = index;
     });
     const wheel = input.wheelDelta();
-    if (wheel !== 0 && slotCount > 0) {
-      // +1 per notch scrolled down selects the next slot.
-      const base = this.selectQueued ?? activeIndex;
-      this.selectQueued = (((base + wheel) % slotCount) + slotCount) % slotCount;
+    if (wheel !== 0) {
+      // +1 per notch scrolled down selects the next filled slot.
+      const next = cycleWeaponSlot(slots, this.selectQueued ?? activeIndex, wheel);
+      if (next !== null) this.selectQueued = next;
     }
   }
 
   /** Call once per render frame after the frame's ticks, before input.endFrame(). */
-  endFrame(activeIndex: number, slotCount: number): void {
-    this.poll(activeIndex, slotCount);
+  endFrame(activeIndex: number, slots: Slots): void {
+    this.poll(activeIndex, slots);
     this.polledThisFrame = false;
   }
 
   /** Builds and consumes the input for one tick. */
-  take(activeIndex: number, slotCount: number): CombatInput {
-    this.poll(activeIndex, slotCount);
+  take(activeIndex: number, slots: Slots): CombatInput {
+    this.poll(activeIndex, slots);
     if (!this.input.isLocked) return IDLE;
     const select = this.selectQueued;
     const combat: CombatInput = {

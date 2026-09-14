@@ -151,9 +151,12 @@ async function buildCut(spec: ClipSpec, cut: CutSpec, index: number, near: numbe
   if (length < 0.05) throw new Error(`${spec.id}: cut at ${near} in ${cut.file} is too short`);
 
   const filters = baseFilters(spec);
-  if (cut.rate && cut.rate !== 1) filters.push(`asetrate=${Math.round(RATE * cut.rate)}`, `aresample=${RATE}`);
-  const fadeOut = Math.max(0.01, length * spec.fadeOut);
-  filters.push(`afade=t=in:d=${cut.skip ? 0.04 : 0.003}`, `afade=t=out:st=${(length - fadeOut).toFixed(4)}:d=${fadeOut.toFixed(4)}`);
+  const rate = cut.rate ?? 1;
+  if (rate !== 1) filters.push(`asetrate=${Math.round(RATE * rate)}`, `aresample=${RATE}`);
+  // Fades run after the rate change, so they are timed on the stretched output.
+  const outLength = length / rate;
+  const fadeOut = Math.max(0.01, outLength * spec.fadeOut);
+  filters.push(`afade=t=in:d=${cut.skip ? 0.04 : 0.003}`, `afade=t=out:st=${(outLength - fadeOut).toFixed(4)}:d=${fadeOut.toFixed(4)}`);
 
   const name = `${spec.id}.${index}`;
   const wav = path.join(WORK_DIR, `${name}.wav`);

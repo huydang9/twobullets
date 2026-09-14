@@ -28,6 +28,11 @@ export const AUDIBLE_RANGE = {
   suppressedShot: 150,
   impact: 80,
   explosion: 300,
+  pinPull: 10,
+  heal: 12,
+  throwableBounce: 35,
+  smokePop: 90,
+  molotov: 110,
 } as const;
 
 export function clamp(value: number, min: number, max: number): number {

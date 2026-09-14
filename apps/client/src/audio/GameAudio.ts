@@ -11,22 +11,42 @@ import {
   isSupersonic,
   type Vec3Like,
 } from "./acoustics";
-import { AudioEngine, Priority, setPannerPosition, type Voice, type VoiceOptions } from "./AudioEngine";
+import { AudioEngine, BUSES, Priority, setPannerPosition, type Voice, type VoiceOptions } from "./AudioEngine";
 import type { SoundId } from "./audioManifest";
 import type { AudioSettings } from "./AudioSettings";
 import type { AudioWorldProbe } from "./AudioWorldProbe";
+import {
+  BLAST_SOUNDS,
+  DEBRIS_RANGE,
+  LOOP_RANGE,
+  LOOP_VOICES,
+  USE_CUES,
+  blastDuckDb,
+  blastEcho,
+  blastLayers,
+  flashRing,
+  type MixLayer,
+} from "./equipmentMix";
+import { addCrackle, addUseCue, addZip, createHissBuffer } from "./equipment/foley";
 import { FOOTSTEP_SOUND, FOOTSTEP_TRIM, IMPACT_SOUND, LOCAL_MIX, STANCE, WEAPON_SOUNDS, firstPersonShot, type WeaponSound } from "./soundDesign";
 import type { SoundBank } from "./SoundBank";
 import type {
+  AreaStartAudioEvent,
+  ArmorHitAudioEvent,
+  AudioBusId,
   ExplosionAudioEvent,
   FootstepAudioEvent,
   GunshotAudioEvent,
   HitConfirmAudioEvent,
   ImpactAudioEvent,
+  ItemUseAudioEvent,
   JumpAudioEvent,
   LandingAudioEvent,
   MechanicalAudioEvent,
   NearMissAudioEvent,
+  PickupAudioKind,
+  ThrowableBounceAudioEvent,
+  ThrowActionAudioEvent,
 } from "./types";
 
 /** Occluded sources lose this much level and most of their highs. */
@@ -45,6 +65,17 @@ const FLESH_ZONE: Readonly<Record<HitZone, { gain: number; rate: number; snap: n
   limb: { gain: 0.7, rate: 1.08, snap: 0 },
 };
 
+/** Pitch of the canister body per throwable (a smoke can is bigger and duller). */
+const BOUNCE_RATE: Readonly<Record<ThrowableBounceAudioEvent["kind"], number>> = { frag: 1, smoke: 0.82, flash: 1.12, molotov: 1.3 };
+const AREA_UPDATE_SECONDS = 0.1;
+
+interface AreaLoop {
+  readonly kind: "smoke" | "fire";
+  readonly position: { x: number; y: number; z: number };
+  level: number;
+  voice: Voice | null;
+}
+
 interface Placement {
   readonly distance: number;
   readonly delay: number;
@@ -61,6 +92,9 @@ interface Placement {
 export class GameAudio {
   private readonly listener = { x: 0, y: 0, z: 0 };
   private readonly forward = { x: 0, y: 0, z: 1 };
+  private readonly areas = new Map<number, AreaLoop>();
+  private areaTimer = 0;
+  private hiss: AudioBuffer | null = null;
 
   constructor(
     readonly engine: AudioEngine,
@@ -375,37 +409,304 @@ export class GameAudio {
     }
   }
 
-  /** Placeholder explosion until grenades have recorded assets: pitched-down shotgun reports plus a noise rumble. */
+  /**
+   * Frag or flashbang detonation: close bang and body crossfading into the down-range take, pressure sub, dirt and
+   * debris raining down, echo growing with distance, speed-of-sound delay, and ducking scaled by distance.
+   */
   playExplosion(event: ExplosionAudioEvent): void {
     const ctx = this.engine.live;
     if (!ctx) return;
+    const design = BLAST_SOUNDS[event.kind ?? "frag"];
     const power = event.power ?? 1;
-    const place = this.place(event.position, 10, AUDIBLE_RANGE.explosion * Math.sqrt(power), 0.8, event.age);
+    const place = this.place(event.position, design.reference, design.range * Math.sqrt(power), design.rolloff, event.age);
     if (!place) return;
+    const d = place.distance;
     const voice = this.engine.voice({
       bus: "weapons",
       priority: Priority.important,
-      label: "explosion",
+      label: design.near,
       position: event.position,
-      gain: Math.min(1.4, place.gain * power),
+      panning: d < 60 ? "HRTF" : "equalpower",
+      gain: Math.min(1, place.gain * power),
       lowpass: place.lowpass,
       room: 0.5 * this.probe.enclosure,
-      echo: 0.9,
+      echo: blastEcho(design, d) * (place.occluded ? 1.3 : 1),
+      distance: d,
+      occluded: place.occluded,
+      // Keep the transient of anything close; far blasts glue with the rest of the gunfire.
+      route: d < 80 ? "direct" : "bus",
+    });
+    if (!voice) return;
+    const when = ctx.currentTime + place.delay;
+    const rate = 1 + (Math.random() - 0.5) * 0.08;
+    this.playLayers(voice, blastLayers(design, d), when, rate, 1);
+    const close = 1 - clamp(d / 60, 0, 1);
+    if (event.kind === "flash") {
+      // The flashbang's magnesium crack: a very short, bright snap on top.
+      voice.addNoise({ when, gain: 0.35 * close, filter: "highpass", frequency: 3000, decay: 0.012 });
+    } else {
+      voice.addNoise({ when, gain: 0.25 * (0.3 + close), attack: 0.004, filter: "lowpass", frequency: 500, frequencyEnd: 70, sweep: 1.4, decay: 0.5, rate: 0.5 });
+      if (design.debris && d < DEBRIS_RANGE) this.playDebris(event.position, when, 1 - d / DEBRIS_RANGE);
+    }
+
+    const depth = blastDuckDb(design, d) * Math.min(1, power);
+    if (depth > 0.5) {
+      this.duckAmbience(depth + 4, 0.6, 2.4);
+      for (const bus of ["footsteps", "impacts", "foley", "weapons"] as const) this.engine.duck(bus, depth * (bus === "weapons" ? 0.5 : 1), 0.4, 1.8);
+    }
+    // Overpressure up close: the world goes dull for a moment, and a frag within a few metres leaves the ears ringing.
+    if (event.kind !== "flash" && d < 14) {
+      // The attack lets the blast transient through before the ears shut down.
+      this.engine.muffle(700 + 160 * d, 0.08, 0.25, 1.6, place.delay);
+      if (d < 5) this.playFlashRing({ strength: 0.35 * (1 - d / 5), seconds: 2.5, delay: place.delay });
+    }
+  }
+
+  playThrowableBounce(event: ThrowableBounceAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx || event.impactSpeed < 0.4) return;
+    const surface = event.surface ?? this.probe.surfaceAtImpact(event.position, event.normal);
+    const place = this.place(event.position, 2, AUDIBLE_RANGE.throwableBounce, 1, 0, 0.3);
+    if (!place) return;
+    const force = clamp(event.impactSpeed / 9, 0.1, 1);
+    const voice = this.engine.voice({
+      bus: "impacts",
+      priority: Priority.normal,
+      label: "throw.bounce",
+      position: event.position,
+      gain: place.gain * (0.35 + 0.65 * force),
+      lowpass: place.lowpass,
+      room: 0.2 * this.probe.enclosure,
       distance: place.distance,
       occluded: place.occluded,
     });
     if (!voice) return;
     const when = ctx.currentTime + place.delay;
-    const close = 1 - clamp(place.distance / 60, 0, 1);
-    this.layer(voice, "shot.shotgun.far", { when, rate: 0.42, gain: 1 });
-    this.layer(voice, "shot.sniper.far", { when: when + 0.01, rate: 0.55, gain: 0.7 });
-    if (close > 0) this.layer(voice, "shot.shotgun.near", { when, rate: 0.5, gain: 0.9 * close });
-    voice.addNoise({ when, gain: 1.2, attack: 0.005, filter: "lowpass", frequency: 600, frequencyEnd: 90, sweep: 1.2, decay: 0.45, rate: 0.5 });
-    voice.addTone({ when, gain: 0.9 * (0.3 + close), frequency: 70, frequencyEnd: 28, sweep: 0.6, decay: 0.25 });
-    const depth = 6 + 10 * clamp(1 - place.distance / 150, 0, 1);
-    this.duckAmbience(depth + 4, 0.8, 2);
-    this.engine.duck("footsteps", depth, 0.5, 1.5);
-    this.engine.duck("impacts", depth * 0.6, 0.3, 1);
+    const jitter = 0.94 + Math.random() * 0.12;
+    const soft = surface === "grass" || surface === "dirt";
+    const body = BOUNCE_RATE[event.kind] * jitter;
+    if (soft) {
+      this.layer(voice, "impact.dirt", { when, rate: 0.85 * jitter, gain: 0.7 });
+      this.layer(voice, "throw.bounce", { when, rate: body * 0.9, gain: 0.25, lowpass: 1800 });
+    } else {
+      this.layer(voice, "throw.bounce", { when, rate: body * (surface === "wood" ? 0.85 : surface === "metal" ? 1.12 : 1) });
+      this.layer(voice, FOOTSTEP_SOUND[surface], { when, rate: 1.15 * jitter, gain: 0.45 * FOOTSTEP_TRIM[surface] });
+    }
+  }
+
+  playThrowAction(event: ThrowActionAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    const range = event.action === "throw" ? 15 : AUDIBLE_RANGE.pinPull;
+    const voice = this.foleyVoice(`throw.${event.action}`, event.position, range, LOCAL_MIX.mechanical);
+    if (!voice) return;
+    const when = ctx.currentTime;
+    const jitter = () => 0.95 + Math.random() * 0.1;
+    const molotov = event.kind === "molotov";
+    switch (event.action) {
+      case "draw":
+        this.layer(voice, "foley.cloth", { when, rate: jitter(), gain: 0.7 });
+        break;
+      case "pinPull":
+        if (molotov) {
+          // Lighting the rag: a flint strike and the flame catching.
+          this.layer(voice, "mech.latch", { when, rate: 1.5 * jitter(), gain: 0.5 });
+          voice.addNoise({ when: when + 0.08, gain: 0.25, attack: 0.05, filter: "bandpass", q: 0.8, frequency: 900, frequencyEnd: 2400, sweep: 0.3, decay: 0.25 });
+        } else {
+          this.layer(voice, "throw.pin", { when, rate: jitter() });
+          this.layer(voice, "mech.latch", { when: when + 0.03, rate: 1.3 * jitter(), gain: 0.45 });
+        }
+        break;
+      case "spoon":
+        this.layer(voice, "throw.spoon", { when, rate: jitter(), gain: 0.8 });
+        break;
+      case "throw": {
+        const underhand = event.style === "underhand";
+        this.layer(voice, "throw.swish", { when, rate: (underhand ? 1.2 : 0.9) * jitter(), gain: underhand ? 0.55 : 1 });
+        this.layer(voice, "foley.cloth", { when: when + 0.02, rate: jitter(), gain: 0.5 });
+        // The spoon flies off as the grenade leaves the hand (a cooked frag already let it go).
+        if (!molotov && event.kind !== "frag") this.layer(voice, "throw.spoon", { when: when + 0.06, rate: 1.1 * jitter(), gain: 0.5 });
+        break;
+      }
+      case "pinReturn":
+        this.layer(voice, "mech.latch", { when, rate: 1.2 * jitter(), gain: 0.6 });
+        break;
+      case "holster":
+        this.layer(voice, "foley.cloth", { when, rate: 0.9 * jitter(), gain: 0.6 });
+        break;
+    }
+  }
+
+  /** Smoke canister igniting: a dull pop and the first burst of gas (the hiss loop follows via {@link playSmokeHiss}). */
+  playSmokePop(event: AreaStartAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    const voice = this.spatialOneShot("impacts", "smoke.burst", event, 4, AUDIBLE_RANGE.smokePop, 0.8, 0.35);
+    if (!voice) return;
+    const when = voice.createdAt + (voice.options.distance !== undefined ? arrivalDelay(voice.options.distance, event.age) : 0);
+    voice.addTone({ when, gain: 0.45, frequency: 150, frequencyEnd: 60, sweep: 0.08, decay: 0.05 });
+    voice.addNoise({ when, gain: 0.35, filter: "lowpass", frequency: 1200, decay: 0.04 });
+    this.layer(voice, "smoke.burst", { when: when + 0.03, rate: 0.9 + Math.random() * 0.1 });
+  }
+
+  /** Molotov bursting: glass shattering and the whoosh of the fuel catching. */
+  playMolotovShatter(event: AreaStartAudioEvent): void {
+    const voice = this.spatialOneShot("impacts", "molotov.shatter", event, 4, AUDIBLE_RANGE.molotov, 0.7, 0.4);
+    if (!voice) return;
+    const when = voice.createdAt + (voice.options.distance !== undefined ? arrivalDelay(voice.options.distance, event.age) : 0);
+    this.layer(voice, "molotov.shatter", { when, rate: 0.95 + Math.random() * 0.1 });
+    this.layer(voice, "throw.swish", { when: when + 0.06, rate: 0.45, gain: 0.9, lowpass: 1500 });
+    voice.addNoise({ when: when + 0.05, gain: 0.7, attack: 0.1, filter: "bandpass", q: 0.7, frequency: 250, frequencyEnd: 1400, sweep: 0.35, decay: 0.3 });
+    voice.addTone({ when: when + 0.05, gain: 0.25, frequency: 90, frequencyEnd: 45, sweep: 0.3, decay: 0.2 });
+  }
+
+  // --- Area loops (smoke hiss, fire crackle) ---------------------------------------------------------------------------
+
+  /** Starts or moves a smoke hiss loop; `level` 0..1 follows the canister (equipmentMix.smokeHissLevel). */
+  playSmokeHiss(areaId: number, position: Vec3Like, level = 1): void {
+    this.setArea(areaId, "smoke", position, level);
+  }
+
+  /** Starts or moves a fire crackle loop; `level` 0..1 follows how much of the patch still burns. */
+  playFire(areaId: number, position: Vec3Like, level = 1): void {
+    this.setArea(areaId, "fire", position, level);
+  }
+
+  stopArea(areaId: number): void {
+    const area = this.areas.get(areaId);
+    if (!area) return;
+    area.voice?.stop(area.kind === "fire" ? 1.2 : 0.8);
+    this.areas.delete(areaId);
+  }
+
+  /**
+   * Per frame: follows the listener (distance, occlusion) at 10 Hz and keeps only the nearest LOOP_VOICES loops of each
+   * kind playing, so a street full of fire costs a handful of voices.
+   */
+  updateAreas(dt: number): void {
+    const ctx = this.engine.live;
+    this.areaTimer -= dt;
+    if (!ctx || this.areas.size === 0 || this.areaTimer > 0) return;
+    this.areaTimer = AREA_UPDATE_SECONDS;
+    const sorted = [...this.areas.values()].sort((a, b) => distance(a.position, this.listener) - distance(b.position, this.listener));
+    const slots = { smoke: LOOP_VOICES.smoke, fire: LOOP_VOICES.fire };
+    for (const area of sorted) {
+      const place = area.level > 0.01 ? this.place(area.position, 2.5, LOOP_RANGE[area.kind], 1, 0, 0.5) : null;
+      if (!place || slots[area.kind] <= 0) {
+        area.voice?.stop(0.5);
+        area.voice = null;
+        continue;
+      }
+      slots[area.kind]--;
+      const gain = place.gain * area.level;
+      if (!area.voice || area.voice.end < ctx.currentTime) {
+        area.voice = this.startLoop(area, gain, place.lowpass);
+        continue;
+      }
+      area.voice.setGain(gain, 0.15);
+      area.voice.setLowpass(place.lowpass, 0.15);
+      if (area.voice.panner) setPannerPosition(area.voice.panner, area.position, ctx.currentTime);
+      if (area.kind === "fire" && Math.random() < 0.6) addCrackle(area.voice, ctx.currentTime, AREA_UPDATE_SECONDS);
+    }
+  }
+
+  // --- Flashbang, consumables, armor -----------------------------------------------------------------------------------
+
+  /**
+   * Ear ringing after a flashbang (or a very close frag): a high whistle that fades over `seconds`, while every other
+   * bus is ducked by the exposure strength and the whole mix is low-passed, recovering as the ringing fades.
+   */
+  playFlashRing(event: { readonly strength: number; readonly seconds?: number; readonly delay?: number }): void {
+    const ctx = this.engine.live;
+    if (!ctx || event.strength <= 0) return;
+    const ring = flashRing(event.strength);
+    const seconds = Math.max(0.5, event.seconds ?? 6 * event.strength);
+    const delay = event.delay ?? 0;
+    this.engine.stopTag("flashRing");
+    const voice = this.engine.voice({ bus: "ui", priority: Priority.local, label: "flash.ring", route: "overlay", tag: "flashRing" });
+    if (voice) {
+      const when = ctx.currentTime + delay;
+      // Two close partials beat slowly, like real tinnitus; the decay constant spreads the fade over `seconds`.
+      voice.addTone({ when, gain: ring.tone, frequency: 3650, attack: 0.04, decay: seconds / 5 });
+      voice.addTone({ when, gain: ring.tone * 0.55, frequency: 3710, attack: 0.08, decay: seconds / 6 });
+      voice.addTone({ when, gain: ring.tone * 0.25, frequency: 7300, attack: 0.02, decay: seconds / 9 });
+    }
+    const hold = seconds * 0.25;
+    const release = seconds * 0.75;
+    for (const bus of BUSES) if (bus !== "ui") this.engine.duck(bus, ring.duckDb, delay + hold, release);
+    this.engine.muffle(ring.lowpass, 0.02, hold, release, delay);
+  }
+
+  /** Healing/boosting foley spread across the use time. Stop it with {@link stopItemUse} when the use is cancelled. */
+  playItemUse(event: ItemUseAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    this.engine.stopTag(event.tag);
+    const voice = this.foleyVoice(`use.${event.itemId}`, event.position, AUDIBLE_RANGE.heal, LOCAL_MIX.mechanical, event.tag);
+    if (!voice) return;
+    const elapsed = event.elapsed ?? 0;
+    const now = ctx.currentTime;
+    for (const [at, cue] of USE_CUES[event.itemId]) {
+      const offset = at * event.seconds - elapsed;
+      if (offset >= -0.05) addUseCue(voice, this.bank, cue, now + Math.max(0, offset));
+    }
+  }
+
+  stopItemUse(tag: string): void {
+    this.engine.stopTag(tag);
+  }
+
+  /** Picking up or equipping: cloth and the item's own material. */
+  playPickup(kind: PickupAudioKind | "drop", position: Vec3Like | null = null): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    const voice = this.foleyVoice(`pickup.${kind}`, position, 10, LOCAL_MIX.mechanical);
+    if (!voice) return;
+    const when = ctx.currentTime;
+    const jitter = () => 0.94 + Math.random() * 0.12;
+    this.layer(voice, "foley.cloth", { when, rate: jitter(), gain: 0.7 });
+    switch (kind) {
+      case "ammo":
+        for (let i = 0; i < 3; i++) this.layer(voice, "foley.casing", { when: when + 0.04 + i * 0.045, rate: 1.5 * jitter(), gain: 0.5 });
+        break;
+      case "weapon":
+        this.layer(voice, "mech.latch", { when: when + 0.14, rate: 0.9 * jitter(), gain: 0.8 });
+        break;
+      case "armor":
+        this.layer(voice, "armor.hit", { when: when + 0.08, rate: 0.8 * jitter(), gain: 0.35, lowpass: 3000 });
+        this.layer(voice, "foley.cloth", { when: when + 0.22, rate: 0.85 * jitter(), gain: 0.8 });
+        this.layer(voice, "mech.latch", { when: when + 0.34, rate: 1.4 * jitter(), gain: 0.4 });
+        break;
+      case "backpack":
+        addZip(voice, when + 0.05, 0.35, 1);
+        break;
+      case "consumable":
+        this.layer(voice, "use.paper", { when: when + 0.03, rate: jitter(), gain: 0.5 });
+        break;
+      case "throwable":
+        this.layer(voice, "throw.bounce", { when: when + 0.05, rate: 1.3 * jitter(), gain: 0.25, lowpass: 4000 });
+        break;
+      case "drop":
+        this.layer(voice, "foley.land", { when: when + 0.12, rate: 1.1 * jitter(), gain: 0.35 });
+        break;
+    }
+  }
+
+  /** Armor absorbing a hit: a hard plate clank; a breaking piece adds a crack. */
+  playArmorHit(event: ArmorHitAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    const level = clamp(0.45 + event.absorbed / 30, 0.45, 1);
+    const voice = event.position
+      ? this.spatialOneShot("impacts", "armor.hit", { position: event.position }, 3, 50, level, 0.2)
+      : this.engine.voice({ bus: "impacts", priority: Priority.local, label: "armor.hit", gain: 0.55 * level });
+    if (!voice) return;
+    const when = voice.createdAt + (event.position && voice.options.distance !== undefined ? arrivalDelay(voice.options.distance) : 0);
+    this.layer(voice, "armor.hit", { when, rate: 0.9 + Math.random() * 0.15 });
+    if (event.destroyed) {
+      this.layer(voice, "armor.break", { when: when + 0.02, rate: 0.95 + Math.random() * 0.1, gain: 0.9 });
+      this.layer(voice, "armor.hit", { when: when + 0.05, rate: 0.7, gain: 0.5, lowpass: 2000 });
+    }
   }
 
   // --- UI -------------------------------------------------------------------------------------------------------------
@@ -447,6 +748,92 @@ export class GameAudio {
       lowpass = Math.min(lowpass, OCCLUSION_CUTOFF);
     }
     return { distance: d, delay: arrivalDelay(d, age), gain, lowpass, occluded };
+  }
+
+  /** Mixed layers of a recipe (equipmentMix / weaponMix) on one voice. */
+  private playLayers(voice: Voice, layers: readonly MixLayer[], when: number, rate: number, gain: number): void {
+    for (const layer of layers) {
+      if (layer.kind === "sub") {
+        voice.addTone({ when: when + layer.delay, gain: layer.gain * gain, frequency: layer.from * rate, frequencyEnd: layer.to, sweep: layer.sweep, attack: 0.002, decay: layer.decay });
+      } else {
+        this.layer(voice, layer.sound, { when: when + layer.delay, rate: layer.rate * rate, gain: layer.gain * gain, offset: layer.offset, lowpass: layer.lowpass ?? undefined });
+      }
+    }
+  }
+
+  /** Dirt and fragments pattering down around a blast over the next second and a half. */
+  private playDebris(position: Vec3Like, when: number, closeness: number): void {
+    const voice = this.engine.voice({ bus: "impacts", priority: Priority.detail, label: "explosion.debris", position, panning: "equalpower", gain: 0.55 * closeness, lowpass: 9000, distance: distance(position, this.listener) });
+    if (!voice) return;
+    const count = 3 + Math.round(3 * closeness);
+    for (let i = 0; i < count; i++) {
+      const t = when + 0.35 + Math.random() * 1.3 * (i + 1) / count;
+      this.layer(voice, "explosion.debris", { when: t, rate: 0.85 + Math.random() * 0.35, gain: 0.5 + Math.random() * 0.5 });
+    }
+    this.layer(voice, "impact.dirt", { when: when + 0.25, rate: 0.6, gain: 0.8 });
+  }
+
+  /** First-person foley when `position` is null, otherwise a spatial foley voice within `range`. */
+  private foleyVoice(label: string, position: Vec3Like | null, range: number, localGain: number, tag?: string): Voice | null {
+    if (!position) {
+      return this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: localGain, room: 0.15 * this.probe.enclosure, ...(tag ? { tag } : {}) });
+    }
+    const place = this.place(position, 1.5, range, 1, 0, 0.3);
+    if (!place) return null;
+    return this.engine.voice({ bus: "foley", priority: Priority.normal, label, position, gain: place.gain, lowpass: place.lowpass, distance: place.distance, occluded: place.occluded, ...(tag ? { tag } : {}) });
+  }
+
+  private spatialOneShot(bus: AudioBusId, label: string, event: AreaStartAudioEvent, reference: number, range: number, level: number, echo: number): Voice | null {
+    const place = this.place(event.position, reference, range, 0.9, event.age);
+    if (!place) return null;
+    return this.engine.voice({
+      bus,
+      priority: Priority.important,
+      label,
+      position: event.position,
+      gain: Math.min(1, place.gain * level),
+      lowpass: place.lowpass,
+      room: 0.3 * this.probe.enclosure,
+      echo,
+      distance: place.distance,
+      occluded: place.occluded,
+    });
+  }
+
+  private setArea(areaId: number, kind: AreaLoop["kind"], position: Vec3Like, level: number): void {
+    let area = this.areas.get(areaId);
+    if (!area) {
+      area = { kind, position: { x: 0, y: 0, z: 0 }, level: 0, voice: null };
+      this.areas.set(areaId, area);
+      // Pick it up on the next frame instead of waiting for the 10 Hz refresh.
+      this.areaTimer = 0;
+    }
+    area.position.x = position.x;
+    area.position.y = position.y;
+    area.position.z = position.z;
+    area.level = clamp(level, 0, 1);
+  }
+
+  private startLoop(area: AreaLoop, gain: number, lowpass: number): Voice | null {
+    const ctx = this.engine.live;
+    if (!ctx) return null;
+    const voice = this.engine.voice({ bus: "ambience", priority: Priority.important, label: area.kind === "fire" ? "fire.loop" : "smoke.hiss", position: area.position, gain: 0, lowpass, room: 0.2 * this.probe.enclosure, distance: distance(area.position, this.listener) });
+    if (!voice) return null;
+    const now = ctx.currentTime;
+    if (area.kind === "smoke") {
+      this.hiss = this.hiss?.sampleRate === ctx.sampleRate ? this.hiss : createHissBuffer(ctx);
+      const hiss = this.hiss;
+      voice.addBuffer(hiss, { when: now, loop: true, offset: Math.random() * hiss.duration, rate: 0.95 + Math.random() * 0.1 });
+    } else {
+      const fire = this.bank.pick("fire.loop");
+      if (fire) {
+        // Two offset, detuned copies hide the short loop's repetition.
+        voice.addBuffer(fire, { when: now, loop: true, offset: Math.random() * fire.duration });
+        voice.addBuffer(fire, { when: now, loop: true, offset: Math.random() * fire.duration, rate: 1.13, gain: 0.6, lowpass: 5000 });
+      }
+    }
+    voice.output.gain.setTargetAtTime(gain, now, 0.25);
+    return voice;
   }
 
   private duckAmbience(db: number, hold: number, release: number): void {

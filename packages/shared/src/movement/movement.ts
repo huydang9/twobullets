@@ -1,4 +1,4 @@
-import { MOVEMENT } from "../constants";
+import { FALL_DAMAGE, MOVEMENT } from "../constants";
 import type { MoveEnvironment, MoveInput, MoveState, Stance } from "./types";
 
 /** Ground normals flatter than this (normal.y below it) are not used for slope following. */
@@ -14,6 +14,7 @@ export function createMoveState(): MoveState {
     coyoteTimer: 0,
     jumpBufferTimer: 0,
     groundIgnoreTimer: 0,
+    fallSpeed: 0,
   };
 }
 
@@ -27,7 +28,7 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
   let groundIgnoreTimer = Math.max(0, state.groundIgnoreTimer - dt);
   let grounded = env.supported && groundIgnoreTimer === 0;
 
-  const stance: Stance = input.crouch || (state.stance === "crouch" && !env.canStand) ? "crouch" : "stand";
+  const stance = resolveStance(state.stance, input, env);
 
   // Wish direction: clamp analog input to the unit circle so diagonals are not faster.
   let forward = clamp(input.forward, -1, 1);
@@ -46,8 +47,8 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
   // Sprint starts only on the ground but carries through jumps.
   const sprintAllowed = input.sprint && stance === "stand" && wishAmount > 0 && forward / wishAmount >= MOVEMENT.sprintMinForward;
   const sprinting = sprintAllowed && (grounded || state.sprinting);
-  const baseSpeed = stance === "crouch" ? MOVEMENT.crouchSpeed : sprinting ? MOVEMENT.sprintSpeed : MOVEMENT.walkSpeed;
-  const targetSpeed = baseSpeed * wishAmount * clamp(input.speedScale, 0, 1);
+  const baseSpeed = stance === "prone" ? MOVEMENT.crawlSpeed : stance === "crouch" ? MOVEMENT.crouchSpeed : sprinting ? MOVEMENT.sprintSpeed : MOVEMENT.walkSpeed;
+  const targetSpeed = baseSpeed * wishAmount * clamp(input.speedScale, 0, MOVEMENT.maxSpeedScale);
 
   let { x: vx, y: vy, z: vz } = state.velocity;
 
@@ -77,8 +78,10 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
     vy = Math.max(vy - MOVEMENT.gravity * dt, -MOVEMENT.maxFallSpeed);
   }
 
+  // Edge detection follows the raw key, so a jump held through a gate doesn't fire when the gate lifts.
+  const canJump = input.allowJump !== false && stance !== "prone";
   const jumpPressed = input.jump && !state.jumpHeld;
-  let jumpBufferTimer = jumpPressed ? MOVEMENT.jumpBufferTime : Math.max(0, state.jumpBufferTimer - dt);
+  let jumpBufferTimer = !canJump ? 0 : jumpPressed ? MOVEMENT.jumpBufferTime : Math.max(0, state.jumpBufferTimer - dt);
   let coyoteTimer = grounded ? MOVEMENT.coyoteTime : Math.max(0, state.coyoteTimer - dt);
 
   if (jumpBufferTimer > 0 && coyoteTimer > 0 && groundIgnoreTimer === 0) {
@@ -98,7 +101,43 @@ export function computeDesiredVelocity(state: MoveState, input: MoveInput, env: 
     coyoteTimer,
     jumpBufferTimer,
     groundIgnoreTimer,
+    fallSpeed: grounded ? 0 : Math.max(0, -vy),
   };
+}
+
+/** Crawl forces prone. Getting up goes as far toward the wanted stance as the headroom allows. */
+function resolveStance(current: Stance, input: MoveInput, env: MoveEnvironment): Stance {
+  if (input.crawl) return "prone";
+  const wanted: Stance = input.crouch ? "crouch" : "stand";
+  if (current === "stand" || current === wanted) return wanted;
+  if (wanted === "stand" && env.canStand) return "stand";
+  if (current === "crouch") return "crouch";
+  return env.canCrouch ?? true ? "crouch" : "prone";
+}
+
+export function capsuleHeightFor(stance: Stance): number {
+  return stance === "prone" ? MOVEMENT.proneHeight : stance === "crouch" ? MOVEMENT.crouchHeight : MOVEMENT.standHeight;
+}
+
+export function capsuleRadiusFor(stance: Stance): number {
+  return stance === "prone" ? MOVEMENT.proneRadius : MOVEMENT.capsuleRadius;
+}
+
+export function eyeHeightFor(stance: Stance): number {
+  return stance === "prone" ? MOVEMENT.proneEyeHeight : stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight;
+}
+
+/** Downward speed at touchdown when `next` is the first grounded tick after `previous`, else 0, m/s. */
+export function landingSpeed(previous: MoveState, next: MoveState): number {
+  return !previous.grounded && next.grounded ? previous.fallSpeed : 0;
+}
+
+/** Fall damage for a landing speed: 0 up to FALL_DAMAGE.minSpeed, growing with impact energy to lethal at lethalSpeed. */
+export function fallDamage(speed: number): number {
+  const { minSpeed, lethalSpeed, lethalDamage } = FALL_DAMAGE;
+  if (!(speed > minSpeed)) return 0;
+  const energy = (speed * speed - minSpeed * minSpeed) / (lethalSpeed * lethalSpeed - minSpeed * minSpeed);
+  return Math.round(lethalDamage * energy * 10) / 10;
 }
 
 /** Moves (x, z) toward (tx, tz) by at most maxDelta. */

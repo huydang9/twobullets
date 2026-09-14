@@ -4,10 +4,13 @@ import {
   MOVEMENT,
   SIMULATION,
   createMoveState,
+  eyeHeightFor,
+  landingSpeed,
   type LevelData,
   type MoveInput,
   type MoveState,
   type PlayerDebugState,
+  type SpawnPoint,
 } from "@twobullets/shared";
 import type { InputManager } from "../input/InputManager";
 import { CharacterBody } from "./CharacterBody";
@@ -38,16 +41,30 @@ export interface PlayerTick {
   readonly dt: number;
   readonly input: MoveInput;
   readonly state: MoveState;
+  /** Downward speed at touchdown if the player landed this tick, else 0, m/s (fall damage). */
+  readonly landingSpeed: number;
 }
 
-/** Gameplay modifiers other systems apply to the player (e.g. aiming down sights). */
+/** Gameplay modifiers other systems apply to the player every render frame (e.g. aiming down sights). */
 export interface PlayerModifiers {
-  /** Multiplier on ground speed, 0..1. */
+  /** Multiplier on ground speed, 0..MOVEMENT.maxSpeedScale. */
   speedScale: number;
   allowSprint: boolean;
+  allowJump: boolean;
   /** Multiplier on mouse sensitivity. */
   sensitivityScale: number;
 }
+
+/** Movement gates read at tick time from simulation state (healing, knocked, boost); EquipmentModifiers satisfies it. */
+export interface MoveGates {
+  readonly speedScale: number;
+  readonly allowSprint: boolean;
+  readonly allowJump: boolean;
+  /** Knocked: prone crawl at MOVEMENT.crawlSpeed. `speedScale` is ignored while crawling (the stance sets the speed). */
+  readonly crawl: boolean;
+}
+
+const OPEN_GATES: MoveGates = { speedScale: 1, allowSprint: true, allowJump: true, crawl: false };
 
 /**
  * Local player: mouse look every render frame, movement on a fixed 60 Hz tick driven by MoveInput snapshots,
@@ -56,10 +73,11 @@ export interface PlayerModifiers {
 export class PlayerController {
   readonly camera: TargetCamera;
   readonly onTick = new Observable<PlayerTick>();
-  readonly modifiers: PlayerModifiers = { speedScale: 1, allowSprint: true, sensitivityScale: 1 };
+  readonly modifiers: PlayerModifiers = { speedScale: 1, allowSprint: true, allowJump: true, sensitivityScale: 1 };
 
   private readonly body: CharacterBody;
   private state: MoveState = createMoveState();
+  private gates: (() => MoveGates) | null = null;
   private yaw = 0;
   private pitch = 0;
   private accumulator = 0;
@@ -109,10 +127,20 @@ export class PlayerController {
     this.updateCamera(dt, this.accumulator / TICK_SECONDS);
   }
 
+  /** Source of tick-time movement gates (architecture R3: derived from tick state, not render state), or null. */
+  setMoveGates(source: (() => MoveGates) | null): void {
+    this.gates = source;
+  }
+
+  /** Respawns at a random spawn point of the level. */
   respawn(): void {
     const points = this.level.spawnPoints;
     const spawn = points[Math.floor(Math.random() * points.length)];
-    if (!spawn) return;
+    if (spawn) this.respawnAt(spawn);
+  }
+
+  /** Teleports to `spawn` standing still, facing its yaw, with fresh movement state. */
+  respawnAt(spawn: SpawnPoint): void {
     const [x, y, z] = spawn.position;
     this.body.teleport({ x, y, z });
     this.state = createMoveState();
@@ -132,10 +160,14 @@ export class PlayerController {
     return { yaw: this.yaw, pitch: this.pitch };
   }
 
+  /** Tick-accurate feet (ground contact) position. */
+  getFeetToRef(result: Vector3): Vector3 {
+    return result.copyFrom(this.currentFeet);
+  }
+
   /** Tick-accurate (not interpolated or smoothed) eye position, for spawning shots. */
   getEyeToRef(result: Vector3): Vector3 {
-    const eye = this.state.stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight;
-    return result.set(this.currentFeet.x, this.currentFeet.y + eye, this.currentFeet.z);
+    return result.set(this.currentFeet.x, this.currentFeet.y + eyeHeightFor(this.state.stance), this.currentFeet.z);
   }
 
   get moveState(): MoveState {
@@ -190,20 +222,25 @@ export class PlayerController {
     this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch + dy * sensitivity));
   }
 
-  /** Snapshot of player intent for one tick; this is what will be sent to the server. */
+  /** Snapshot of player intent for one tick, with this tick's gates applied; this is what will be sent to the server. */
   private sampleInput(): MoveInput {
     const input = this.input;
+    const gates = this.gates?.() ?? OPEN_GATES;
+    const { crawl } = gates;
+    const allowJump = gates.allowJump && this.modifiers.allowJump;
     if (!input.isLocked) {
-      return { forward: 0, right: 0, jump: false, sprint: false, crouch: false, speedScale: 1, yaw: this.yaw, pitch: this.pitch };
+      return { forward: 0, right: 0, jump: false, sprint: false, crouch: false, speedScale: 1, allowJump, crawl, yaw: this.yaw, pitch: this.pitch };
     }
     const axis = (positive: boolean, negative: boolean): number => (positive ? 1 : 0) - (negative ? 1 : 0);
     return {
       forward: axis(input.isActionDown("forward"), input.isActionDown("back")),
       right: axis(input.isActionDown("right"), input.isActionDown("left")),
       jump: this.jumpQueued || input.isActionDown("jump"),
-      sprint: input.isActionDown("sprint") && this.modifiers.allowSprint,
+      sprint: input.isActionDown("sprint") && this.modifiers.allowSprint && gates.allowSprint,
       crouch: input.isActionDown("crouch"),
-      speedScale: this.modifiers.speedScale,
+      speedScale: this.modifiers.speedScale * (crawl ? 1 : gates.speedScale),
+      allowJump,
+      crawl,
       yaw: this.yaw,
       pitch: this.pitch,
     };
@@ -212,10 +249,11 @@ export class PlayerController {
   private tick(): void {
     const moveInput = this.sampleInput();
     this.jumpQueued = false;
-    const wasGrounded = this.state.grounded;
+    const previous = this.state;
+    const wasGrounded = previous.grounded;
 
     this.previousFeet.copyFrom(this.currentFeet);
-    this.state = this.body.step(this.state, moveInput, TICK_SECONDS);
+    this.state = this.body.step(previous, moveInput, TICK_SECONDS);
     this.body.getFeetToRef(this.currentFeet);
 
     if (this.currentFeet.y < this.level.killY) {
@@ -233,15 +271,14 @@ export class PlayerController {
       }
     }
 
-    this.onTick.notifyObservers({ dt: TICK_SECONDS, input: moveInput, state: this.state });
+    this.onTick.notifyObservers({ dt: TICK_SECONDS, input: moveInput, state: this.state, landingSpeed: landingSpeed(previous, this.state) });
   }
 
   private updateCamera(dt: number, alpha: number): void {
     const v = this.state.velocity;
     const speed = Math.hypot(v.x, v.z);
 
-    const targetEye = this.state.stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight;
-    this.eyeHeight += (targetEye - this.eyeHeight) * blendFactor(CAMERA.crouchBlendRate, dt);
+    this.eyeHeight += (eyeHeightFor(this.state.stance) - this.eyeHeight) * blendFactor(CAMERA.crouchBlendRate, dt);
     this.stepOffset -= this.stepOffset * blendFactor(CAMERA.stepSmoothRate, dt);
 
     const sprintTarget = this.state.sprinting && speed > MOVEMENT.walkSpeed ? 1 : 0;

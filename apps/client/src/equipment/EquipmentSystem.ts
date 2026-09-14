@@ -1,8 +1,8 @@
 import { Observable, PhysicsRaycastResult, Vector3, type HavokPlugin, type IRaycastQuery, type Observer, type PhysicsBody, type Scene } from "@babylonjs/core";
 import {
+  ARENA_LEVEL,
   INTERACT,
   ITEMS,
-  MOVEMENT,
   SIMULATION,
   VITALS,
   applyDamage,
@@ -13,15 +13,17 @@ import {
   createGroundLoot,
   createOfflineInventory,
   createPlayerEquipment,
-  createVitals,
+  createTestLoot,
   cookProgress,
   deriveEquipmentModifiers,
   drop,
   dropGroundItem,
+  eyeHeightFor,
   generateLoot,
   inventoryCapacity,
   inventoryWeight,
   itemUseProgress,
+  len2,
   len3,
   pickLootTarget,
   pickUp,
@@ -33,9 +35,11 @@ import {
   spawnRelease,
   stepEquipmentWorld,
   stepPlayerEquipment,
+  stepRevive,
   swapWeapons,
   throwableCounts,
   throwLaunch,
+  wantsAutoPickup,
   withArmor,
   type ConsumableItemId,
   type DamageRequest,
@@ -44,7 +48,6 @@ import {
   type EquipmentModifiers,
   type EquipmentWorld,
   type EquipmentWorldEvent,
-  type ExplosionHit,
   type GroundLoot,
   type InventoryState,
   type ItemInstance,
@@ -62,10 +65,13 @@ import {
   type Vec3,
   type Vec3Tuple,
   type Vitals,
+  type VitalsHit,
   type WeaponSlot,
   type WorldEntity,
 } from "@twobullets/shared";
 import { CollisionLayer, type Damageable } from "../combat/hitboxes";
+import type { TargetArmor } from "../combat/TargetArmor";
+import type { CombatEquipmentLink } from "../combat/types";
 import type { Action } from "../input/bindings";
 import type { PlayerModifiers, PlayerTick } from "../player/PlayerController";
 import {
@@ -73,12 +79,17 @@ import {
   type AreaDamageEvent,
   type ArmorEvent,
   type DetonationEvent,
-  type EquipmentActions,
-  type EquipmentView,
+  type EquipmentItemActions,
+  type EquipmentItemsView,
+  type EquipmentPlayerControl,
   type FireEvent,
   type FlashEvent,
   type ItemEvent,
   type ItemUseView,
+  type PlayerDamage,
+  type ReviveActionEvent,
+  type ReviveTarget,
+  type ReviveView,
   type SmokeEvent,
   type ThrowableBounceEvent,
   type ThrowArcView,
@@ -91,10 +102,10 @@ export interface EquipmentPlayer {
   readonly onTick: Observable<PlayerTick>;
   readonly moveState: MoveState;
   readonly physicsBody?: PhysicsBody;
-  readonly modifiers: PlayerModifiers;
+  /** Unused: gates reach movement through `modifiers` at tick time (PlayerController.setMoveGates). */
+  readonly modifiers?: PlayerModifiers;
   getEyeToRef(result: Vector3): Vector3;
   getAim(): { readonly yaw: number; readonly pitch: number };
-  respawn?(): void;
 }
 
 /** The parts of InputManager equipment reads. */
@@ -116,8 +127,12 @@ export interface EquipmentOptions {
   readonly seed?: number;
   /** Map mode: spawns ground loot in these buildings. */
   readonly map?: { readonly pois: readonly PointOfInterest[]; readonly buildings: readonly LootBuilding[] };
+  /** Ground loot outside map mode. Default: a test pile in front of every arena spawn; `[]` for none. */
+  readonly loot?: readonly LootItem[];
   /** Called every tick for the current targets. */
   readonly targets?: () => readonly EquipmentTarget[];
+  /** Teammates the local player can revive (DEV teammate, squad bots later). */
+  readonly teammates?: () => readonly ReviveTarget[];
   readonly inventory?: InventoryState;
 }
 
@@ -128,21 +143,30 @@ const ARC_POINTS = 96;
 /** Ticks between nearby-loot refreshes (10 Hz). */
 const LOOT_QUERY_TICKS = 6;
 const SMOKE_UPDATE_TICKS = 15;
-/** Offline: seconds from elimination to respawn. */
-const RESPAWN_SECONDS = 5;
 /** Equipment rays see static world only: not hitbox triggers, not player blockers. */
 const WORLD_COLLIDE_MASK = ~(CollisionLayer.hitbox | CollisionLayer.blocker);
+/** The client allows this much past INTERACT.reach for latency and eye jitter; the server re-checks. */
+const PICKUP_SLACK = 0.4;
+/** Items lying within this horizontal radius of the feet (and height band) are auto-picked up. */
+const AUTO_PICKUP = { radius: 1.1, below: 0.6, above: 0.4 } as const;
+/** Line-of-sight target on a ground item: this far above the floor point, m. */
+const ITEM_SIGHT_HEIGHT = 0.15;
+/** Drops land this far in front of the feet (when nothing is in the way), spread on a small ring. */
+const DROP = { forward: 0.55, spread: 0.25 } as const;
+/** Height band (above/below the feet) a downed teammate must be in for a revive. */
+const REVIVE_HEIGHT = 1.2;
 
 /**
  * Local player's equipment: ticks the shared equipment rules in lockstep with movement (like CombatSystem), flies
- * throwables against Havok, resolves grenades and fire against the player and practice soldiers, and spawns ground
- * loot in map mode. Presentation, HUD and audio subscribe through {@link EquipmentView}; the inventory UI sends
- * {@link EquipmentActions}. Runs headless: nothing here draws.
+ * throwables against Havok, resolves grenades and fire against the player and practice soldiers, owns ground loot
+ * (map loot or arena test piles) and its interaction (F pickup, auto pickup, hold-F revive), and holds the inventory
+ * whose weapons and ammo CombatSystem mirrors. Presentation, HUD and audio subscribe through {@link EquipmentItemsView};
+ * the inventory UI sends {@link EquipmentItemActions}; Game drives life events through {@link EquipmentPlayerControl}.
+ * Runs headless: nothing here draws.
  *
- * Frame order: player.update → combat.update → equipment.update (it multiplies its gates into player.modifiers
- * after CombatSystem has written them).
+ * Tick order: CombatSystem (reads the inventory and gates, writes magazines and spent ammo back) → EquipmentSystem.
  */
-export class EquipmentSystem implements EquipmentView, EquipmentActions {
+export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions, EquipmentPlayerControl, CombatEquipmentLink {
   readonly onThrow = new Observable<ThrowEvent>();
   readonly onThrowableBounce = new Observable<ThrowableBounceEvent>();
   readonly onDetonate = new Observable<DetonationEvent>();
@@ -154,12 +178,18 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
   readonly onArmor = new Observable<ArmorEvent>();
   readonly onVitals = new Observable<VitalsViewEvent>();
   readonly onAreaDamage = new Observable<AreaDamageEvent>();
+  readonly onReviveAction = new Observable<ReviveActionEvent>();
 
   readonly maxHealth = VITALS.maxHealth;
-  readonly groundLoot: GroundLoot | null;
+  readonly groundLoot: GroundLoot;
   nearbyLoot: readonly LootItem[] = [];
   lootTarget: LootItem | null = null;
   throwables: readonly ThrowableSnapshot[] = [];
+  /** Reaching 0 HP knocks instead of eliminating (a teammate is standing). Offline solo: false. */
+  canBeKnocked = false;
+  autoPickup = true;
+  activeWeaponSlot: WeaponSlot | null = null;
+  loadoutVersion = 0;
 
   private state: PlayerEquipmentState;
   private readonly world: EquipmentWorld;
@@ -169,10 +199,16 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
   private readonly arc = { points: new Float32Array(ARC_POINTS * 3), count: 0, end: { x: 0, y: 0, z: 0 } as Vec3, visible: false };
   private readonly pendingActions: ((tick: TickContext) => void)[] = [];
   private readonly inHandThrows = new Set<number>();
+  /** Items the player put down: auto pickup leaves them alone. */
+  private readonly playerDropped = new Set<number>();
   private readonly eye = new Vector3();
   private readonly worldEvents: EquipmentWorldEvent[] = [];
   private tickCount = 0;
-  private respawnTimer = 0;
+  /** Entity reviving the local player (Game/DEV), or null. */
+  private reviverId: number | null = null;
+  /** Teammate the local player is reviving, and one in reach for the prompt. */
+  private revivingTarget: ReviveTarget | null = null;
+  private reviveCandidate: ReviveTarget | null = null;
 
   constructor(
     scene: Scene,
@@ -185,7 +221,8 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     this.world = createEquipmentWorld(seed);
     this.raycaster = new WorldRaycaster(scene);
     this.inputQueue = new EquipmentInputQueue(input);
-    this.groundLoot = options.map ? createGroundLoot(generateLoot(seed, options.map.pois, options.map.buildings).items) : null;
+    const loot = options.map ? generateLoot(seed, options.map.pois, options.map.buildings).items : (options.loot ?? createTestLoot(ARENA_LEVEL.spawnPoints));
+    this.groundLoot = createGroundLoot(loot);
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
   }
 
@@ -237,8 +274,19 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     return armorLoadout(this.state.inventory);
   }
 
+  /** Gates for movement (read at tick time by the player) and weapons (read by CombatSystem). Reviving roots the player. */
   get modifiers(): EquipmentModifiers {
-    return deriveEquipmentModifiers(this.state);
+    const gates = deriveEquipmentModifiers(this.state);
+    return this.revivingTarget ? { ...gates, speedScale: 0, allowSprint: false, allowJump: false, allowWeapons: false } : gates;
+  }
+
+  get revive(): ReviveView | null {
+    const target = this.revivingTarget ?? this.reviveCandidate;
+    if (!target) return null;
+    return {
+      targetName: target.displayName ?? "Teammate",
+      progress: this.revivingTarget ? Math.min(1, this.revivingTarget.vitals.reviveProgress / VITALS.reviveSeconds) : null,
+    };
   }
 
   get smokes() {
@@ -252,7 +300,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
   // ---- EquipmentActions --------------------------------------------------------------------------------------------
 
   pickUp(lootId: number, replaceSlot?: WeaponSlot): void {
-    this.pendingActions.push((tick) => this.pickUpLoot(lootId, tick, replaceSlot));
+    this.pendingActions.push((tick) => void this.pickUpLoot(lootId, tick, { replaceSlot }));
   }
 
   drop(target: DropTarget): void {
@@ -270,20 +318,56 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     });
   }
 
+  selectThrowable(kind: ThrowableKind): void {
+    this.pendingActions.push(() => {
+      const { inventory, throw: held } = this.state;
+      const pinPulled = held.phase === "primed" || held.phase === "cooking";
+      if (pinPulled || inventory.selectedThrowable === kind || countItem(inventory, kind) <= 0) return;
+      this.setInventory({ ...inventory, selectedThrowable: kind });
+      this.onItem.notifyObservers({ type: "throwableSelected", kind });
+    });
+  }
+
+  // ---- EquipmentPlayerControl --------------------------------------------------------------------------------------
+
+  damagePlayer(hit: PlayerDamage): void {
+    this.damageLocal({ amount: hit.amount, kind: hit.kind, zone: hit.zone ?? null, sourceId: hit.sourceId }, hit.position);
+  }
+
+  setReviver(reviverId: number | null): void {
+    this.reviverId = reviverId;
+  }
+
+  resetLoadout(inventory: InventoryState = createOfflineInventory()): void {
+    this.cancelTeammateRevive();
+    this.state = createPlayerEquipment(inventory);
+    this.reviverId = null;
+    this.inHandThrows.clear();
+    this.arc.visible = false;
+    this.arc.count = 0;
+    this.loadoutVersion++;
+    this.onVitals.notifyObservers({ type: "respawned" });
+  }
+
+  // ---- CombatEquipmentLink -----------------------------------------------------------------------------------------
+
+  commitWeapons(inventory: InventoryState, activeSlot: WeaponSlot | null): void {
+    if (inventory !== this.state.inventory) this.setInventory(inventory);
+    this.activeWeaponSlot = activeSlot;
+  }
+
   // ---- Frame and tick ----------------------------------------------------------------------------------------------
 
-  /** Per render frame, after combat.update: queues untaken input and applies equipment gates to the player. */
+  /** Per render frame, after combat.update: queues input no tick consumed this frame. */
   update(): void {
     this.inputQueue.endFrame(this.state.inventory);
-    const gates = this.modifiers;
-    const modifiers = this.player.modifiers;
-    modifiers.speedScale *= gates.speedScale;
-    modifiers.allowSprint &&= gates.allowSprint;
   }
 
   dispose(): void {
     this.tickObserver.remove();
-    for (const observable of [this.onThrow, this.onThrowableBounce, this.onDetonate, this.onSmoke, this.onFire, this.onFlash, this.onItem, this.onUse, this.onArmor, this.onVitals, this.onAreaDamage]) observable.clear();
+    for (const observable of [this.onThrow, this.onThrowableBounce, this.onDetonate, this.onSmoke, this.onFire, this.onFlash, this.onItem, this.onUse, this.onArmor, this.onVitals, this.onAreaDamage, this.onReviveAction]) {
+      observable.clear();
+    }
   }
 
   private tick({ dt, state: move }: PlayerTick): void {
@@ -294,7 +378,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     const aim = this.player.getAim();
     const ctx: TickContext = {
       eye: { x: eye.x, y: eye.y, z: eye.z },
-      feet: { x: eye.x, y: eye.y - (move.stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight), z: eye.z },
+      feet: { x: eye.x, y: eye.y - eyeHeightFor(move.stance), z: eye.z },
       viewDir: viewDirection(aim.yaw, aim.pitch),
       yaw: aim.yaw,
       pitch: aim.pitch,
@@ -303,6 +387,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
 
     for (const action of this.pendingActions.splice(0)) action(ctx);
 
+    this.stepBeingRevived(dt);
     const input = this.inputQueue.take(this.state.inventory, move);
     const step = stepPlayerEquipment(this.state, input, { eye: ctx.eye, yaw: aim.yaw, pitch: aim.pitch, velocity: move.velocity }, dt);
     const previousVitals = this.state.vitals;
@@ -314,7 +399,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
       if (id >= 0 && step.release.style === "inHand") this.inHandThrows.add(id);
     }
 
-    if (input.interactPressed && this.state.vitals.life === "alive" && this.lootTarget) this.pickUpLoot(this.lootTarget.lootId, ctx);
+    this.stepInteraction(input, ctx, dt);
 
     const targets = this.options.targets?.() ?? [];
     const entities = this.worldEntities(ctx, targets);
@@ -327,9 +412,108 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
       this.onUse.notifyObservers({ type: "progress", itemId: this.state.use.itemId, progress: itemUseProgress(this.state.use) ?? 0 });
     }
     if (this.tickCount % SMOKE_UPDATE_TICKS === 0) for (const cloud of this.world.smokes) this.onSmoke.notifyObservers({ type: "updated", cloud });
-    if (this.tickCount % LOOT_QUERY_TICKS === 0) this.refreshNearbyLoot(ctx);
+    if (this.tickCount % LOOT_QUERY_TICKS === 0) {
+      this.refreshNearbyLoot(ctx);
+      this.autoPickUp(ctx);
+    }
+    this.lootTarget = this.state.vitals.life === "alive" && !this.reviveCandidate ? pickLootTarget(this.nearbyLoot, ctx.eye, ctx.viewDir) : null;
     this.updateArc(ctx, move, raycast);
-    this.updateRespawn(dt);
+  }
+
+  /** F: revive a downed teammate in reach (held), otherwise pick up the looked-at item (pressed). */
+  private stepInteraction(input: QueuedEquipmentInput, ctx: TickContext, dt: number): void {
+    const candidate = this.handsFree() ? this.findReviveCandidate(ctx) : null;
+    this.reviveCandidate = candidate;
+
+    const reviving = this.revivingTarget;
+    if (reviving) {
+      const active = input.interactHeld && this.handsFree() && this.inReviveReach(reviving, ctx);
+      const step = stepRevive(reviving.vitals, LOCAL_PLAYER_ID, active, dt);
+      reviving.setVitals(step.target);
+      if (step.event?.type === "revived") {
+        this.revivingTarget = null;
+        this.onReviveAction.notifyObservers({ type: "completed", targetId: reviving.id });
+      } else if (step.target.reviverId !== LOCAL_PLAYER_ID) {
+        this.revivingTarget = null;
+        this.onReviveAction.notifyObservers({ type: "cancelled", targetId: reviving.id });
+      } else {
+        this.onReviveAction.notifyObservers({ type: "progress", targetId: reviving.id, progress: Math.min(1, step.target.reviveProgress / VITALS.reviveSeconds) });
+      }
+      return;
+    }
+
+    if (!input.interactPressed || this.state.vitals.life !== "alive") return;
+    if (candidate) {
+      const step = stepRevive(candidate.vitals, LOCAL_PLAYER_ID, true, dt);
+      // Someone else is already reviving them.
+      if (step.target.reviverId !== LOCAL_PLAYER_ID) return;
+      candidate.setVitals(step.target);
+      this.revivingTarget = candidate;
+      this.onReviveAction.notifyObservers({ type: "started", targetId: candidate.id });
+      return;
+    }
+    const target = pickLootTarget(this.nearbyLoot, ctx.eye, ctx.viewDir);
+    if (target) this.pickUpLoot(target.lootId, ctx);
+  }
+
+  /** Alive with hands free (no item in use, no throwable out): needed to revive. Looting only needs to be alive. */
+  private handsFree(): boolean {
+    const { vitals, use, throw: held } = this.state;
+    return vitals.life === "alive" && use.itemId === null && held.phase === "idle";
+  }
+
+  private findReviveCandidate(ctx: TickContext): ReviveTarget | null {
+    let best: ReviveTarget | null = null;
+    let bestDistance = Infinity;
+    for (const mate of this.options.teammates?.() ?? []) {
+      if (mate.id === LOCAL_PLAYER_ID || mate.vitals.life !== "downed" || !this.inReviveReach(mate, ctx)) continue;
+      const distance = len2(mate.feet.x - ctx.feet.x, mate.feet.z - ctx.feet.z);
+      if (distance < bestDistance) {
+        best = mate;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  private inReviveReach(mate: ReviveTarget, ctx: TickContext): boolean {
+    const { feet } = mate;
+    return len2(feet.x - ctx.feet.x, feet.z - ctx.feet.z) <= VITALS.reviveRange && Math.abs(feet.y - ctx.feet.y) <= REVIVE_HEIGHT && mate.vitals.life === "downed";
+  }
+
+  private cancelTeammateRevive(): void {
+    const target = this.revivingTarget;
+    if (!target) return;
+    this.revivingTarget = null;
+    target.setVitals(stepRevive(target.vitals, LOCAL_PLAYER_ID, false, 0).target);
+    this.onReviveAction.notifyObservers({ type: "cancelled", targetId: target.id });
+  }
+
+  /** The local player downed with a reviver set (setReviver): progress, pause the bleed, stand up after 5 s. */
+  private stepBeingRevived(dt: number): void {
+    const vitals = this.state.vitals;
+    if (vitals.life !== "downed") {
+      this.reviverId = null;
+      return;
+    }
+    const reviver = this.reviverId ?? vitals.reviverId;
+    if (reviver < 0) return;
+    const step = stepRevive(vitals, reviver, this.reviverId !== null, dt);
+    this.state = { ...this.state, vitals: step.target };
+    switch (step.event?.type) {
+      case "reviveStarted":
+        this.onVitals.notifyObservers({ type: "reviveStarted", reviverId: reviver });
+        break;
+      case "reviveCancelled":
+        this.onVitals.notifyObservers({ type: "reviveCancelled" });
+        return;
+      case "revived":
+        this.reviverId = null;
+        this.onVitals.notifyObservers({ type: "revived" });
+        this.onVitals.notifyObservers({ type: "healed", amount: step.target.health, source: "revive" });
+        return;
+    }
+    if (step.target.reviverId === reviver) this.onVitals.notifyObservers({ type: "reviveProgress", progress: Math.min(1, step.target.reviveProgress / VITALS.reviveSeconds) });
   }
 
   private worldEntities(ctx: TickContext, targets: readonly EquipmentTarget[]): WorldEntity[] {
@@ -342,7 +526,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     targets.forEach((target, index) => {
       if (!target.alive) return;
       const { x, y, z } = target.feet;
-      entities.push({ id: index + 1, team: index + 1, feet: { x, y, z }, posture: "stand", eye: { x, y: y + MOVEMENT.standEyeHeight, z }, viewDir: { x: 0, y: 0, z: 1 } });
+      entities.push({ id: index + 1, team: index + 1, feet: { x, y, z }, posture: "stand", eye: { x, y: y + eyeHeightFor("stand"), z }, viewDir: { x: 0, y: 0, z: 1 } });
     });
     return entities;
   }
@@ -370,7 +554,6 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
           break;
         case "bledOut":
           this.onVitals.notifyObservers({ type: "eliminated", killerId: event.killerId, cause: "bleed" });
-          this.respawnTimer = RESPAWN_SECONDS;
           break;
         case "throwableSelected":
           this.onItem.notifyObservers({ type: "throwableSelected", kind: event.kind });
@@ -408,10 +591,15 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
       case "flashed":
         if (event.targetId === LOCAL_PLAYER_ID) this.flashLocal(event.exposure, ctx);
         break;
-      case "damage":
-        if (event.request.targetId === LOCAL_PLAYER_ID) this.damageLocal(event.request, event.explosion);
-        else this.damageTarget(event.request, targets[event.request.targetId - 1]);
+      case "damage": {
+        const { request } = event;
+        if (request.targetId === LOCAL_PLAYER_ID) {
+          this.damageLocal({ amount: request.amount, kind: request.kind, zone: event.explosion ? "body" : null, sourceId: request.sourceId }, request.position);
+        } else {
+          this.damageTarget(request, targets[request.targetId - 1]);
+        }
         break;
+      }
     }
   }
 
@@ -424,11 +612,11 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     this.onFlash.notifyObservers({ position: ctx.eye, exposure });
   }
 
-  private damageLocal(request: DamageRequest, explosion: ExplosionHit | null): void {
+  /** Every hit on the local player (grenades, fire, falls, later bullets): armor → health → knocked/eliminated. */
+  private damageLocal(hit: VitalsHit, position: Vec3): void {
     const before = this.state.vitals;
     const worn = armorLoadout(this.state.inventory);
-    // Offline the local player is a team of one, so reaching 0 HP eliminates (see findTeamWipes for squads).
-    const outcome = applyDamage(before, worn, { amount: request.amount, kind: request.kind, zone: explosion ? "body" : null, sourceId: request.sourceId }, { canBeKnocked: false });
+    const outcome = applyDamage(before, worn, hit, { canBeKnocked: this.canBeKnocked });
     if (outcome.dealt <= 0 && outcome.armorResult.absorbed <= 0) return;
     this.state = { ...this.state, vitals: outcome.vitals, inventory: withArmor(this.state.inventory, outcome.armor) };
 
@@ -438,11 +626,15 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
       if (armor.destroyed) this.onArmor.notifyObservers({ type: "destroyed", slot: armor.slot, level });
       else this.onArmor.notifyObservers({ type: "damaged", slot: armor.slot, level, absorbed: armor.absorbed, durability: armor.durabilityAfter, condition: armorCondition(armor.slot, this.state.inventory[armor.slot]) });
     }
-    if (outcome.dealt > 0) this.onVitals.notifyObservers({ type: "damaged", amount: outcome.dealt, kind: request.kind, sourceId: request.sourceId, position: request.position });
-    if (outcome.knocked) this.onVitals.notifyObservers({ type: "knocked", byId: request.sourceId });
+    if (outcome.dealt > 0) this.onVitals.notifyObservers({ type: "damaged", amount: outcome.dealt, kind: hit.kind, sourceId: hit.sourceId, position });
+    if (outcome.knocked) {
+      this.cancelTeammateRevive();
+      this.onVitals.notifyObservers({ type: "knocked", byId: hit.sourceId });
+    }
     if (outcome.killed) {
-      this.onVitals.notifyObservers({ type: "eliminated", killerId: outcome.killerId, cause: request.kind });
-      this.respawnTimer = RESPAWN_SECONDS;
+      this.cancelTeammateRevive();
+      this.reviverId = null;
+      this.onVitals.notifyObservers({ type: "eliminated", killerId: outcome.killerId, cause: hit.kind });
     }
   }
 
@@ -451,7 +643,7 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     const feet = target.feet;
     const point = new Vector3(feet.x, feet.y + 1, feet.z);
     const direction = point.subtract(new Vector3(request.position.x, request.position.y, request.position.z)).normalize();
-    const result = target.applyDamage({ colliderId: `${target.id}/area`, zone: "body", amount: request.amount, point, direction });
+    const result = target.applyDamage({ colliderId: `${target.id}/area`, zone: "body", amount: request.amount, kind: request.kind, point, direction });
     if (!result) return;
     this.onAreaDamage.notifyObservers({
       targetId: target.id,
@@ -465,25 +657,39 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     });
   }
 
-  private pickUpLoot(lootId: number, ctx: TickContext, replaceSlot?: WeaponSlot): void {
+  /** Returns whether anything was taken. `silent` (auto pickup) skips failure events. */
+  private pickUpLoot(lootId: number, ctx: TickContext, { replaceSlot, silent = false }: { replaceSlot?: WeaponSlot | undefined; silent?: boolean } = {}): boolean {
     const ground = this.groundLoot;
-    const item = ground?.items.get(lootId);
-    if (!ground || !item || this.state.vitals.life !== "alive") return;
+    const item = ground.items.get(lootId);
+    if (!item || this.state.vitals.life !== "alive") return false;
     const [x, y, z] = item.position;
-    if (len3(x - ctx.eye.x, y - ctx.eye.y, z - ctx.eye.z) > INTERACT.reach + 0.4) return;
+    if (len3(x - ctx.eye.x, y - ctx.eye.y, z - ctx.eye.z) > INTERACT.reach + PICKUP_SLACK) return false;
 
     const instance = toInstance(item);
-    // Until weapons come from the inventory (phase 2), a primary pickup with both primaries full replaces primary 1.
-    const result = pickUp(this.state.inventory, instance, replaceSlot ?? 0);
+    // F on a primary with both primaries full swaps the one in hand (primary 1 when holding the sidearm or unarmed).
+    const active = this.activeWeaponSlot;
+    const result = pickUp(this.state.inventory, instance, replaceSlot ?? (active === 1 ? 1 : 0));
     if (!result.ok) {
-      this.onItem.notifyObservers({ type: "pickupFailed", item: instance, lootId, error: result.error });
-      return;
+      if (!silent) this.onItem.notifyObservers({ type: "pickupFailed", item: instance, lootId, error: result.error });
+      return false;
     }
     this.setInventory(result.inventory);
     setGroundQuantity(ground, lootId, result.remainder?.quantity ?? 0);
+    if (!result.remainder) this.playerDropped.delete(lootId);
     this.onItem.notifyObservers({ type: "picked", item: instance, lootId, taken: result.taken });
-    for (const dropped of result.dropped) this.putOnGround(dropped, item.position);
+    for (const dropped of result.dropped) this.putOnGround(dropped, ctx, item.position);
     this.refreshNearbyLoot(ctx);
+    return true;
+  }
+
+  private autoPickUp(ctx: TickContext): void {
+    if (!this.autoPickup || this.state.vitals.life !== "alive") return;
+    for (const item of this.nearbyLoot) {
+      const dy = item.position[1] - ctx.feet.y;
+      if (dy < -AUTO_PICKUP.below || dy > AUTO_PICKUP.above || len2(item.position[0] - ctx.feet.x, item.position[2] - ctx.feet.z) > AUTO_PICKUP.radius) continue;
+      if (this.playerDropped.has(item.lootId) || !wantsAutoPickup(this.state.inventory, item.itemId)) continue;
+      this.pickUpLoot(item.lootId, ctx, { silent: true });
+    }
   }
 
   private dropItem(target: DropTarget, ctx: TickContext): void {
@@ -493,16 +699,31 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
       return;
     }
     this.setInventory(result.inventory);
-    this.putOnGround(result.dropped, [ctx.feet.x, ctx.feet.y, ctx.feet.z]);
+    this.putOnGround(result.dropped, ctx);
     this.refreshNearbyLoot(ctx);
   }
 
-  private putOnGround(instance: ItemInstance, position: Vec3Tuple): void {
-    if (!this.groundLoot) return;
-    // Settle onto whatever is below, so drops on stairs or balconies don't float.
-    const below = this.raycaster.cast({ x: position[0], y: position[1] + 0.5, z: position[2] }, { x: position[0], y: position[1] - 3, z: position[2] });
-    const y = below ? below.point.y : position[1];
-    const item = dropGroundItem(this.groundLoot, instance, [position[0], y, position[2]]);
+  /**
+   * Puts an item from the inventory on the ground: at `at` (a swap leaves the old gear where the new one lay), else a
+   * little in front of the feet unless a wall is in the way. Settles onto whatever is below.
+   */
+  private putOnGround(instance: ItemInstance, ctx: TickContext, at?: Vec3Tuple): void {
+    const ground = this.groundLoot;
+    const ring = (ground.nextId * 2.399) % (Math.PI * 2);
+    let [x, y, z] = at ?? [ctx.feet.x, ctx.feet.y, ctx.feet.z];
+    if (!at) {
+      const horizontal = Math.max(1e-6, len2(ctx.viewDir.x, ctx.viewDir.z));
+      const tx = x + (ctx.viewDir.x / horizontal) * DROP.forward + Math.sin(ring) * DROP.spread;
+      const tz = z + (ctx.viewDir.z / horizontal) * DROP.forward + Math.cos(ring) * DROP.spread;
+      if (!this.raycaster.cast({ x, y: y + 0.3, z }, { x: tx, y: y + 0.3, z: tz })) {
+        x = tx;
+        z = tz;
+      }
+    }
+    const below = this.raycaster.cast({ x, y: y + 0.5, z }, { x, y: y - 3, z });
+    if (below) y = below.point.y;
+    const item = dropGroundItem(ground, instance, [x, y, z]);
+    this.playerDropped.add(item.lootId);
     this.onItem.notifyObservers({ type: "dropped", item });
   }
 
@@ -510,14 +731,18 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     this.state = { ...this.state, inventory };
   }
 
+  /** Items within reach that the eye can see (no looting through walls or floors). */
   private refreshNearbyLoot(ctx: TickContext): void {
-    if (!this.groundLoot || this.state.vitals.life !== "alive") {
+    if (this.state.vitals.life !== "alive") {
       this.nearbyLoot = [];
       this.lootTarget = null;
       return;
     }
-    this.nearbyLoot = queryGroundLoot(this.groundLoot, ctx.eye, INTERACT.reach);
-    this.lootTarget = pickLootTarget(this.nearbyLoot, ctx.eye, ctx.viewDir);
+    const eye = ctx.eye;
+    this.nearbyLoot = queryGroundLoot(this.groundLoot, eye, INTERACT.reach).filter((item) => {
+      const [x, y, z] = item.position;
+      return this.raycaster.cast(eye, { x, y: y + ITEM_SIGHT_HEIGHT, z }) === null;
+    });
   }
 
   private updateArc(ctx: TickContext, move: MoveState, raycast: RaycastFn): void {
@@ -535,15 +760,6 @@ export class EquipmentSystem implements EquipmentView, EquipmentActions {
     arc.count = result.count;
     arc.end = result.end;
   }
-
-  private updateRespawn(dt: number): void {
-    if (this.state.vitals.life !== "dead" || this.respawnTimer <= 0) return;
-    this.respawnTimer -= dt;
-    if (this.respawnTimer > 0) return;
-    this.state = { ...this.state, vitals: createVitals() };
-    this.player.respawn?.();
-    this.onVitals.notifyObservers({ type: "respawned" });
-  }
 }
 
 interface TickContext {
@@ -557,6 +773,7 @@ interface TickContext {
 
 interface QueuedEquipmentInput extends EquipmentInput {
   readonly interactPressed: boolean;
+  readonly interactHeld: boolean;
 }
 
 const WEAPON_SELECT_ACTIONS: readonly Action[] = ["slot1", "slot2", "slot3", "slot4"];
@@ -609,6 +826,7 @@ class EquipmentInputQueue {
       weaponSelectPressed: this.wheel || WEAPON_SELECT_ACTIONS.some(was),
       useItem: this.uiUse ?? this.useQueued,
       interactPressed: was("interact"),
+      interactHeld: was("interact") || held("interact"),
     };
     this.pressed.clear();
     this.wheel = false;
@@ -638,8 +856,8 @@ class EquipmentInputQueue {
 }
 
 /**
- * Static-world segment queries for throwables and area effects: like HavokRaycaster, but hitbox triggers and player
- * blockers are invisible, and the thrower's own capsule is ignored.
+ * Static-world segment queries for throwables, area effects and loot sight lines: like HavokRaycaster, but hitbox
+ * triggers and player blockers are invisible, and the local player's own capsule is ignored.
  */
 class WorldRaycaster {
   private readonly plugin: HavokPlugin;
@@ -681,8 +899,14 @@ function toInstance(item: LootItem): ItemInstance {
   return { itemId, quantity, ...(durability !== undefined ? { durability } : {}), ...(magazine !== undefined ? { magazine } : {}) };
 }
 
-/** Adapts practice soldiers (TargetDummy) to equipment targets. */
-export function soldierTargets(dummies: readonly (Damageable & { readonly soldier: { readonly root: { readonly position: Vec3 } } })[]): EquipmentTarget[] {
+/**
+ * Adapts practice soldiers (TargetDummy) to equipment targets. With `armor` (CombatSystem.targetArmor), blasts are
+ * reduced by a worn vest first, like bullets.
+ */
+export function soldierTargets(
+  dummies: readonly (Damageable & { readonly soldier: { readonly root: { readonly position: Vec3 } } })[],
+  armor?: TargetArmor,
+): EquipmentTarget[] {
   return dummies.map((dummy) => ({
     id: dummy.id,
     ...(dummy.displayName ? { displayName: dummy.displayName } : {}),
@@ -692,6 +916,9 @@ export function soldierTargets(dummies: readonly (Damageable & { readonly soldie
     get feet() {
       return dummy.soldier.root.position;
     },
-    applyDamage: (hit) => dummy.applyDamage(hit),
+    applyDamage: (hit) => {
+      if (!armor || !dummy.alive) return dummy.applyDamage(hit);
+      return dummy.applyDamage({ ...hit, amount: armor.absorb(dummy.id, hit.amount, hit.kind ?? "bullet", hit.zone).amount });
+    },
   }));
 }

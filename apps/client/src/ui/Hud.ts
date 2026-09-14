@@ -1,9 +1,12 @@
 import { Vector3, type Scene } from "@babylonjs/core";
 import type { HitZone, PlayerDebugState } from "@twobullets/shared";
+import { loadAudioCredits } from "../audio/audioCredits";
 import type { CombatView } from "../combat/types";
+import type { EquipmentView } from "../equipment/types";
 import { CombatHud } from "./CombatHud";
 import { Crosshair } from "./Crosshair";
 import { el } from "./dom";
+import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEquipment";
 import { PlayOverlay } from "./PlayOverlay";
 import { StatsPanel } from "./StatsPanel";
 import "./hud.css";
@@ -34,7 +37,10 @@ export type HudPreview =
   | "scope"
   | "compass"
   | "feed"
-  | "reload";
+  | "reload"
+  | EquipmentPreview;
+
+const EQUIPMENT_PREVIEWS: ReadonlySet<string> = new Set<EquipmentPreview>(["boost", "armor", "knocked", "revive", "cook", "use", "pickup", "death"]);
 
 /** Frame deltas above this (tab switch, breakpoint) are clamped so smoothing doesn't jump. */
 const MAX_DT = 0.1;
@@ -50,6 +56,10 @@ export class Hud {
   private readonly container: HTMLDivElement;
   private readonly inspectorTag: HTMLDivElement;
   private combat: CombatHud | undefined;
+  private equipment: EquipmentView | null = null;
+  private preview: PreviewEquipment | null = null;
+  private baseCredits: readonly string[] = [];
+  private audioCredits: readonly string[] = [];
   private scene: Scene | undefined;
   private locked = false;
   private inspectorOpen = false;
@@ -63,6 +73,10 @@ export class Hud {
     this.overlay = new PlayOverlay(this.container, handlers.onPlayClick);
     this.inspectorTag = el("div", "tb-inspector-tag", "INSPECTOR OPEN · F9 TO CLOSE", this.container);
     this.refreshVisibility();
+    void loadAudioCredits(import.meta.env.BASE_URL).then((lines) => {
+      this.audioCredits = lines;
+      this.overlay.setCredits([...this.baseCredits, ...lines]);
+    });
   }
 
   setLocked(locked: boolean): void {
@@ -82,9 +96,10 @@ export class Hud {
     this.refreshVisibility();
   }
 
-  /** Attribution lines listed under "Credits" in the play overlay (plain text). */
+  /** Attribution lines listed under "Credits" in the play overlay (plain text); the audio credits are appended. */
   setCredits(lines: readonly string[]): void {
-    this.overlay.setCredits(lines);
+    this.baseCredits = lines;
+    this.overlay.setCredits([...lines, ...this.audioCredits]);
   }
 
   /** Connects combat HUD elements (compass, ammo, slots, health, hit markers, kill feed, crosshair spread, scope). */
@@ -92,7 +107,25 @@ export class Hud {
     this.combat?.dispose();
     this.scene = scene;
     this.combat = new CombatHud(this.container, combat, scene, this.crosshair);
+    this.combat.bindEquipment(this.equipment);
     this.refreshVisibility();
+  }
+
+  /**
+   * Connects the equipment HUD: boost and knocked health, armor, throwable slot, cook/use/revive rings, interaction
+   * prompt, pickup feed and death recap. Health then comes from `equipment.vitals`.
+   */
+  attachEquipment(equipment: EquipmentView): void {
+    this.equipment = equipment;
+    if (!this.preview) this.combat?.bindEquipment(equipment);
+  }
+
+  /**
+   * Flashbang whiteout, 0..1 (throwables presentation): fades the combat HUD out so a full whiteout hides it.
+   * Call with 0 when the whiteout ends.
+   */
+  setFlashWhiteout(amount: number): void {
+    if (this.combat) this.combat.whiteout = amount;
   }
 
   /** Called every frame after scene.render(). Must not allocate DOM nodes or thrash layout. */
@@ -112,6 +145,8 @@ export class Hud {
    * `__twobullets.hud.debugPreview("demo")` (or "body" | "limb" | "head" | "kill" | "headkill" | "shotgun" | "spray" |
    * "hurt" | "lowhealth" | "heal" | "scope" | "compass" | "feed" | "reload"). "scope" toggles; "heal" clears health
    * overrides. Pass `delaySeconds` to click back into the game before it plays.
+   * Equipment HUD: "boost" | "armor" | "knocked" | "revive" | "cook" | "use" | "pickup" | "death" play a scripted
+   * equipment view, then restore the attached one.
    * Credits: `__twobullets.hud.setCredits(["Rifle model by X (CC-BY 4.0)"])`.
    */
   debugPreview(kind: HudPreview = "demo", delaySeconds = 0): void {
@@ -124,6 +159,11 @@ export class Hud {
     const camera = this.scene?.activeCameras?.[0] ?? this.scene?.activeCamera;
     if (!combat || !camera) {
       console.warn("[hud] debugPreview needs attachCombat() and an active camera");
+      return;
+    }
+
+    if (EQUIPMENT_PREVIEWS.has(kind)) {
+      void this.playEquipmentPreview(combat, kind as EquipmentPreview);
       return;
     }
 
@@ -200,6 +240,21 @@ export class Hud {
         later(4800, () => this.debugPreview("compass"));
         break;
     }
+  }
+
+  /** Loaded on demand so production builds leave the scripted view out. */
+  private async playEquipmentPreview(combat: CombatHud, kind: EquipmentPreview): Promise<void> {
+    const { PreviewEquipment } = await import("./equipment/PreviewEquipment");
+    this.preview?.dispose();
+    const preview = new PreviewEquipment();
+    this.preview = preview;
+    combat.bindEquipment(preview);
+    preview.play(kind, () => {
+      if (this.preview !== preview) return;
+      preview.dispose();
+      this.preview = null;
+      combat.bindEquipment(this.equipment);
+    });
   }
 
   /** DEV only: shows the crosshair and combat HUD (and hides the play overlay) without pointer lock. */

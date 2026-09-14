@@ -9,6 +9,7 @@ import type {
   FirePatch,
   FlashExposure,
   GroundLoot,
+  HitZone,
   InventoryError,
   InventoryState,
   ItemInstance,
@@ -119,6 +120,10 @@ export interface ThrowArcView {
   readonly end: Vec3;
   /** False when no pin is pulled (hide the arc). */
   readonly visible: boolean;
+  /** Surface normal at `end` (landing marker orientation). Optional: presentation probes the world when absent. */
+  readonly endNormal?: Vec3;
+  /** Throw style the arc was predicted for (aim held = underhand). Optional: presentation infers it when absent. */
+  readonly style?: "overhand" | "underhand";
 }
 
 export interface ItemUseView {
@@ -174,12 +179,14 @@ export interface EquipmentView {
   readonly smokes: readonly SmokeCloud[];
   readonly fires: readonly FirePatch[];
 
-  /** All ground loot (null outside map mode); render it from `groundLoot.items` and watch `groundLoot.version`. */
+  /** All ground loot (map loot or arena test piles); render it from `groundLoot.items` and watch `groundLoot.version`. */
   readonly groundLoot: GroundLoot | null;
   /** Ground items within reach, nearest first (refreshed at 10 Hz). */
   readonly nearbyLoot: readonly LootItem[];
   /** Item the interaction prompt offers ("F  Pick up Bandage ×5"), or null. */
   readonly lootTarget: LootItem | null;
+  /** Reviving a downed teammate (HUD prompt and ring). Optional until squads or bots exist. */
+  readonly revive?: ReviveView | null;
 }
 
 /** Commands for the inventory/loot UI; applied on the next tick, results arrive as ItemEvent/UseEvent. */
@@ -192,3 +199,72 @@ export interface EquipmentActions {
 
 /** Entity id of the local player inside the equipment simulation. Practice targets use 1..n. */
 export const LOCAL_PLAYER_ID = 0;
+
+/** Damage from outside the equipment world (falls now, bot bullets later), routed through vitals and armor. */
+export interface PlayerDamage {
+  readonly amount: number;
+  readonly kind: DamageKind;
+  /** Bullet hit zone (decides helmet/vest); null or omitted for zone-less damage. */
+  readonly zone?: HitZone | null;
+  /** Attacker entity id, or -1 for the world. */
+  readonly sourceId: number;
+  /** Where the damage came from, for the directional hurt indicator. */
+  readonly position: Vec3;
+}
+
+/**
+ * Game-side control of the local player's life (Game.ts wiring): outside damage, knock rules, revive and loadout
+ * resets. Events still arrive through {@link EquipmentView.onVitals}.
+ */
+export interface EquipmentPlayerControl {
+  damagePlayer(hit: PlayerDamage): void;
+  /** Reaching 0 HP knocks instead of eliminating (a teammate is standing). Offline solo: false. */
+  canBeKnocked: boolean;
+  /** Starts (id) or stops (null) a revive on the downed local player; progresses each tick via stepRevive. */
+  setReviver(reviverId: number | null): void;
+  /** Fresh kit: inventory (default: the offline preset), idle throw/use state and full vitals. */
+  resetLoadout(inventory?: InventoryState): void;
+}
+
+/** The local player's side of a revive: a downed teammate in reach, and progress while F is held on them. */
+export interface ReviveView {
+  /** Name for "F  Revive <name>", or null when nobody downed is in reach. */
+  readonly targetName: string | null;
+  /** 0..1 while reviving, else null. */
+  readonly progress: number | null;
+}
+
+// ---- Items, loot and revive (phase 2) --------------------------------------------------------------------------
+
+/** A downed teammate the local player can revive by holding F (the DEV teammate now, squad bots later). */
+export interface ReviveTarget {
+  readonly id: number;
+  readonly displayName?: string;
+  /** Feet position, world space. */
+  readonly feet: Vec3;
+  readonly vitals: Vitals;
+  /** Receives each revive step (progress, cancel, revived). */
+  setVitals(vitals: Vitals): void;
+}
+
+/** The local player reviving someone else (the local player being revived arrives as VitalsViewEvent). */
+export type ReviveActionEvent =
+  | { readonly type: "started"; readonly targetId: number }
+  /** Every tick while reviving; 0..1. */
+  | { readonly type: "progress"; readonly targetId: number; readonly progress: number }
+  | { readonly type: "cancelled"; readonly targetId: number }
+  | { readonly type: "completed"; readonly targetId: number };
+
+/** Item/loot/revive state and commands beyond the phase 1 contract (inventory screen, loot renderer, interaction). */
+export interface EquipmentItemsView extends EquipmentView {
+  readonly onReviveAction: Observable<ReviveActionEvent>;
+  /** Weapon slot in hand (null while unarmed or before combat is attached): F swaps this primary when both are full. */
+  readonly activeWeaponSlot: WeaponSlot | null;
+  /** Walking over ammo for a carried weapon, meds or throwables picks them up when they fit (PUBG auto pickup). */
+  autoPickup: boolean;
+}
+
+export interface EquipmentItemActions extends EquipmentActions {
+  /** Arms this throwable kind for key 5 (ignored while a pin is pulled or none are carried). */
+  selectThrowable(kind: ThrowableKind): void;
+}

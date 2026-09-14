@@ -27,7 +27,13 @@ export type SourceId =
   | "handgunReload"
   | "shotgunReload"
   | "rifleReload"
-  | "swishes";
+  | "swishes"
+  | "bangs"
+  | "distantExplosion"
+  | "fireCrackle"
+  | "glassBreak"
+  | "breakingFalling"
+  | "sfx100";
 
 export interface AudioSource {
   readonly id: SourceId;
@@ -183,6 +189,70 @@ export const SOURCES: readonly AudioSource[] = [
     url: "https://opengameart.org/sites/default/files/swishes.zip",
     file: "swishes.zip",
     bytes: 385_150,
+    archive: "zip",
+  },
+  // --- Equipment (grenades, molotov, consumables). Checked 2026-09-14.
+  {
+    id: "bangs",
+    title: "25 CC0 bang / firework SFX",
+    authors: ["rubberduck"],
+    license: "CC0",
+    page: "https://opengameart.org/content/25-cc0-bang-firework-sfx",
+    url: "https://opengameart.org/sites/default/files/25-CC0-bang-sfx.zip",
+    file: "25-CC0-bang-sfx.zip",
+    bytes: 1_390_498,
+    archive: "zip",
+  },
+  {
+    id: "distantExplosion",
+    title: "Muffled Distant Explosion",
+    authors: ["NenadSimic"],
+    license: "CC0",
+    page: "https://opengameart.org/content/muffled-distant-explosion",
+    url: "https://opengameart.org/sites/default/files/NenadSimic%20-%20Muffled%20Distant%20Explosion.wav",
+    file: "muffled-distant-explosion.wav",
+    bytes: 907_518,
+  },
+  {
+    id: "fireCrackle",
+    title: "Fire Crackling",
+    authors: ["AntumDeluge"],
+    license: "CC0",
+    page: "https://opengameart.org/content/fire-crackling",
+    url: "https://opengameart.org/sites/default/files/fire-1.wav",
+    file: "fire-crackling.wav",
+    bytes: 253_232,
+  },
+  {
+    id: "glassBreak",
+    title: "Glass Break",
+    authors: ["Till Behrend"],
+    license: "CC0",
+    page: "https://opengameart.org/content/glass-break",
+    url: "https://opengameart.org/sites/default/files/glass_breaking.wav",
+    file: "glass-breaking.wav",
+    bytes: 230_924,
+  },
+  {
+    id: "breakingFalling",
+    title: "75 CC0 breaking / falling / hit sfx",
+    authors: ["rubberduck"],
+    license: "CC0",
+    page: "https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx",
+    url: "https://opengameart.org/sites/default/files/sfx_breaking_and_falling.zip",
+    file: "sfx_breaking_and_falling.zip",
+    bytes: 1_624_406,
+    archive: "zip",
+  },
+  {
+    id: "sfx100",
+    title: "100 CC0 SFX",
+    authors: ["rubberduck"],
+    license: "CC0",
+    page: "https://opengameart.org/content/100-cc0-sfx",
+    url: "https://opengameart.org/sites/default/files/100-CC0-SFX_0.zip",
+    file: "100-CC0-SFX.zip",
+    bytes: 2_921_904,
     archive: "zip",
   },
 ];

@@ -6,8 +6,9 @@ import type { AudioBusId } from "./types";
  * WebAudio graph (raw WebAudio rather than Babylon's AudioEngineV2: we need per-voice filters for air absorption and
  * occlusion, per-voice reverb/echo sends and sample-accurate delayed starts, none of which the V2 sound API exposes).
  *
- *   voice: sources → layer gains → low-pass → gain → [HRTF panner] → bus ─→ [glue] → duck → fader ─→ master → limiter
- *                                                                    └→ direct → gentle comp ─┘ (skips glue and duck)
+ *   voice: sources → layer gains → low-pass → gain → [HRTF panner] → bus ─→ [glue] → duck → fader ─→ master → muffle → limiter
+ *                                                                    └→ direct → gentle comp ─┘ (skips glue and duck)  │
+ *                                                                    └→ overlay (ear ringing: skips buses and muffle) ────┘
  *                                                  └→ room send ─→ bus room tap ─→ convolver ─→ indoor return ─┘
  *                                                  └→ echo send ─→ bus echo tap ─→ slapback ──→ outdoor return ┘
  *
@@ -22,6 +23,8 @@ const BUS_CAP: Readonly<Record<AudioBusId, number>> = { weapons: 20, impacts: 12
 const STEAL_FADE = 0.025;
 const NOISE_SECONDS = 2;
 const ROOM_SECONDS = 0.9;
+/** Master low-pass cutoff when nothing is muffled, Hz. */
+const MUFFLE_OPEN = 22_000;
 
 /** Voice priorities: higher survives stealing. */
 export const Priority = {
@@ -52,9 +55,10 @@ export interface VoiceOptions {
   readonly tag?: string;
   /**
    * "direct" skips the bus glue compressor and ducking (the local player's own gunfire, which does the ducking, and
-   * the biggest remote guns whose transient must survive).
+   * the biggest remote guns whose transient must survive). "overlay" also skips the master muffle (ear ringing, which
+   * must stay audible while everything else is dulled); the bus still counts toward its voice cap.
    */
-  readonly route?: "bus" | "direct";
+  readonly route?: "bus" | "direct" | "overlay";
 }
 
 export interface LayerOptions {
@@ -246,6 +250,8 @@ export class Voice {
 export class AudioEngine {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
+  private muffleFilter: BiquadFilterNode | null = null;
+  private overlay: GainNode | null = null;
   private roomReturn: GainNode | null = null;
   private echoReturn: GainNode | null = null;
   private noise: AudioBuffer | null = null;
@@ -318,10 +324,9 @@ export class AudioEngine {
       panner.distanceModel = "inverse";
       panner.rolloffFactor = 0;
       setPannerPosition(panner, options.position, ctx.currentTime);
-      output.connect(panner).connect(options.route === "direct" ? bus.direct : bus.input);
-    } else {
-      output.connect(options.route === "direct" ? bus.direct : bus.input);
     }
+    const destination = options.route === "overlay" && this.overlay ? this.overlay : options.route === "direct" ? bus.direct : bus.input;
+    (panner ? output.connect(panner) : output).connect(destination);
     const voice = new Voice(ctx, options, filter, output, panner, this.noise);
     if (options.room) voice.send(bus.roomTap, options.room);
     if (options.echo) voice.send(bus.echoTap, options.echo);
@@ -389,6 +394,27 @@ export class AudioEngine {
     gain.setTargetAtTime(1, bus.duckUntil, release / 3);
   }
 
+  /**
+   * Dulls the whole mix (everything but overlay voices) through a master low-pass: glides down to `frequency` in
+   * `attack` s (after `delay`), holds, then opens back up over `release` s. A shallower muffle doesn't interrupt a
+   * deeper one in progress.
+   */
+  muffle(frequency: number, attack: number, hold: number, release: number, delay = 0): void {
+    const ctx = this.live;
+    const filter = this.muffleFilter;
+    if (!ctx || !filter) return;
+    const param = filter.frequency;
+    const target = Math.max(80, frequency);
+    if (param.value < target && param.value < MUFFLE_OPEN * 0.9) return;
+    const start = ctx.currentTime + delay;
+    const bottom = start + Math.max(0.005, attack);
+    param.cancelScheduledValues(ctx.currentTime);
+    param.setValueAtTime(param.value, start);
+    param.exponentialRampToValueAtTime(target, bottom);
+    param.setValueAtTime(target, bottom + hold);
+    param.exponentialRampToValueAtTime(MUFFLE_OPEN, bottom + hold + Math.max(0.05, release));
+  }
+
   /** Per-frame housekeeping: frees finished voices. */
   update(): void {
     const ctx = this.context;
@@ -445,9 +471,18 @@ export class AudioEngine {
     limiter.attack.value = 0.001;
     limiter.release.value = 0.1;
     limiter.connect(ctx.destination);
+    this.muffleFilter = ctx.createBiquadFilter();
+    this.muffleFilter.type = "lowpass";
+    // Butterworth: effectively flat to ~16 kHz while open.
+    this.muffleFilter.Q.value = Math.SQRT1_2;
+    this.muffleFilter.frequency.value = MUFFLE_OPEN;
+    this.muffleFilter.connect(limiter);
     this.master = ctx.createGain();
     this.master.gain.value = this.settings.get("master");
-    this.master.connect(limiter);
+    this.master.connect(this.muffleFilter);
+    this.overlay = ctx.createGain();
+    this.overlay.gain.value = this.settings.get("master");
+    this.overlay.connect(limiter);
 
     this.noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
     const noise = this.noise.getChannelData(0);
@@ -563,7 +598,7 @@ export class AudioEngine {
     const ctx = this.context;
     if (!ctx) return;
     if (key === "master") {
-      this.master?.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
+      for (const node of [this.master, this.overlay]) node?.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
       return;
     }
     const bus = this.buses.get(key);
