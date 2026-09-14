@@ -7,8 +7,10 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc -p tsconfig.json && tsc -p scripts/tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "decode": "node --import ../../tools/map/lib/resolve.ts src/cli/decode.ts",
+    "content-hash": "node --experimental-transform-types scripts/content-hash.ts"
   },
   "dependencies": {
     "@twobullets/shared": "workspace:*"

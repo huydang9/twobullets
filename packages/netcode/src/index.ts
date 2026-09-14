@@ -1,1 +1,12 @@
 export type { Session } from "./transport/Session";
+export * from "./timeSync";
+export * from "./timeDilation";
+export * from "./inputBuffer";
+export * from "./baselines";
+export * from "./interpolation";
+export * from "./prediction";
+export * from "./testing/clock";
+export * from "./testing/rng";
+export * from "./testing/profiles";
+export * from "./testing/memorySession";
+export * from "./testing/LinkConditioner";
