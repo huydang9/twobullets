@@ -160,10 +160,24 @@ export const CHARACTER_TEXTURES: readonly TextureRule[] = [
 
 export interface CharacterClipSpec {
   readonly file: string;
+  /** Folder under SRC_DIR holding `file`. Defaults to the character's `animDir`. */
+  readonly dir?: string;
   readonly loop: boolean;
   /** Strip horizontal hips drift (clips exported without "In Place"). */
   readonly inPlace: boolean;
+  /** Inclusive source frame range to keep (at `CLIP_FPS`); the clip is re-timed to start at 0. */
+  readonly frames?: FrameRange;
+  /**
+   * Horizontal hips placement: "anchor" shifts the whole clip so the first hips key sits over the origin (keeps sway),
+   * "lock" pins the hips over the origin on every key (for falls that travel).
+   */
+  readonly root?: "anchor" | "lock";
+  /** Turns the whole clip about +Y (degrees, right-handed glTF space: +90 takes +X to −Z), after `root`. */
+  readonly yaw?: number;
 }
+
+/** Mixamo downloads are 30 fps. */
+export const CLIP_FPS = 30;
 
 export interface CharacterSpec {
   readonly id: "swat";
@@ -176,6 +190,20 @@ export interface CharacterSpec {
 
 const loop = (file: string, inPlace = false): CharacterClipSpec => ({ file, loop: true, inPlace });
 const once = (file: string): CharacterClipSpec => ({ file, loop: false, inPlace: false });
+/** Second Mixamo batch (docs/assets-pipeline.md, "Knocked, revive, item and throw clips"). */
+const MIXAMO = "animations/mixamo";
+const extra = (file: string, isLoop: boolean, frames: FrameRange, options: Pick<CharacterClipSpec, "root" | "yaw"> = {}): CharacterClipSpec => ({
+  file,
+  dir: MIXAMO,
+  loop: isLoop,
+  inPlace: false,
+  frames,
+  ...options,
+});
+
+export function characterClipPath(spec: CharacterSpec, clip: CharacterClipSpec): string {
+  return `${clip.dir ?? spec.animDir}/${clip.file}`;
+}
 
 export const CHARACTER: CharacterSpec = {
   id: "swat",
@@ -202,6 +230,26 @@ export const CHARACTER: CharacterSpec = {
     hit: once("Hit Reaction.fbx"),
     death_front: once("Death From The Front.fbx"),
     death_back: once("Death From The Back.fbx"),
+    // Falls backward and rolls onto the stomach (settled by frame 65). The fall travels 1.6 m, so the hips are pinned.
+    knock_down: extra("Knocked Down.fbx", false, [0, 66], { root: "lock" }),
+    // On the back, head −Z already.
+    writhe: extra("Writhing In Pain.fbx", true, [0, 170], { root: "anchor" }),
+    // Hands and knees, authored head +Z and exported In Place: turned so it matches the other lying clips.
+    crawl: extra("Crawling.fbx", true, [0, 54], { yaw: 180 }),
+    // From the back (head −Z) to standing facing +Z; still from frame 55.
+    get_up: extra("Getting Up.fbx", false, [0, 62]),
+    // Kneeling, compressions then breaths then compressions; the patient lies 0.45 m ahead of the hips.
+    cpr_give: extra("Administering Cpr.fbx", true, [0, 259], { root: "anchor" }),
+    // Authored lying along X beside the giver (head −X); turned to head −Z. Nearly static, so 5 s is plenty.
+    cpr_receive: extra("Receiving Cpr.fbx", true, [0, 150], { root: "anchor", yaw: -90 }),
+    heal_kneel: extra("Kneeling Inspecting.fbx", true, [0, 148], { root: "anchor" }),
+    bandage: extra("Searching Pockets.fbx", true, [0, 150]),
+    // The source idles 2 s on either side of the drink.
+    drink: extra("Drinking.fbx", true, [55, 180]),
+    // Rifle-aimed idle on both ends trimmed; the hand leaves the grenade around source frame 56.
+    throw_stand: extra("Toss Grenade.fbx", false, [30, 84]),
+    throw_crouch: extra("Throw Grenade.fbx", false, [30, 90]),
+    pick_up: extra("Pick Up Item.fbx", false, [0, 36]),
   },
   bones: {
     hips: "mixamorig:Hips",

@@ -19,6 +19,7 @@ import {
   CACHE_DIR,
   CHARACTER,
   CHARACTER_TEXTURES,
+  characterClipPath,
   CREDITS,
   OUT_DIR,
   PIPELINE_VERSION,
@@ -104,7 +105,7 @@ try {
     );
   });
   const characterBuild = (async () => {
-    const animFiles = Object.values(CHARACTER.clips).map((clip) => join(SRC_DIR, CHARACTER.animDir, clip.file));
+    const animFiles = Object.values(CHARACTER.clips).map((clip) => join(SRC_DIR, characterClipPath(CHARACTER, clip)));
     const inputs = await hashFiles([join(SRC_DIR, CHARACTER.mesh), ...animFiles]);
     characters[CHARACTER.id] = await cached(CHARACTER.id, inputs + jsonKey([CHARACTER, CHARACTER_TEXTURES]), () =>
       buildCharacter(CHARACTER, io, pool, format),

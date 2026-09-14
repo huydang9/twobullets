@@ -1,5 +1,5 @@
 import type { Node, TransformNode } from "@babylonjs/core";
-import { MOVEMENT, type HitZone } from "@twobullets/shared";
+import { MOVEMENT, type ConsumableItemId, type HitZone } from "@twobullets/shared";
 import type { CharacterAsset, CharacterBoneRole, CharacterClipName } from "../assets";
 
 /**
@@ -62,11 +62,11 @@ export type LocomotionClip = Extract<
   | "crouch_walk_fwd"
 >;
 
-export type ActionName = "fire" | "reload" | "hit";
+export type ActionName = "fire" | "reload" | "hit" | "throwStand" | "throwCrouch" | "pickUp";
 
 /** Upper-body one-shots. Times are clip seconds; fades are real seconds. */
 export interface ActionSpec {
-  readonly clip: Extract<CharacterClipName, "fire" | "reload" | "hit">;
+  readonly clip: Extract<CharacterClipName, "fire" | "reload" | "hit" | "throw_stand" | "throw_crouch" | "pick_up">;
   readonly start: number;
   /** Clip time the action ends at (the rest of the clip is skipped). Defaults to the clip end. */
   readonly end?: number;
@@ -82,7 +82,58 @@ export const ACTIONS: Readonly<Record<ActionName, ActionSpec>> = {
   reload: { clip: "reload", start: 0, speed: 1, fadeIn: 0.2, fadeOut: 0.3, weight: 1 },
   // The clip is a 2.3 s stagger; its first 1.35 s (flinch back and recover) played fast reads as a flinch.
   hit: { clip: "hit", start: 0, end: 1.35, speed: 1.8, fadeIn: 0.05, fadeOut: 0.3, weight: 0.85 },
+  // Throws are triggered by the release event, so they join late in the wind-up: the hand opens at clip 0.87 s.
+  throwStand: { clip: "throw_stand", start: 0.55, speed: 1.2, fadeIn: 0.08, fadeOut: 0.35, weight: 1 },
+  throwCrouch: { clip: "throw_crouch", start: 0.55, speed: 1.2, fadeIn: 0.08, fadeOut: 0.35, weight: 1 },
+  // A running grab into the pack: reads over any locomotion.
+  pickUp: { clip: "pick_up", start: 0, speed: 1.1, fadeIn: 0.12, fadeOut: 0.25, weight: 0.9 },
 };
+
+/** Upper-body one-shots that take the hands off the rifle (the prop is hidden while they play). */
+export const HANDS_BUSY_ACTIONS: ReadonlySet<ActionName> = new Set<ActionName>(["throwStand", "throwCrouch", "pickUp"]);
+
+/** Held activities, driven by state rather than events (item use, giving CPR). */
+export type SoldierActivity = "kneelHeal" | "bandage" | "drink" | "cpr";
+
+export interface ActivitySpec {
+  readonly clip: Extract<CharacterClipName, "heal_kneel" | "bandage" | "drink" | "cpr_give">;
+  /** Kneeling clips stay full body while moving; standing ones drop to the upper body so the legs can walk. */
+  readonly kneeling: boolean;
+}
+
+export const ACTIVITIES: Readonly<Record<SoldierActivity, ActivitySpec>> = {
+  kneelHeal: { clip: "heal_kneel", kneeling: true },
+  bandage: { clip: "bandage", kneeling: false },
+  drink: { clip: "drink", kneeling: false },
+  cpr: { clip: "cpr_give", kneeling: true },
+};
+
+export function activityForItem(item: ConsumableItemId): SoldierActivity {
+  switch (item) {
+    case "medkit":
+    case "first_aid":
+      return "kneelHeal";
+    case "bandage":
+      return "bandage";
+    case "energy_drink":
+    case "painkiller":
+      return "drink";
+  }
+}
+
+/** Full-body clips the downed/revive graph uses. Lying clips put the head toward −Z (docs/assets-pipeline.md). */
+export const DOWNED = {
+  /** The crawl is authored In Place; its planted hands travel about this fast, m/s. */
+  crawlClipSpeed: 0.5,
+  minCrawlPlayback: 0.6,
+  maxCrawlPlayback: 2.4,
+  /** Crawl starts above this speed and holds `crawlHold` seconds after dropping below it. */
+  crawlStartSpeed: 0.25,
+  crawlHold: 0.35,
+  /** Seconds before the end of knock_down / get_up where the next pose starts blending in. */
+  knockBlend: 0.35,
+  getUpBlend: 0.4,
+} as const;
 
 /** jump_up opens with a 0.27 s squat we skip, since the jump has already left the ground. */
 export const JUMP_UP_START = 0.27;

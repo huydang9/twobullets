@@ -22,7 +22,7 @@ import {
   Vector3,
 } from "three";
 import type { CharacterAsset, CharacterClip, CharacterClipName, Vec3 } from "../../../apps/client/src/assets/manifest.ts";
-import { CHARACTER_TEXTURES, type CharacterSpec, SRC_DIR } from "../config.ts";
+import { CHARACTER_TEXTURES, CLIP_FPS, type CharacterClipSpec, characterClipPath, type CharacterSpec, SRC_DIR } from "../config.ts";
 import { hashBytes } from "./cache.ts";
 import { canonicalBone, type FbxImage, loadFbx, originalName } from "./fbx.ts";
 import { countGeometry, optimize, QUIET_LOGGER } from "./gltf.ts";
@@ -66,7 +66,7 @@ export async function buildCharacter(
 
   const clips = {} as Record<CharacterClipName, CharacterClip>;
   for (const [name, clipSpec] of Object.entries(spec.clips) as [CharacterClipName, CharacterSpec["clips"][CharacterClipName]][]) {
-    clips[name] = await convertClip(doc, buffer, name, join(SRC_DIR, spec.animDir, clipSpec.file), bones, clipSpec);
+    clips[name] = await convertClip(doc, buffer, name, join(SRC_DIR, characterClipPath(spec, clipSpec)), bones, clipSpec);
   }
 
   const restBounds = poseBounds(doc, worldMatrices(doc, poseAt(doc, undefined, 0)));
@@ -303,7 +303,7 @@ async function convertClip(
   name: string,
   path: string,
   bones: Map<string, Node>,
-  spec: { loop: boolean; inPlace: boolean },
+  spec: CharacterClipSpec,
 ): Promise<CharacterClip> {
   const { group } = await loadFbx(path);
   const clip = group.animations.find((c) => c.tracks.length > 0);
@@ -327,13 +327,17 @@ async function convertClip(
       continue;
     }
 
-    const times = new Float32Array(track.times);
-    const values = new Float32Array(track.values);
+    const stride = path === "rotation" ? 4 : 3;
+    const trimmed = spec.frames ? trimTrack(track.times, track.values, stride, spec.frames[0] / CLIP_FPS, spec.frames[1] / CLIP_FPS) : null;
+    const times = new Float32Array(trimmed?.times ?? track.times);
+    const values = new Float32Array(trimmed?.values ?? track.values);
     duration = Math.max(duration, times.at(-1)!);
     if (path === "translation") {
       for (let i = 0; i < values.length; i++) values[i]! *= CM_TO_M;
       if (spec.inPlace && node.getName() === HIPS) rootMotion = removeHorizontalDrift(times, values);
-    } else if (path === "rotation") {
+    }
+    if (node.getName() === HIPS) placeRoot(path, values, spec);
+    if (path === "rotation") {
       for (let i = 4; i < values.length; i += 4) {
         const dot4 = values[i]! * values[i - 4]! + values[i + 1]! * values[i - 3]! + values[i + 2]! * values[i - 2]! + values[i + 3]! * values[i - 1]!;
         if (dot4 < 0) for (let k = 0; k < 4; k++) values[i + k]! *= -1;
@@ -370,4 +374,76 @@ function removeHorizontalDrift(times: Float32Array, values: Float32Array): Vec3 
   // glTF → Babylon mirrors X.
   const velocity = new Vector3(-dx / duration, 0, dz / duration);
   return [round(velocity.x), 0, round(velocity.z)];
+}
+
+/**
+ * Keeps keys inside [t0, t1] (seconds), adding interpolated edge keys where the track has none, and shifts time to 0.
+ * Quaternions are nlerped at the edges (keys are one frame apart, so that is exact enough).
+ */
+function trimTrack(sourceTimes: ArrayLike<number>, sourceValues: ArrayLike<number>, stride: number, t0: number, t1: number) {
+  const EPS = 1e-4;
+  const times: number[] = [];
+  const values: number[] = [];
+  const sample = (t: number) => {
+    const n = sourceTimes.length;
+    let i = 0;
+    while (i < n - 1 && sourceTimes[i + 1]! < t) i++;
+    const j = Math.min(i + 1, n - 1);
+    const span = sourceTimes[j]! - sourceTimes[i]!;
+    const u = span > 0 ? Math.min(1, Math.max(0, (t - sourceTimes[i]!) / span)) : 0;
+    const out: number[] = [];
+    let sign = 1;
+    if (stride === 4) {
+      let dot = 0;
+      for (let k = 0; k < 4; k++) dot += sourceValues[i * 4 + k]! * sourceValues[j * 4 + k]!;
+      sign = dot < 0 ? -1 : 1;
+    }
+    for (let k = 0; k < stride; k++) out.push(sourceValues[i * stride + k]! + (sign * sourceValues[j * stride + k]! - sourceValues[i * stride + k]!) * u);
+    if (stride === 4) {
+      const length = Math.sqrt(out.reduce((sum, v) => sum + v * v, 0));
+      for (let k = 0; k < 4; k++) out[k]! /= length;
+    }
+    return out;
+  };
+  const push = (t: number, value: ArrayLike<number>) => {
+    times.push(Math.round((t - t0) * CLIP_FPS * 1000) / 1000 / CLIP_FPS);
+    for (let k = 0; k < stride; k++) values.push(value[k]!);
+  };
+  for (let i = 0; i < sourceTimes.length; i++) {
+    const t = sourceTimes[i]!;
+    if (t < t0 - EPS || t > t1 + EPS) continue;
+    if (times.length === 0 && t > t0 + EPS) push(t0, sample(t0));
+    push(t, Array.from({ length: stride }, (_, k) => sourceValues[i * stride + k]!));
+  }
+  if (times.length === 0) push(t0, sample(t0));
+  if (times.at(-1)! < t1 - t0 - EPS) push(t1, sample(t1));
+  return { times, values };
+}
+
+/** Applies the spec's `root` (horizontal hips placement) and `yaw` to a hips track, in place. */
+function placeRoot(path: "translation" | "rotation" | "scale", values: Float32Array, spec: CharacterClipSpec): void {
+  const yaw = ((spec.yaw ?? 0) * Math.PI) / 180;
+  if (path === "translation") {
+    const [x0, z0] = [values[0]!, values[2]!];
+    for (let i = 0; i < values.length; i += 3) {
+      if (spec.root === "lock") values[i] = values[i + 2] = 0;
+      else if (spec.root === "anchor") (values[i]! -= x0), (values[i + 2]! -= z0);
+      if (yaw !== 0) {
+        const [x, z] = [values[i]!, values[i + 2]!];
+        values[i] = x * Math.cos(yaw) + z * Math.sin(yaw);
+        values[i + 2] = -x * Math.sin(yaw) + z * Math.cos(yaw);
+      }
+    }
+  } else if (path === "rotation" && yaw !== 0) {
+    // World-space turn before the hips' own rotation (the hips' parent is the unrotated root): q' = yaw * q.
+    const s = Math.sin(yaw / 2);
+    const c = Math.cos(yaw / 2);
+    for (let i = 0; i < values.length; i += 4) {
+      const [x, y, z, w] = [values[i]!, values[i + 1]!, values[i + 2]!, values[i + 3]!];
+      values[i] = c * x + s * z;
+      values[i + 1] = c * y + s * w;
+      values[i + 2] = c * z - s * x;
+      values[i + 3] = c * w - s * y;
+    }
+  }
 }

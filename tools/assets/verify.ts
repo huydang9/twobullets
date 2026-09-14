@@ -106,7 +106,13 @@ for (const [id, character] of Object.entries(manifest.characters)) {
     check(animation.listChannels().every((c) => joints.has(c.getTargetNode()!)), `${id}/${name}: channel targets a non-joint`);
     const hips = animation.listChannels().find((c) => c.getTargetNode()!.getName() === character.bones.hips && c.getTargetPath() === "translation");
     const values = hips?.getSampler()?.getOutput()?.getArray();
-    if (values && CHARACTER.clips[name as keyof typeof CHARACTER.clips].inPlace) {
+    const clipSpec = CHARACTER.clips[name as keyof typeof CHARACTER.clips];
+    // Anchored and pinned clips (knocked, revive, kneeling) must start with the hips over the root.
+    if (values && clipSpec.root) {
+      const offset = Math.hypot(values[0]!, values[2]!);
+      check(offset < 0.01, `${id}/${name}: hips start ${offset.toFixed(3)} m off the root (root: ${clipSpec.root})`);
+    }
+    if (values && clipSpec.inPlace) {
       const n = values.length;
       const drift = Math.hypot(values[n - 3]! - values[0]!, values[n - 1]! - values[2]!);
       check(drift < 0.001, `${id}/${name}: hips drift ${drift.toFixed(4)} m between first and last key`);

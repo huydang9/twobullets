@@ -4,7 +4,7 @@ import type { CharacterInstance } from "../assets";
 import type { Damageable, HitboxRegistry } from "../combat/hitboxes";
 import type { BloodBody } from "../fx/BloodEffects";
 import type { Environment } from "../world/environment";
-import { SoldierAnimator, createSoldierMotion, type AirState, type SoldierMotion } from "./SoldierAnimator";
+import { SoldierAnimator, createSoldierMotion, type AirState, type DownState, type SoldierMotion } from "./SoldierAnimator";
 import { SoldierHitboxes } from "./SoldierHitboxes";
 import type { SoldierResources } from "./SoldierResources";
 import { soldierScale, type ActionName } from "./soldierRig";
@@ -22,8 +22,9 @@ const direction = new Vector3();
 /**
  * Animated third-person SWAT soldier: the reusable body for target dummies now and remote players later.
  *
- * The owner places `root` (feet, yaw about Y; the model faces +Z) and each frame writes `motion`, triggers events
- * (`fire`, `reload`, `hit`, `die`, `revive`), then calls `update(dt)` before `scene.render()`.
+ * The owner places `root` (feet, yaw about Y; the model faces +Z) and each frame writes `motion` (movement, `downed`,
+ * `beingRevived`, `activity`), triggers events (`fire`, `reload`, `hit`, `throwGrenade`, `pickUp`, `die`, `revive`), then
+ * calls `update(dt)` before `scene.render()`. Lying poses put the head toward the model's −Z.
  */
 export class SoldierCharacter implements BloodBody {
   readonly root: TransformNode;
@@ -31,9 +32,12 @@ export class SoldierCharacter implements BloodBody {
   /** Per-frame locomotion input; mutate in place. */
   readonly motion: SoldierMotion = createSoldierMotion();
   readonly hitboxes: SoldierHitboxes | null;
+  /** The owner's wish to show the rifle (a gun in hand); it is still hidden while the hands are busy. */
+  rifleVisible = true;
 
   private readonly animator: SoldierAnimator;
   private readonly rifle: Mesh | null = null;
+  private rifleShown = true;
   private lives = 0;
 
   constructor(scene: Scene, resources: SoldierResources, environment: Environment, options: SoldierCharacterOptions) {
@@ -87,6 +91,24 @@ export class SoldierCharacter implements BloodBody {
 
   get airState(): AirState {
     return this.animator.airState;
+  }
+
+  get downState(): DownState {
+    return this.animator.downState;
+  }
+
+  get handsBusy(): boolean {
+    return this.animator.handsBusy;
+  }
+
+  /** Throw release: standing toss or crouched throw on the upper body. */
+  throwGrenade(crouched: boolean): void {
+    this.animator.throwGrenade(crouched);
+  }
+
+  /** Loot grabbed into the pack. */
+  pickUp(): void {
+    this.animator.pickUp();
   }
 
   fire(): void {
@@ -146,6 +168,11 @@ export class SoldierCharacter implements BloodBody {
 
   update(dt: number): void {
     this.animator.update(dt);
+    const show = this.rifleVisible && !this.animator.handsBusy;
+    if (this.rifle && show !== this.rifleShown) {
+      this.rifleShown = show;
+      this.rifle.setEnabled(show);
+    }
   }
 
   dispose(): void {

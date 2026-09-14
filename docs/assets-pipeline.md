@@ -24,7 +24,7 @@ apps/client/public/assets/
   weapons/shotgun.glb      4.1 MB   12.6k verts  16.7k tris  6 textures
   weapons/pistol.glb       4.1 MB   15.0k verts  21.3k tris  6 textures
   weapons/sniper.glb       4.1 MB   18.2k verts  20.7k tris  7 textures
-  characters/swat.glb      1.6 MB   12.6k verts  19.5k tris  6 textures, 69 bones, 20 clips
+  characters/swat.glb      2.0 MB   12.6k verts  19.5k tris  6 textures, 69 bones, 32 clips
   decoders/                0.7 MB   meshopt + Babylon KTX2 transcoders (no CDN at runtime)
 ```
 
@@ -106,7 +106,25 @@ Processing steps (`tools/assets/lib/character.ts`):
 - **Skeleton.** `FBXLoader` duplicates bones that are shared between the head and body skins. These are merged into one glTF skeleton of 69 `mixamorig:*` joints, with inverse binds taken from the FBX clusters. The head and body are merged into a single mesh, `swat_mesh`, with one primitive per material and one skin, so Babylon creates exactly one skeleton.
 - **Units and geometry.** Centimeters are baked to meters (translations, vertices, inverse binds). The model is Y-up and faces +Z. The bind pose is 1.78 m tall with feet at y = 0. UV v is flipped to glTF convention.
 - **Materials.** Phong is converted to PBR: diffuse becomes base color, the normal map is kept, and roughness is derived from specular luminance (metalness 0).
-- **Animations.** All 20 clips retarget by bone name onto the same skeleton. The rest poses of the animation FBXs match the character, apart from a 0.36 mm hips offset. The FBXs were exported without "In Place", so for locomotion clips the pipeline removes the linear X/Z drift of the hips, leaving the natural sway. The removed velocity is stored as `clips[name].rootMotion` in m/s, which you can use to sync playback speed with movement. For example, `walk_fwd` is 1.84 m/s, `run_fwd` 4.61 m/s and `sprint_fwd` 6.91 m/s. Death, hit and jump clips keep their hips motion.
+- **Animations.** All 32 clips retarget by bone name onto the same skeleton. The rest poses of the animation FBXs match the character, apart from a 0.36 mm hips offset. The FBXs were exported without "In Place", so for locomotion clips the pipeline removes the linear X/Z drift of the hips, leaving the natural sway. The removed velocity is stored as `clips[name].rootMotion` in m/s, which you can use to sync playback speed with movement. For example, `walk_fwd` is 1.84 m/s, `run_fwd` 4.61 m/s and `sprint_fwd` 6.91 m/s. Death, hit and jump clips keep their hips motion.
+- **Knocked, revive, item and throw clips.** A second Mixamo batch (`assets-src/animations/mixamo/`, Swat Guy rig, 30 fps, listed in `assets-src/DOWNLOADS-2026-09-15.md`) adds 12 clips through three per-clip options in `config.ts`: `frames` trims to an inclusive source range and re-times it to 0, `root` places the hips (`anchor` shifts the clip so the first hips key sits over the origin, `lock` pins the hips over the origin on every key), and `yaw` turns the whole clip about +Y. Every lying clip then shares one convention: hips over the origin, head toward −Z, feet toward +Z, so the client can blend between them without the body swinging round. The batch added 0.45 MB (1.58 → 2.03 MB).
+
+  | Clip | Source | Frames | Loop | Placement | Used for |
+  |---|---|---|---|---|---|
+  | `knock_down` | Knocked Down | 0–66 | once | `lock` (the fall travels 1.6 m) | knocked: backward fall, rolls onto the stomach |
+  | `writhe` | Writhing In Pain | 0–170 | loop | `anchor` | knocked, not moving (on the back) |
+  | `crawl` | Crawling (In Place) | 0–54 | loop | `yaw: 180` (authored head +Z) | knocked, moving (hands and knees, toward −Z) |
+  | `get_up` | Getting Up | 0–62 | once | | revived: from the back to standing, facing +Z |
+  | `cpr_give` | Administering Cpr | 0–259 | loop | `anchor` | reviver; the patient's chest is 0.45 m ahead of the hips |
+  | `cpr_receive` | Receiving Cpr | 0–150 | loop | `anchor`, `yaw: −90` (authored along X) | being revived (on the back) |
+  | `heal_kneel` | Kneeling Inspecting | 0–148 | loop | `anchor` | medkit, first aid |
+  | `bandage` | Searching Pockets | 0–150 | loop | | bandage |
+  | `drink` | Drinking | 55–180 | loop | | energy drink, painkiller (2 s of idle trimmed on each side) |
+  | `throw_stand` | Toss Grenade (In Place) | 30–84 | once | | standing throw; the hand opens at clip 0.87 s |
+  | `throw_crouch` | Throw Grenade | 30–90 | once | | crouched throw; the hand opens at clip 0.87 s |
+  | `pick_up` | Pick Up Item (In Place) | 0–36 | once | | loot pickup |
+
+  Loops end on a frame equal (or within a few degrees) to their first. The client graph that plays them is `apps/client/src/targets/SoldierAnimator.ts`; `apps/client/src/match/BotBodies.ts` maps bot state onto it.
 - **Hitbox and attachment bones.** The `bones` map in the manifest covers `hips`, `spine`, `chest`, `neck`, `head`, both upper arms, forearms, hands, up-legs, legs and feet.
 
 ## Manifest
@@ -209,7 +227,7 @@ library.requiredCredits;                        // CC-BY entries for the credits
 - Exactly one skin per file; meshopt is used.
 - Weapon animation name and last frame match; node names are unique.
 - KTX2 textures: power-of-two sizes up to 2K, mipmaps present, codec and supercompression consistent, sRGB transfer only on base color.
-- Character: 20 clips with matching durations, every channel targets a skin joint, locomotion hips drift under 1 mm, all bone roles present.
+- Character: 32 clips with matching durations, every channel targets a skin joint, locomotion hips drift under 1 mm, anchored and locked clips start with the hips within 1 cm of the root, all bone roles present.
 - Skinned bounds recomputed from the compressed files match the pre-compression manifest bounds within 2 mm, which proves quantization kept the skinning intact.
 
 **Texture decoding:** all 32 KTX2 textures transcode with the hosted decoder bundle and wasm (to BC7 with desktop caps), with the correct gamma flags.

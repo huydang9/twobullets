@@ -250,6 +250,8 @@ let time = 0;
 const frame: HandsFrame = createHandsFrame();
 const sweepMaxCover = 0.35;
 const worst = { cover: 0 };
+/** Worst sweep coverage per run label. */
+const worstByRun = new Map<string, number>();
 const onlyRuns = process.argv.find((a) => a.startsWith("--only="))?.slice(7);
 function run(label: string, seconds: number, script: (t: number) => void, marks: readonly [number, string][], checkEvery = 1 / 30): void {
   if (onlyRuns && !onlyRuns.split(",").includes(label)) return;
@@ -280,6 +282,7 @@ function run(label: string, seconds: number, script: (t: number) => void, marks:
       if (coverage(grid) > sweepMaxCover) fail("cover", `covers ${(coverage(grid) * 100).toFixed(0)}%`);
       if (upperLeft / ((GW / 2) * (GH / 2)) > 0.08) fail("band", `${((upperLeft / ((GW / 2) * (GH / 2))) * 100).toFixed(0)}% of the upper-left quadrant`);
       worst.cover = Math.max(worst.cover, coverage(grid));
+      worstByRun.set(label, Math.max(worstByRun.get(label) ?? 0, coverage(grid)));
       nextCheck += checkEvery;
     }
   }
@@ -371,6 +374,7 @@ for (const s of samples) {
     `${s.label.padEnd(30)} cover ${String(Math.round(s.cover * 100)).padStart(3)}% UL ${String(Math.round(s.upperLeft * 100)).padStart(3)}%  hand ${fmtBox(hand).padEnd(32)} z ${hand.nearZ === Infinity ? "  - " : hand.nearZ.toFixed(2)}  item ${s.item ? `${fmtBox(s.item)} z ${s.item.nearZ.toFixed(2)}` : s.itemVisible ? "visible" : "hidden"}${s.item ? ` shown ${Math.round(s.itemUnoccluded * 100)}%` : ""}`,
   );
 }
+const KIT_MAX_COVER = 0.15;
 const within = (b: Box | null, x0: number, x1: number, y0: number, y1: number) => !!b && b.minX >= x0 && b.maxX <= x1 && b.minY >= y0 && b.maxY <= y1;
 for (const s of samples) {
   const holding = /ready|pin pull|cook hold|primed hold|underhand hold/.test(s.label);
@@ -399,7 +403,22 @@ for (const s of samples) {
     else if (!raised && ((s.item.minY + s.item.maxY) / 2 > 0 || s.item.maxY > 0.2)) errors.push(`${s.label}: item ${fmtBox(s.item)} (want held low)`);
     else if (s.item.nearZ < (raised ? 0.22 : 0.28)) errors.push(`${s.label}: item ${s.item.nearZ.toFixed(2)} m from the camera`);
     if (s.item && s.itemUnoccluded < 0.4) errors.push(`${s.label}: only ${(s.itemUnoccluded * 100).toFixed(0)}% of the item is in front of the hand`);
+    // Cases (medkit, first aid): a corner of the screen, not a tray across the middle.
+    if (/^(medkit|first_aid) /.test(s.label)) {
+      if (s.cover > KIT_MAX_COVER) errors.push(`${s.label}: covers ${(s.cover * 100).toFixed(0)}% (max ${KIT_MAX_COVER * 100}% for a case)`);
+      if (s.item) {
+        const cx = (s.item.minX + s.item.maxX) / 2;
+        const cy = (s.item.minY + s.item.maxY) / 2;
+        if (cx < 0.2 || cy > -0.3 || s.item.minX < -0.1) errors.push(`${s.label}: case ${fmtBox(s.item)} (want lower right, clear of the centre)`);
+        if (s.item.maxX < 1 && s.item.minY > -1) errors.push(`${s.label}: case fully on screen ${fmtBox(s.item)} (want it cut by the right or bottom edge)`);
+      }
+    }
   }
+}
+for (const kit of ["medkit", "first_aid"]) {
+  const cover = worstByRun.get(kit);
+  if (cover !== undefined && cover > KIT_MAX_COVER) errors.push(`${kit}: covers up to ${(cover * 100).toFixed(0)}% during the use (max ${KIT_MAX_COVER * 100}%)`);
+  if (cover !== undefined) console.log(`${kit} sweep: worst coverage ${(cover * 100).toFixed(0)}%`);
 }
 console.log(`sweep (every 1/30 s, all phases): worst coverage ${(worst.cover * 100).toFixed(0)}%`);
 if (verbose) console.log(`flame streaks ${flameStreaks}`);

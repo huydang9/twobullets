@@ -183,8 +183,8 @@
   "characters": {
     "swat": {
       "url": "characters/swat.glb",
-      "hash": "8d4a5f647d134e3c",
-      "bytes": 1579044,
+      "hash": "05eb4bbbedc0b810",
+      "bytes": 2032408,
       "height": 1.78,
       "bounds": {
         "min": [-0.9615, -0.001, -0.195],
@@ -279,6 +279,54 @@
         },
         "death_back": {
           "duration": 2.967,
+          "loop": false
+        },
+        "knock_down": {
+          "duration": 2.2,
+          "loop": false
+        },
+        "writhe": {
+          "duration": 5.667,
+          "loop": true
+        },
+        "crawl": {
+          "duration": 1.8,
+          "loop": true
+        },
+        "get_up": {
+          "duration": 2.067,
+          "loop": false
+        },
+        "cpr_give": {
+          "duration": 8.633,
+          "loop": true
+        },
+        "cpr_receive": {
+          "duration": 5,
+          "loop": true
+        },
+        "heal_kneel": {
+          "duration": 4.933,
+          "loop": true
+        },
+        "bandage": {
+          "duration": 5,
+          "loop": true
+        },
+        "drink": {
+          "duration": 4.167,
+          "loop": true
+        },
+        "throw_stand": {
+          "duration": 1.8,
+          "loop": false
+        },
+        "throw_crouch": {
+          "duration": 2,
+          "loop": false
+        },
+        "pick_up": {
+          "duration": 1.2,
           "loop": false
         }
       },

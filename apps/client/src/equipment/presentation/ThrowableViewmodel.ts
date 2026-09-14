@@ -47,6 +47,8 @@ export const HAND_POSES = {
   use: { position: [0.0, -0.165, 0.33], rotation: [0.38, -0.04, 0.0], left: [0, 0] },
   /** Can or bottle raised to the mouth. */
   drink: { position: [0.03, -0.045, 0.15], rotation: [-1.0, -0.2, 0.1], left: [1.0, -0.1] },
+  /** Medkit / first aid case low right, tipped toward the lens and partly below the screen edge. */
+  useKit: { position: [0.13, -0.24, 0.3], rotation: [0.6, -0.35, 0.3], left: [0.15, 0.2] },
 } satisfies Record<string, HandPose>;
 
 export type HandPoseName = keyof typeof HAND_POSES;
@@ -75,6 +77,11 @@ export const ARM_POSES = {
   use: { position: [-0.2, -0.02, 0.41], rotation: [0, 0, 0], left: [0.05, 0.3], right: 0, wrist: -2.2 },
   /** Can or bottle tipped up toward the mouth, still a hand's length from the lens. */
   drink: { position: [-0.2, 0.05, 0.36], rotation: [-0.2, 0, 0], left: [0.4, -0.1], right: 0, wrist: -2.2 },
+  /**
+   * Medkit / first aid: the case held low right by its handle, tipped toward the lens and cut by the screen corner (at
+   * most ~15% of the screen, checked by tools/assets/equipment/framing.ts). The left hand reaches in and out of it.
+   */
+  useKit: { position: [-0.02, -0.05, 0.41], rotation: [0, -0.15, -0.25], left: [0.05, 0.3], right: 0.1, wrist: -2.2 },
 } satisfies Record<HandPoseName, HandPose>;
 
 /** How each procedural item sits in the fallback rig's grip: local offset (m) and rotation (radians). */
@@ -93,8 +100,8 @@ const ITEM_GRIP: Readonly<Record<HeldItemKind, { readonly position: Tuple3; read
 /**
  * Items in the throw arms' fist, in grip space (the pipeline's `grip` node: +Y out of the thumb side of the fist). +X
  * moves the item out into the open palm so the fist doesn't hide it (checked by tools/assets/equipment/framing.ts). The
- * grenades' fuse axis already matches it; bottles slide so the fist closes around the body, the medkit case rests
- * flat across the fist like a tray.
+ * grenades' fuse axis already matches it; bottles slide so the fist closes around the body. The medkit case hangs off
+ * the fist toward the screen's right edge (+Y) and below it (−X), tipped back, so its corner is cut by the screen.
  */
 const CLIP_ITEM_GRIP: Readonly<Record<HeldItemKind, { readonly position: Tuple3; readonly rotation: Tuple3 }>> = {
   frag: { position: [0.02, 0, 0], rotation: [0, 0, 0] },
@@ -103,8 +110,8 @@ const CLIP_ITEM_GRIP: Readonly<Record<HeldItemKind, { readonly position: Tuple3;
   molotov: { position: [0.02, -0.05, 0], rotation: [0, 0, 0] },
   bandage: { position: [0.02, 0.03, 0], rotation: [0, 0, 0] },
   first_aid: { position: [0, 0.02, 0.02], rotation: [0, 0, 0] },
-  // Counter-rotated against the use pose's wrist turn so the case stays flat.
-  medkit: { position: [0, 0, 0.1], rotation: [0, 0, 2.2] },
+  // Counter-rotated against the pose's wrist turn, then tipped back toward the lens.
+  medkit: { position: [-0.03, 0.12, 0.1], rotation: [-0.35, 0, 2.2] },
   energy_drink: { position: [0.02, -0.02, 0], rotation: [0, 0, 0] },
   painkiller: { position: [0.02, 0.01, 0], rotation: [0, 0, 0] },
 };
@@ -494,7 +501,7 @@ export class ThrowableViewmodel {
 
   /** Item-use motion targets; returns the spring frequency. */
   private useTarget(itemId: ConsumableItemId, progress: number, elapsed: number): number {
-    this.setTarget(this.poses.use);
+    this.setTarget(itemId === "medkit" || itemId === "first_aid" ? this.poses.useKit : this.poses.use);
     const target = this.target;
     const item = this.item;
     const grip = this.grips[itemId];
@@ -509,17 +516,17 @@ export class ThrowableViewmodel {
         if (item) item.root.rotation.x = grip.rotation[0] + (item.real ? Math.sin(t * 5) * 0.35 : t * 5);
         return 9;
       }
-      case "first_aid": {
-        const open = pulse(0.1, 0.85, progress);
-        target[1]! += Math.sin(t * 3) * 0.008 - 0.02 * open;
-        if (item) item.root.rotation.x = grip.rotation[0] + 0.35 * open * Math.abs(Math.sin(t * 2.5));
-        return 7;
-      }
+      case "first_aid":
       case "medkit": {
-        const inject = pulse(0.55, 0.9, progress);
-        target[1]! += -0.02 + 0.03 * inject;
-        target[2]! += -0.02 * inject;
-        target[6]! = 0.7 * inject;
+        // Working out of the open case: the left hand dips in and comes back, the case rocks toward it. The medkit ends
+        // with the injection: the left hand drops away and the case settles lower.
+        const reach = Math.sin(t * (itemId === "medkit" ? 2.2 : 2.8));
+        const inject = itemId === "medkit" ? pulse(0.62, 0.92, progress) : 0;
+        target[1]! += 0.008 * reach - 0.025 * inject;
+        target[5]! += 0.05 * reach;
+        target[6]! += 0.1 * (0.5 + 0.5 * reach) * (1 - inject) + 0.6 * inject;
+        target[7]! += 0.12 * reach * (1 - inject);
+        if (item) item.root.rotation.x = grip.rotation[0] + 0.1 * reach;
         return 6;
       }
       case "energy_drink":

@@ -1,6 +1,6 @@
 import { AnimationGroupMask, AnimationGroupMaskMode, type AnimationGroup } from "@babylonjs/core";
 import type { CharacterClipName, CharacterInstance } from "../assets";
-import { ACTIONS, JUMP_DOWN_START, JUMP_UP_START, type ActionName } from "./soldierRig";
+import { ACTIONS, ACTIVITIES, DOWNED, HANDS_BUSY_ACTIONS, JUMP_DOWN_START, JUMP_UP_START, type ActionName, type SoldierActivity } from "./soldierRig";
 
 /** Movement input for the animator, written by the owner every frame (local player sim or network snapshot). */
 export interface SoldierMotion {
@@ -12,14 +12,22 @@ export interface SoldierMotion {
   sprinting: boolean;
   /** Holds the shouldered-rifle stance on the upper body while moving. */
   aiming: boolean;
+  /** Knocked down: the fall, then crawl (moving) or writhe (still). Clearing it while alive plays the get-up. */
+  downed: boolean;
+  /** Downed and a teammate is giving CPR. */
+  beingRevived: boolean;
+  /** Held activity (item use, giving CPR), or null. Ignored while downed or dead. */
+  activity: SoldierActivity | null;
 }
 
 export function createSoldierMotion(): SoldierMotion {
-  return { velocityX: 0, velocityZ: 0, grounded: true, crouched: false, sprinting: false, aiming: false };
+  return { velocityX: 0, velocityZ: 0, grounded: true, crouched: false, sprinting: false, aiming: false, downed: false, beingRevived: false, activity: null };
 }
 
 export type DeathDirection = "front" | "back";
 export type AirState = "ground" | "rising" | "falling" | "landing";
+/** Knocked-down graph: none → knock (fall) → down (crawl / writhe / receive CPR) → getUp → none. */
+export type DownState = "none" | "knock" | "down" | "getUp";
 
 /** Weight smoothing rates, 1/s (exponential; ~3/rate seconds to settle). */
 const BASE_RATE = 9;
@@ -27,6 +35,10 @@ const OVERLAY_RATE = 25;
 const AIR_RATE = 12;
 const DEATH_RATE = 9;
 const REVIVE_RATE = 7;
+/** Knock, lying poses, get-up and activities: slower full-body fades than jumps. */
+const POSTURE_RATE = 6;
+/** Standing activities are full body below this speed and upper body only above it, m/s. */
+const ACTIVITY_WALK_SPEED = 0.8;
 const EPSILON = 1e-3;
 
 /** Airborne this long before the jump pose starts, so stepping off small ledges doesn't trigger it. */
@@ -57,6 +69,8 @@ interface Channel {
   readonly rootSpeed: number;
   /** Phase-locked locomotion cycle. */
   readonly cyclic: boolean;
+  /** Full-body posture clip (downed graph, activities): fades at POSTURE_RATE. */
+  readonly posture: boolean;
   /** Played on demand and held on its last frame instead of looping. */
   readonly oneShot: boolean;
   base: number;
@@ -95,8 +109,17 @@ export class SoldierAnimator {
   private readonly jumpUp: Channel;
   private readonly jumpLoop: Channel;
   private readonly jumpDown: Channel;
+  private readonly knockDown: Channel;
+  private readonly writhe: Channel;
+  private readonly crawl: Channel;
+  private readonly cprReceive: Channel;
+  private readonly getUp: Channel;
 
   private action: ActionName | null = null;
+  private down: DownState = "none";
+  private downTime = 0;
+  /** Seconds the crawl keeps playing after the soldier stops. */
+  private crawlTimer = 0;
   private actionTime = 0;
   private actionSpeed = 1;
   private air: AirState = "ground";
@@ -129,6 +152,7 @@ export class SoldierAnimator {
         duration: clip.duration,
         rootSpeed: clip.rootMotion ? Math.hypot(clip.rootMotion[0], clip.rootMotion[2]) : 0,
         cyclic: clip.loop && clip.rootMotion !== undefined,
+        posture: POSTURE_CLIPS.has(name),
         oneShot,
         base: 0,
         overlay: 0,
@@ -144,7 +168,7 @@ export class SoldierAnimator {
       if (group.isStarted) group.stop(true);
       // -1 would bypass weighted blending entirely.
       group.weight = 0;
-      if (name === "fire" || name === "reload" || name === "hit") group.mask = upperMask;
+      if (UPPER_BODY_CLIPS.has(name)) group.mask = upperMask;
       this.channels.push(channel);
       this.byName.set(name, channel);
     }
@@ -155,6 +179,11 @@ export class SoldierAnimator {
     this.jumpUp = this.channel("jump_up");
     this.jumpLoop = this.channel("jump_loop");
     this.jumpDown = this.channel("jump_down");
+    this.knockDown = this.channel("knock_down");
+    this.writhe = this.channel("writhe");
+    this.crawl = this.channel("crawl");
+    this.cprReceive = this.channel("cpr_receive");
+    this.getUp = this.channel("get_up");
 
     this.idle.base = 1;
     this.apply(0);
@@ -172,13 +201,40 @@ export class SoldierAnimator {
     return this.air;
   }
 
+  get downState(): DownState {
+    return this.down;
+  }
+
+  /** On the ground, getting up, in a held activity or a throw/pickup: the rifle prop has no hands to sit in. */
+  get handsBusy(): boolean {
+    return this.down !== "none" || (this.motion.activity !== null && !this.dead) || (this.action !== null && HANDS_BUSY_ACTIONS.has(this.action));
+  }
+
+  /** Upper-body actions need the soldier up and alive. */
+  private get canAct(): boolean {
+    return this.death === null && this.down === "none";
+  }
+
   fire(): void {
-    if (!this.dead) this.startAction("fire", ACTIONS.fire.speed);
+    if (this.canAct) this.startAction("fire", ACTIONS.fire.speed);
+  }
+
+  /** The grenade left the hand: the late part of a standing toss or a crouched throw. */
+  throwGrenade(crouched: boolean): void {
+    if (!this.canAct) return;
+    const action = crouched ? "throwCrouch" : "throwStand";
+    this.startAction(action, ACTIONS[action].speed);
+  }
+
+  /** Loot grabbed into the pack. Doesn't restart one already playing, or interrupt a reload or throw. */
+  pickUp(): void {
+    if (!this.canAct || this.action === "pickUp" || this.action === "reload" || this.action === "throwStand" || this.action === "throwCrouch") return;
+    this.startAction("pickUp", ACTIONS.pickUp.speed);
   }
 
   /** @param seconds Reload length to match (the simulation's reload time); defaults to the clip's own. */
   reload(seconds?: number): void {
-    if (this.dead) return;
+    if (!this.canAct) return;
     const spec = ACTIONS.reload;
     const length = (spec.end ?? this.channel(spec.clip).duration) - spec.start;
     this.startAction("reload", seconds && seconds > 0 ? length / seconds : spec.speed);
@@ -186,7 +242,7 @@ export class SoldierAnimator {
 
   /** Upper-body flinch. Doesn't interrupt a reload. */
   hit(): void {
-    if (this.dead || this.action === "reload") return;
+    if (!this.canAct || this.action === "reload") return;
     this.startAction("hit", ACTIONS.hit.speed);
   }
 
@@ -194,17 +250,38 @@ export class SoldierAnimator {
     if (this.dead) return;
     this.action = null;
     this.air = "ground";
+    if (this.down === "knock" || this.down === "down") {
+      // Already on the ground (finished while downed): hold the lying pose the body is in.
+      let pose = this.knockDown;
+      for (const c of [this.writhe, this.crawl, this.cprReceive]) if (c.full > pose.full) pose = c;
+      this.down = "none";
+      this.death = pose;
+      // A loop is held where it is; the knock-down fall plays on to its lying end frame.
+      if (!pose.oneShot) {
+        if (pose.group.isStarted) pose.group.speedRatio = 0;
+        pose.frozen = true;
+      }
+      return;
+    }
+    this.down = "none";
     this.death = this.channel(direction === "front" ? "death_front" : "death_back");
     this.play(this.death, 0, 1, this.death.duration);
   }
 
   /** Blends from wherever the body lies back into locomotion. */
   revive(): void {
+    const death = this.death;
+    // A held lying loop (death while downed) runs again next time it is used.
+    if (death && !death.oneShot) {
+      death.frozen = false;
+      if (death.group.isStarted) death.group.speedRatio = 1;
+    }
     this.death = null;
     this.airTime = 0;
   }
 
   update(dt: number): void {
+    this.updateDowned(dt);
     this.updateAir(dt);
     this.updateAction(dt);
     this.updateTargets();
@@ -238,10 +315,50 @@ export class SoldierAnimator {
     channel.pending = true;
   }
 
+  private updateDowned(dt: number): void {
+    this.downTime += dt;
+    const { downed } = this.motion;
+    const speed = Math.hypot(this.motion.velocityX, this.motion.velocityZ);
+    this.crawlTimer = speed > DOWNED.crawlStartSpeed ? DOWNED.crawlHold : Math.max(0, this.crawlTimer - dt);
+    if (this.dead) return;
+    switch (this.down) {
+      case "none":
+        if (downed) this.setDown("knock");
+        break;
+      case "knock":
+        if (!downed) this.setDown("getUp");
+        else if (this.downTime >= this.knockDown.duration - DOWNED.knockBlend) this.down = "down";
+        break;
+      case "down":
+        if (!downed) this.setDown("getUp");
+        break;
+      case "getUp":
+        if (downed) this.setDown("knock");
+        else if (this.downTime >= this.getUp.duration - DOWNED.getUpBlend) this.down = "none";
+        break;
+    }
+    if (this.down === "down" && this.crawl.group.isStarted) {
+      const playback = speed / DOWNED.crawlClipSpeed;
+      this.crawl.group.speedRatio = Math.min(DOWNED.maxCrawlPlayback, Math.max(DOWNED.minCrawlPlayback, playback));
+    }
+  }
+
+  private setDown(state: DownState): void {
+    this.down = state;
+    this.downTime = 0;
+    if (state === "knock") {
+      this.action = null;
+      this.air = "ground";
+      this.play(this.knockDown, 0, 1, this.knockDown.duration);
+    } else if (state === "getUp") {
+      this.play(this.getUp, 0, 1, this.getUp.duration);
+    }
+  }
+
   private updateAir(dt: number): void {
     const { grounded } = this.motion;
     this.airTime += dt;
-    if (this.dead) {
+    if (this.dead || this.down !== "none") {
       this.air = "ground";
       return;
     }
@@ -275,7 +392,7 @@ export class SoldierAnimator {
 
   private updateAction(dt: number): void {
     if (this.action === null) return;
-    if (this.dead) {
+    if (!this.canAct) {
       this.action = null;
       return;
     }
@@ -296,11 +413,24 @@ export class SoldierAnimator {
       c.fullTarget = 0;
     }
 
-    // Full body: death over jumps.
+    // Full body: death over the downed graph over jumps and activities.
     if (this.death) this.death.fullTarget = 1;
+    else if (this.down === "knock") this.knockDown.fullTarget = 1;
+    else if (this.down === "down") (this.motion.beingRevived ? this.cprReceive : this.crawlTimer > 0 ? this.crawl : this.writhe).fullTarget = 1;
+    else if (this.down === "getUp") this.getUp.fullTarget = 1;
     else if (this.air === "rising") this.jumpUp.fullTarget = 1;
     else if (this.air === "falling") this.jumpLoop.fullTarget = 1;
     else if (this.air === "landing") this.jumpDown.fullTarget = 1;
+
+    // Activities: kneeling ones full body; standing ones full body when still, upper body while walking.
+    const activity = this.motion.activity;
+    if (activity !== null && this.canAct) {
+      const spec = ACTIVITIES[activity];
+      const channel = this.channel(spec.clip);
+      const moving = spec.kneeling ? 0 : Math.min(1, Math.hypot(this.motion.velocityX, this.motion.velocityZ) / ACTIVITY_WALK_SPEED);
+      channel.fullTarget += 1 - moving;
+      channel.overlayTarget = moving;
+    }
 
     // Upper body: one action, or the aim stance.
     let actionWeight = 0;
@@ -375,11 +505,12 @@ export class SoldierAnimator {
     const kOverlay = 1 - Math.exp(-OVERLAY_RATE * dt);
     const kAir = 1 - Math.exp(-AIR_RATE * dt);
     const kDeath = 1 - Math.exp(-(this.dead ? DEATH_RATE : REVIVE_RATE) * dt);
+    const kPosture = 1 - Math.exp(-POSTURE_RATE * dt);
     for (const c of this.channels) {
       c.base = approach(c.base, c.baseTarget, kBase);
       c.overlay = approach(c.overlay, c.overlayTarget, kOverlay);
       const deathClip = c.name === "death_front" || c.name === "death_back";
-      c.full = approach(c.full, c.fullTarget, deathClip || this.dead ? kDeath : kAir);
+      c.full = approach(c.full, c.fullTarget, deathClip || this.dead ? kDeath : c.posture ? kPosture : kAir);
     }
   }
 
@@ -481,6 +612,10 @@ export class SoldierAnimator {
     c.frozen = true;
   }
 }
+
+/** Clips layered on the upper body only (masked, so their legs are never evaluated). */
+const UPPER_BODY_CLIPS: ReadonlySet<CharacterClipName> = new Set<CharacterClipName>(["fire", "reload", "hit", "throw_stand", "throw_crouch", "pick_up"]);
+const POSTURE_CLIPS: ReadonlySet<CharacterClipName> = new Set<CharacterClipName>(["knock_down", "writhe", "crawl", "cpr_receive", "get_up", "heal_kneel", "bandage", "drink", "cpr_give"]);
 
 function approach(value: number, target: number, k: number): number {
   const next = value + (target - value) * k;

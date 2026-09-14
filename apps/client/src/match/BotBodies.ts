@@ -1,5 +1,5 @@
-import { Quaternion, Vector3, type AbstractMesh, type Scene } from "@babylonjs/core";
-import type { ActorConfig, ActorState, FlashExposure, Vec3, WeaponId } from "@twobullets/shared";
+import { Quaternion, Vector3, type Scene } from "@babylonjs/core";
+import { ITEM_IDS, ITEMS, PlayerActionType, type ActorConfig, type ActorState, type ConsumableItemId, type FlashExposure, type Vec3, type WeaponId } from "@twobullets/shared";
 import type { MatchSim } from "@twobullets/sim";
 import type { DamageHit, DamageResult, Damageable, HitboxRegistry } from "../combat/hitboxes";
 import type { EquipmentTarget } from "../equipment/EquipmentSystem";
@@ -7,13 +7,18 @@ import type { ReviveTarget } from "../equipment/types";
 import type { FootstepEmitterSource, FootstepEmitterState } from "../audio/FootstepSystem";
 import { SoldierCharacter } from "../targets/SoldierCharacter";
 import type { SoldierResources } from "../targets/SoldierResources";
+import { activityForItem, type SoldierActivity } from "../targets/soldierRig";
 import type { Environment } from "../world/environment";
 
-/** Downed bots use the crouch pose sunk this far until a crawl clip exists (asset request), m. */
-const DOWNED_SINK = 0.45;
 /** Hand → muzzle along the aim for the third-person rifle, m. */
 const MUZZLE_REACH = 0.62;
 const TWO_PI = Math.PI * 2;
+/** Body turn rates while the presentation owns the yaw (lying, giving CPR, settling after a get-up), rad/s. */
+const LYING_TURN_RATE = 2.5;
+const KNEEL_TURN_RATE = 5;
+const SETTLE_TURN_RATE = 6;
+/** Downed and faster than this: the body lines up with the crawl direction, m/s. */
+const CRAWL_TURN_SPEED = 0.25;
 
 /** Angle in [−π, π). */
 function wrapAngle(angle: number): number {
@@ -21,7 +26,10 @@ function wrapAngle(angle: number): number {
 }
 
 /** What bot bodies need from the running match. */
-export type BotBodyMatch = Pick<MatchSim, "state" | "damageActor" | "vitalsOf" | "setBotVitals">;
+export type BotBodyMatch = Pick<MatchSim, "state" | "damageActor" | "vitalsOf" | "setBotVitals" | "inputOf" | "inventoryOf">;
+
+/** DEV pose preview (`BotBody.preview`): forces a state on top of the match's. */
+export type BotPosePreview = "knocked" | "crawl" | "receiveCpr" | "giveCpr" | SoldierActivity | "throwStand" | "throwCrouch" | "pickUp";
 
 /**
  * One bot's presentation (design.md §9.2): a pooled SWAT soldier with bone hitboxes in combat's registry, placed between
@@ -43,11 +51,19 @@ export class BotBody {
   private readonly current = new Vector3();
   private previousYaw = 0;
   private currentYaw = 0;
-  private readonly rifle: AbstractMesh | null;
   private readonly eyeValue = { x: 0, y: 0, z: 0 };
   private readonly viewDirValue = { x: 0, y: 0, z: 1 };
   private shownDead = false;
   private hasTick = false;
+  /** Rendered body yaw; follows the interpolated sim yaw unless `yawOwned` (lying, CPR, settling after a get-up). */
+  private bodyYaw = 0;
+  private yawOwned = false;
+  /** Activity for the item being used (from the use input on the `itemUse` started event). */
+  private itemActivity: SoldierActivity = "bandage";
+  /** Downed slot this bot is giving CPR to this frame, or -1 (BotBodies fills it before `update`). */
+  cprTarget = -1;
+  private lastInventory: unknown = null;
+  private previewPose: BotPosePreview | null = null;
   /** Last bullet/blast direction that hurt this bot (death clip side). */
   readonly lastHitDirection = new Vector3(0, 0, 1);
   private state: ActorState | null = null;
@@ -69,7 +85,6 @@ export class BotBody {
     };
     this.soldier = new SoldierCharacter(scene, resources, environment, { name: `bot${config.slot}`, damage: { registry, owner: this.damageable } });
     this.soldier.root.rotationQuaternion = Quaternion.Identity();
-    this.rifle = this.soldier.root.getChildMeshes(false, (mesh) => mesh.name === `bot${config.slot}_rifle`)[0] ?? null;
     this.target = {
       id: this.id,
       displayName: config.name,
@@ -118,9 +133,12 @@ export class BotBody {
     this.currentYaw = this.previousYaw = state.yaw;
     this.hasTick = true;
     this.shownDead = false;
+    this.bodyYaw = state.yaw;
+    this.yawOwned = false;
+    this.lastInventory = match.inventoryOf(this.slot);
     this.soldier.root.setEnabled(true);
     this.soldier.setHitboxesEnabled(true);
-    this.place(1);
+    this.place(1, 0);
   }
 
   get alive(): boolean {
@@ -149,36 +167,82 @@ export class BotBody {
       this.previousYaw = yaw;
       this.hasTick = true;
     }
+    // Loot pickup has no event: a pickup input on the tick the inventory changed.
+    const match = this.match;
+    if (match) {
+      const inventory = match.inventoryOf(this.slot);
+      const action = match.inputOf(this.slot)?.action;
+      if (action?.type === PlayerActionType.pickup && inventory !== this.lastInventory && s.life === "alive") this.soldier.pickUp();
+      this.lastInventory = inventory;
+    }
+  }
+
+  /** `itemUse` fx: remembers which clip fits the item the bot started using. */
+  itemUse(phase: "started" | "cancelled" | "completed"): void {
+    if (phase !== "started") return;
+    const action = this.match?.inputOf(this.slot)?.action;
+    const item = action?.type === PlayerActionType.use ? consumableOfCode(action.arg) : null;
+    this.itemActivity = item ? activityForItem(item) : "bandage";
+  }
+
+  /** `throwRelease` fx. */
+  throwRelease(): void {
+    this.soldier.throwGrenade(this.state !== null && this.state.stance !== "stand");
+  }
+
+  /**
+   * DEV: forces a pose on top of the match state (`null` clears; clearing a lying pose plays the get-up). Events
+   * (throws, pickup) play once. Console: `__twobullets.match.match.bodies.bySlot[3].preview("crawl")`.
+   */
+  preview(pose: BotPosePreview | null): void {
+    if (pose === "throwStand" || pose === "throwCrouch") this.soldier.throwGrenade(pose === "throwCrouch");
+    else if (pose === "pickUp") this.soldier.pickUp();
+    else this.previewPose = pose;
   }
 
   /** Per render frame before scene.render: pose between ticks (`alpha`), locomotion input, death, weapon prop. */
   update(dt: number, alpha: number): void {
     const s = this.state;
     if (!s) return;
-    this.place(alpha);
+    const preview = this.previewPose;
     const motion = this.soldier.motion;
-    const downed = s.life === "downed";
+    const downed = s.life === "downed" || preview === "knocked" || preview === "crawl" || preview === "receiveCpr";
+    this.place(alpha, dt);
     if (s.life === "dead") {
       if (!this.shownDead) {
         this.shownDead = true;
         this.soldier.die(this.lastHitDirection);
       }
       motion.velocityX = motion.velocityZ = 0;
+      motion.downed = false;
+      motion.activity = null;
     } else {
-      const yaw = this.renderYaw(alpha);
+      const yaw = this.bodyYaw;
       const c = Math.cos(yaw);
       const sn = Math.sin(yaw);
-      const vx = downed ? 0 : s.velocity.x;
-      const vz = downed ? 0 : s.velocity.z;
+      const vx = preview === "crawl" ? Math.sin(yaw + Math.PI) * 1.2 : s.velocity.x;
+      const vz = preview === "crawl" ? Math.cos(yaw + Math.PI) * 1.2 : s.velocity.z;
       motion.velocityX = vx * c - vz * sn;
       motion.velocityZ = vx * sn + vz * c;
       motion.grounded = s.grounded || downed;
-      motion.crouched = downed || s.stance !== "stand";
+      motion.crouched = !downed && s.stance !== "stand";
       motion.sprinting = s.sprinting && !downed;
       motion.aiming = s.weaponId !== null && !downed && (s.adsBlend > 0.5 || s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z < 1);
+      motion.downed = downed;
+      motion.beingRevived = downed && (s.reviverSlot >= 0 || preview === "receiveCpr");
+      motion.activity = downed
+        ? null
+        : this.cprTarget >= 0 || preview === "giveCpr"
+          ? "cpr"
+          : preview === "kneelHeal" || preview === "bandage" || preview === "drink" || preview === "cpr"
+            ? preview
+            : s.usingItem
+              ? this.itemActivity
+              : null;
     }
-    // Every soldier model carries the rifle clone (design §9.2 known limit): shown while any gun is in hand.
-    this.rifle?.setEnabled(s.weaponId !== null && s.life !== "dead");
+    // Every soldier model carries the rifle clone (design §9.2 known limit): shown while any gun is in hand and the
+    // hands aren't busy (SoldierCharacter hides it while lying, getting up, healing, giving CPR, throwing, looting).
+    this.soldier.rifleVisible = s.weaponId !== null && s.life !== "dead";
     const f = this.footstep;
     f.grounded = motion.grounded;
     f.crouched = motion.crouched;
@@ -220,11 +284,62 @@ export class BotBody {
     this.soldier.dispose();
   }
 
-  private place(alpha: number): void {
+  private place(alpha: number, dt: number): void {
     const root = this.soldier.root;
     Vector3.LerpToRef(this.previous, this.current, alpha, root.position);
-    if (this.state?.life === "downed") root.position.y -= DOWNED_SINK;
-    Quaternion.RotationYawPitchRollToRef(this.renderYaw(alpha), 0, 0, root.rotationQuaternion!);
+    this.updateBodyYaw(alpha, dt);
+    Quaternion.RotationYawPitchRollToRef(this.bodyYaw, 0, 0, root.rotationQuaternion!);
+  }
+
+  /**
+   * Lying clips put the head toward the model's −Z, so the body yaw is "head direction + π": a knock falls backward from
+   * the current facing, a crawl lines the head up with the velocity, a patient lies across its reviver, a reviver
+   * kneels facing its patient, and after the get-up the body turns back onto the sim yaw.
+   */
+  private updateBodyYaw(alpha: number, dt: number): void {
+    const s = this.state!;
+    const simYaw = this.renderYaw(alpha);
+    const down = this.soldier.downState;
+    const lying = s.life === "downed" || down === "knock" || down === "down" || this.previewPose === "knocked" || this.previewPose === "crawl" || this.previewPose === "receiveCpr";
+    let target = simYaw;
+    let rate = 0;
+    if (s.life === "dead") {
+      target = this.bodyYaw;
+    } else if (lying) {
+      if (!this.yawOwned) this.bodyYaw = simYaw;
+      target = this.bodyYaw;
+      rate = LYING_TURN_RATE;
+      const giver = s.reviverSlot >= 0 ? this.match?.state.actors[s.reviverSlot] : undefined;
+      if (giver) {
+        // Lie across the reviver: head perpendicular to the line between them, whichever side is closer.
+        const facing = Math.atan2(s.feet.x - giver.feet.x, s.feet.z - giver.feet.z);
+        const a = facing + Math.PI / 2 + Math.PI;
+        const b = facing - Math.PI / 2 + Math.PI;
+        target = Math.abs(wrapAngle(a - this.bodyYaw)) < Math.abs(wrapAngle(b - this.bodyYaw)) ? a : b;
+      } else if (s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z > CRAWL_TURN_SPEED * CRAWL_TURN_SPEED) {
+        target = Math.atan2(s.velocity.x, s.velocity.z) + Math.PI;
+      }
+      this.yawOwned = true;
+    } else if (this.cprTarget >= 0) {
+      const patient = this.match?.state.actors[this.cprTarget];
+      if (!this.yawOwned) this.bodyYaw = simYaw;
+      target = patient ? Math.atan2(patient.feet.x - s.feet.x, patient.feet.z - s.feet.z) : this.bodyYaw;
+      rate = KNEEL_TURN_RATE;
+      this.yawOwned = true;
+    } else if (down === "getUp") {
+      target = this.bodyYaw;
+    } else if (this.yawOwned) {
+      rate = SETTLE_TURN_RATE;
+      if (Math.abs(wrapAngle(simYaw - this.bodyYaw)) < 0.02) this.yawOwned = false;
+    }
+    if (rate === 0) {
+      this.bodyYaw = target;
+      return;
+    }
+    const delta = wrapAngle(target - this.bodyYaw);
+    const step = rate * dt;
+    this.bodyYaw = wrapAngle(this.bodyYaw + (Math.abs(delta) <= step ? delta : Math.sign(delta) * step));
+    if (!this.yawOwned) this.bodyYaw = simYaw;
   }
 
   private eye(): Vec3 {
@@ -292,6 +407,7 @@ export class BotBodies implements FootstepEmitterSource {
   readonly targets: EquipmentTarget[] = [];
   /** Downed-revivable teammates of the human. */
   readonly teammates: ReviveTarget[] = [];
+  private match: BotBodyMatch | null = null;
 
   constructor(scene: Scene, resources: SoldierResources, environment: Environment, registry: HitboxRegistry, actors: readonly ActorConfig[], humanTeam: number | null, weaponOfLocal: () => WeaponId | null) {
     const maxSlot = actors.reduce((max, a) => Math.max(max, a.slot), 0);
@@ -307,6 +423,7 @@ export class BotBodies implements FootstepEmitterSource {
   }
 
   attach(match: BotBodyMatch): void {
+    this.match = match;
     for (const body of this.list) {
       const state = match.state.actors[body.slot];
       if (state) body.attach(match, state);
@@ -318,6 +435,17 @@ export class BotBodies implements FootstepEmitterSource {
   }
 
   update(dt: number, alpha: number): void {
+    // Revivers: a downed actor names its reviver (any slot, the human included).
+    for (const body of this.list) body.cprTarget = -1;
+    const actors = this.match?.state.actors;
+    if (actors) {
+      for (let slot = 0; slot < actors.length; slot++) {
+        const actor = actors[slot];
+        if (!actor || actor.life !== "downed" || actor.reviverSlot < 0) continue;
+        const giver = this.bySlot[actor.reviverSlot];
+        if (giver) giver.cprTarget = actor.slot;
+      }
+    }
     for (const body of this.list) body.update(dt, alpha);
   }
 
@@ -336,3 +464,11 @@ const EMPTY_TARGET: EquipmentTarget = {
   feet: { x: 0, y: -1000, z: 0 },
   applyDamage: () => null,
 };
+
+/** Wire code of a consumable (`PlayerActionType.use` arg), the same table MatchSim decodes. */
+function consumableOfCode(code: number): ConsumableItemId | null {
+  const id = ITEM_IDS[code];
+  if (!id) return null;
+  const category = ITEMS[id].category;
+  return category === "heal" || category === "boost" ? (id as ConsumableItemId) : null;
+}

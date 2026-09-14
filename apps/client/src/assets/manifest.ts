@@ -122,7 +122,23 @@ export type CharacterClipName =
   | "reload"
   | "hit"
   | "death_front"
-  | "death_back";
+  | "death_back"
+  /**
+   * Knocked (DBNO), revive, item-use, throw and loot clips. Every lying clip shares one convention: hips over the root
+   * origin, head toward −Z (so `crawl` moves toward −Z), feet toward +Z.
+   */
+  | "knock_down"
+  | "writhe"
+  | "crawl"
+  | "get_up"
+  | "cpr_give"
+  | "cpr_receive"
+  | "heal_kneel"
+  | "bandage"
+  | "drink"
+  | "throw_stand"
+  | "throw_crouch"
+  | "pick_up";
 
 export type CharacterBoneRole =
   | "hips"

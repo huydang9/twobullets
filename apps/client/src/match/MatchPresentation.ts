@@ -4,8 +4,8 @@ import type { BotBodies } from "./BotBodies";
 
 /**
  * Bridges match events to what the player sees and hears (docs/bots/design.md §9.4): bot shots → spatial gunshot,
- * third-person muzzle flash, tracers and near misses; impacts → dust, holes and blood; weapon events and damage →
- * soldier clips. Human shots and grenades already present themselves through CombatSystem and EquipmentSystem.
+ * third-person muzzle flash, tracers and near misses; impacts → dust, holes and blood; weapon, throw and item-use events
+ * and damage → soldier clips (knocked, revive and item-use poses follow the actor state in BotBodies). Human shots and grenades already present themselves through CombatSystem and EquipmentSystem.
  */
 export class MatchPresentation {
   private readonly unsubscribe: (() => void)[];
@@ -63,8 +63,11 @@ export class MatchPresentation {
         break;
       }
       case "throwRelease":
+        // The grenade itself renders from EquipmentSystem's world.
+        body?.throwRelease();
+        break;
       case "itemUse":
-        // Grenades render from EquipmentSystem's world; no third-person throw or heal clips yet (asset request).
+        body?.itemUse(event.phase);
         break;
     }
   }
