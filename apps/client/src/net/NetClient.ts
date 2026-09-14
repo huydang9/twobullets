@@ -22,7 +22,7 @@ import { MsgId } from "@twobullets/protocol/messages/ids";
 import { encodeInputPacket, MAX_INPUTS_PER_PACKET, type InputPacket } from "@twobullets/protocol/messages/input";
 import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages/ping";
 import type { ReliableEvent } from "@twobullets/protocol/messages/events";
-import type { Mutable } from "@twobullets/protocol/messages/snapshot";
+import type { Mutable, Snapshot } from "@twobullets/protocol/messages/snapshot";
 import { Btn, type PlayerInput } from "@twobullets/shared/input";
 import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, helloFor, WELCOME_TIMEOUT_MS } from "./handshake";
 import type { LocalPlayerNet } from "./LocalPlayerNet";
@@ -46,6 +46,16 @@ const INTERRUPTED_MS = 1000;
 /** Consecutive undecodable snapshots (baseline gone) before asking for a full one. */
 const DECODE_FAILURES_FOR_RESYNC = 30;
 const RESYNC_REQUEST_INTERVAL_MS = 500;
+/**
+ * A snapshot handled this long after the previous frame (and 4 frame intervals) waited out a main-thread stall: its
+ * receive time says nothing about the network, so it skips the offset, jitter and RTT estimates.
+ */
+const STALL_MIN_MS = 100;
+/**
+ * After start, a resync or a stall, the server's smoothed depth still describes the old alignment until inputs sent
+ * since have reached it and this many ticks have passed (its depth EWMA is 0.1 per tick).
+ */
+const DEPTH_SETTLE_TICKS = 20;
 
 export interface NetStats {
   state: NetConnectionState;
@@ -85,6 +95,8 @@ export interface NetStats {
   hitsReceived: number;
   resyncs: number;
   decodeFailures: number;
+  /** Frame dt (plus hitch time given back) as % of wall time over the last second: 100 when frames are honest. */
+  frameTimePct: number;
   bytesInPerSec: number;
   bytesOutPerSec: number;
   remoteCount: number;
@@ -159,6 +171,13 @@ export class NetClient {
   private bytesOut = 0;
   private rateWindowStartMs = 0;
   private renderTickValue = 0;
+  private lastUpdateMs = -1;
+  /** Smoothed wall time between frames, ms (≤ 100). */
+  private frameIntervalMs = 1000 / 60;
+  private burstTicks = 0;
+  private frameTimeMs = 0;
+  /** Depth reports count from snapshots of this server tick on (see DEPTH_SETTLE_TICKS). */
+  private depthFromServerTick = 0;
 
   constructor(session: Session, options: NetClientOptions) {
     this.session = session;
@@ -204,6 +223,7 @@ export class NetClient {
       hitsReceived: 0,
       resyncs: 0,
       decodeFailures: 0,
+      frameTimePct: 100,
       bytesInPerSec: 0,
       bytesOutPerSec: 0,
       remoteCount: 0,
@@ -227,6 +247,14 @@ export class NetClient {
   /** Fractional server tick remote players render at this frame. */
   get renderTick(): number {
     return this.renderTickValue;
+  }
+
+  /**
+   * The `NetClock.currentTick` (next tick to simulate) that puts the buffer at its target: `clientTargetTickAt` is the
+   * newest simulated tick whose input arrives `targetTicks` early, one below the next tick.
+   */
+  targetTickAt(nowMs: number): number {
+    return this.sync.clientTargetTickAt(nowMs, this.netClock.dilation.targetTicks) + 1;
   }
 
   /** Sends Hello; Welcome must follow within WELCOME_TIMEOUT_MS. */
@@ -254,17 +282,31 @@ export class NetClient {
   update(dtSec: number): void {
     const now = this.clock.now();
     const state = this.stats.state;
+    const wallMs = this.lastUpdateMs >= 0 ? now - this.lastUpdateMs : dtSec * 1000;
+    const stalled = wallMs > this.stallMs;
+    this.lastUpdateMs = now;
+    this.frameIntervalMs += 0.1 * (Math.min(wallMs, STALL_MIN_MS) - this.frameIntervalMs);
+    let frameMs = dtSec * 1000;
     if (state === "handshaking") {
       if (now - this.stateStartedMs > WELCOME_TIMEOUT_MS) this.fail("no Welcome from the server (handshake timeout)");
     } else if (state === "syncing") {
       this.maybePing(now, SYNC_PING_INTERVAL_MS);
-      this.maybeStart(now);
+      this.maybeStart(now, dtSec);
     } else if (state === "playing") {
       this.maybePing(now, PLAY_PING_INTERVAL_MS);
+      // The frame dt is capped (Game.ts: 0.1 s). Give a short hitch's dropped time back so the clock doesn't fall
+      // behind and spend seconds dilating back; a longer one (> RESYNC_TICKS) is left to the hard resync below.
+      const lostMs = wallMs - frameMs;
+      if (lostMs > 0.5 && lostMs <= RESYNC_TICKS * this.sync.tickMs) {
+        this.netClock.catchUp(lostMs / 1000);
+        frameMs = wallMs;
+      }
+      // No inputs went out during a stall, so the server's (smoothed) depth dips below the real alignment for a while.
+      if (stalled) this.holdDepth(now);
       const dilation = this.netClock.dilation;
-      dilation.setJitter(this.sync.jitterMs);
-      const target = this.sync.clientTargetTickAt(now, dilation.targetTicks);
-      if (Math.abs(this.netClock.currentTick - target) > RESYNC_TICKS) this.hardResync(now, target);
+      dilation.setJitter(this.sync.jitterMs, this.frameBurstTicks);
+      const target = this.targetTickAt(now);
+      if (Math.abs(this.netClock.currentTick - target) > RESYNC_TICKS) this.hardResync(now, target, dtSec);
       this.stats.interrupted = now - this.lastSnapshotMs > INTERRUPTED_MS;
     }
     if (state === "playing" || state === "syncing") {
@@ -273,6 +315,7 @@ export class NetClient {
       this.stats.remoteCount = this.roster.sample(this.renderTickValue);
     }
     this.local.update(dtSec);
+    this.frameTimeMs += frameMs;
     this.updateStats(now);
   }
 
@@ -351,27 +394,24 @@ export class NetClient {
     const snap = this.store.decode(this.reader, reference);
     if (snap === null) {
       this.stats.decodeFailures++;
+      // The baseline is gone, but events precede the state: don't lose shots, hits and reliable events with it.
+      const eventsOnly = this.store.eventsOnly;
+      if (eventsOnly !== null) this.deliverEvents(eventsOnly, false);
       if (++this.decodeFailStreak >= DECODE_FAILURES_FOR_RESYNC) this.requestResync(recvMs);
       return;
     }
     this.decodeFailStreak = 0;
     this.lastSnapshotMs = recvMs;
     const h = snap.header;
-    sync.onSnapshot(h.serverTick, recvMs, h.lastProcessedInputTick >= 0 ? h.clientTimeEcho : -1, h.serverHoldMs);
+    const stalled = this.lastUpdateMs >= 0 && recvMs - this.lastUpdateMs > this.stallMs;
+    sync.onSnapshot(h.serverTick, recvMs, h.lastProcessedInputTick >= 0 ? h.clientTimeEcho : -1, h.serverHoldMs, !stalled);
     if (h.lastProcessedInputTick > this.lastProcessedInput) this.lastProcessedInput = h.lastProcessedInputTick;
     const playing = this.stats.state === "playing";
-    if (playing && h.lastProcessedInputTick >= 0) this.netClock.dilation.onBufferDepth(h.inputBufferDepthQ / 4, recvMs);
+    // inputBufferDepthQ: quarter ticks the server holds beyond the tick it simulates (> target → the client slows). Not
+    // gated on lastProcessedInputTick: a client whose inputs all arrive late must still hear that it is behind.
+    if (playing && !stalled && h.serverTick >= this.depthFromServerTick) this.netClock.dilation.onBufferDepth(h.inputBufferDepthQ / 4, recvMs);
     const events = this.events;
-    const reliable = snap.reliable;
-    if (reliable !== undefined && reliable.length > 0) {
-      this.deliverTick = h.serverTick;
-      this.receiver.receive(reliable, this.deliver);
-    }
-    if (events !== null) {
-      this.stats.shotsReceived += snap.shots?.length ?? 0;
-      this.stats.hitsReceived += snap.hits?.length ?? 0;
-      events.onSnapshotEvents(snap);
-    }
+    this.deliverEvents(snap, true);
     this.roster.onSnapshot(h.serverTick, snap.entities);
     if (snap.owner === null) return;
     if (h.serverTick > this.newestOwnerTick) this.newestOwnerTick = h.serverTick;
@@ -392,7 +432,43 @@ export class NetClient {
     if (this.movement !== null) this.movement.life = this.ownerLife;
   }
 
-  private maybeStart(now: number): void {
+  /**
+   * Inputs go out once per frame: at frame intervals of about two ticks or more, the server sees them in bursts and
+   * needs that much more buffer to not run dry between frames.
+   */
+  private get frameBurstTicks(): number {
+    const x = this.frameIntervalMs / this.sync.tickMs - 1;
+    // Hysteresis around the x.5 boundaries (a 40 fps loop would flip it).
+    if (Math.abs(x - this.burstTicks) > 0.65) this.burstTicks = Math.max(0, Math.round(x));
+    return this.burstTicks;
+  }
+
+  /** A frame gap (or a message handled this long after the last frame) beyond this is a main-thread stall. */
+  private get stallMs(): number {
+    return Math.max(STALL_MIN_MS, 4 * this.frameIntervalMs);
+  }
+
+  /** Ignores depth reports until inputs sent from now on have reached the server and its smoothing caught up. */
+  private holdDepth(now: number): void {
+    const sync = this.sync;
+    this.depthFromServerTick = Math.ceil(sync.serverTickAt(now) + sync.rttMinMs / 2 / sync.tickMs) + DEPTH_SETTLE_TICKS;
+  }
+
+  private deliverEvents(snap: Snapshot, entitiesValid: boolean): void {
+    const reliable = snap.reliable;
+    if (reliable !== undefined && reliable.length > 0) {
+      this.deliverTick = snap.header.serverTick;
+      this.receiver.receive(reliable, this.deliver);
+    }
+    const events = this.events;
+    if (events !== null) {
+      this.stats.shotsReceived += snap.shots?.length ?? 0;
+      this.stats.hitsReceived += snap.hits?.length ?? 0;
+      events.onSnapshotEvents(snap, entitiesValid);
+    }
+  }
+
+  private maybeStart(now: number, dtSec: number): void {
     const sync = this.sync;
     if (sync.sampleCount < SYNC_SNAPSHOTS || this.newestOwnerTick < 0) return;
     if (this.pingReplies < SYNC_PINGS && now - this.stateStartedMs < SYNC_MAX_MS) return;
@@ -403,17 +479,24 @@ export class NetClient {
     if (this.movement !== null) this.movement.life = life;
     this.local.startFrom(owner, stored.weapon ?? null, life);
     const dilation = this.netClock.dilation;
-    dilation.setJitter(sync.jitterMs);
-    this.netClock.start(Math.ceil(sync.clientTargetTickAt(now, dilation.targetTicks)));
+    dilation.setJitter(sync.jitterMs, this.frameBurstTicks);
+    const tick = Math.ceil(this.targetTickAt(now));
+    this.netClock.start(tick, dtSec);
+    this.holdDepth(now);
     this.lastSnapshotMs = now;
     this.setState("playing", "");
   }
 
-  private hardResync(now: number, target: number): void {
-    this.netClock.resync(Math.round(target));
+  /**
+   * Re-aligns the tick number and drops prediction history. Local only: baselines and the reliable event queue are
+   * unaffected by the client's tick alignment, and a ResyncRequest would make the server drop unacked events.
+   */
+  private hardResync(now: number, target: number, dtSec: number): void {
+    const tick = Math.round(target);
+    this.netClock.resync(tick, dtSec);
+    this.holdDepth(now);
     this.local.clearHistory();
     this.stats.resyncs++;
-    this.requestResync(now);
   }
 
   private requestResync(now: number): void {
@@ -509,6 +592,8 @@ export class NetClient {
     s.extrapolatedPct = this.roster.sampledFrames > 0 ? (this.roster.extrapolatedFrames / this.roster.sampledFrames) * 100 : 0;
     const elapsed = now - this.rateWindowStartMs;
     if (elapsed >= 1000) {
+      s.frameTimePct = (this.frameTimeMs * 100) / elapsed;
+      this.frameTimeMs = 0;
       s.bytesInPerSec = (this.bytesIn * 1000) / elapsed;
       s.bytesOutPerSec = (this.bytesOut * 1000) / elapsed;
       this.bytesIn = 0;

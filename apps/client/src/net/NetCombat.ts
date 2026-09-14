@@ -34,8 +34,11 @@ import { EVENT_RULES } from "./netCombatRules";
 /** What NetClient hands to the combat layer (M4). Everything is called synchronously while a message is handled. */
 export interface NetEventSink {
   onWelcome(slot: number, team: number): void;
-  /** Every decoded snapshot: tier U `shots` and `hits` (entities give shot origins). */
-  onSnapshotEvents(snapshot: Snapshot): void;
+  /**
+   * Every decoded snapshot: tier U `shots` and `hits` (entities give shot origins). `entitiesValid` false: a snapshot
+   * dropped for a missing baseline, with only its header and events decoded.
+   */
+  onSnapshotEvents(snapshot: Snapshot, entitiesValid?: boolean): void;
   /** Tier R, exactly once and in order. `event` is only valid during the call. */
   onReliableEvent(event: ReliableEvent, serverTick: number): void;
   /** Owner vitals of the newest snapshot that carried them. */
@@ -175,6 +178,10 @@ export class NetCombat implements NetEventSink {
   private readonly lastVitals = createOwnerVitalsBlock();
   private hasVitals = false;
   private newestTick = -1;
+  /** Shooter feet (mm) and tick of each slot's newest full entity state, for shots in events-only snapshots. */
+  private readonly feetMm = new Int32Array(MAX_ENTITY_SLOTS * 3);
+  private readonly feetTick = new Float64Array(MAX_ENTITY_SLOTS).fill(-1);
+  private readonly feetScratch = { xMm: 0, yMm: 0, zMm: 0 };
 
   constructor(feedback: CombatFeedback) {
     this.feedback = feedback;
@@ -188,20 +195,23 @@ export class NetCombat implements NetEventSink {
     this.ownSlot = slot;
     this.ownTeam = team;
     this.lastShotId.fill(-1);
+    this.feetTick.fill(-1);
     this.hasVitals = false;
     this.feedback.welcome?.(slot, team);
   }
 
-  onSnapshotEvents(snapshot: Snapshot): void {
+  onSnapshotEvents(snapshot: Snapshot, entitiesValid = true): void {
     const tick = snapshot.header.serverTick;
     if (tick > this.newestTick) this.newestTick = tick;
+    if (entitiesValid) this.rememberFeet(snapshot);
     const shots = snapshot.shots;
     if (shots !== undefined) {
       for (let i = 0; i < shots.length; i++) {
         const e = shots[i]!;
         if (e.shooter === this.ownSlot && !EVENT_RULES.shotsIncludeOwn) continue;
         const weaponId = weaponIdOfCode(e.weapon);
-        const feet = entityFeet(snapshot, e.shooter);
+        // Without the snapshot's entities, the shooter's feet from the nearest snapshot that had them (a few cm off).
+        const feet = entitiesValid ? entityFeet(snapshot, e.shooter) : this.rememberedFeet(e.shooter, tick);
         if (weaponId === null || feet === null) {
           this.stats.shotsDropped++;
           continue;
@@ -361,6 +371,29 @@ export class NetCombat implements NetEventSink {
   }
 
   /** A free pending shot, or the oldest one played right away. */
+  private rememberFeet(snapshot: Snapshot): void {
+    const tick = snapshot.header.serverTick;
+    const entities = snapshot.entities;
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i]!;
+      if (e.presence !== EntityPresence.full || tick < this.feetTick[e.slot]!) continue;
+      this.feetTick[e.slot] = tick;
+      this.feetMm[e.slot * 3] = e.xMm;
+      this.feetMm[e.slot * 3 + 1] = e.yMm;
+      this.feetMm[e.slot * 3 + 2] = e.zMm;
+    }
+  }
+
+  private rememberedFeet(slot: number, tick: number): { readonly xMm: number; readonly yMm: number; readonly zMm: number } | null {
+    const seen = this.feetTick[slot];
+    if (seen === undefined || seen < 0 || Math.abs(tick - seen) > FEET_MAX_AGE_TICKS) return null;
+    const f = this.feetScratch;
+    f.xMm = this.feetMm[slot * 3]!;
+    f.yMm = this.feetMm[slot * 3 + 1]!;
+    f.zMm = this.feetMm[slot * 3 + 2]!;
+    return f;
+  }
+
   private acquireShot(): PendingShot {
     let oldest: PendingShot | null = null;
     for (const s of this.shots) {
@@ -382,6 +415,9 @@ export class NetCombat implements NetEventSink {
     return oldest!;
   }
 }
+
+/** Remembered shooter feet older (or newer) than this don't place an events-only shot. */
+const FEET_MAX_AGE_TICKS = 12;
 
 function entityFeet(snapshot: Snapshot, slot: number): { readonly xMm: number; readonly yMm: number; readonly zMm: number } | null {
   const entities = snapshot.entities;

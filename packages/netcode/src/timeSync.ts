@@ -146,10 +146,16 @@ export class TimeSync {
 
   /**
    * One decoded snapshot. `clientTimeEcho`/`serverHoldMs` from its header give an RTT sample (pass a negative echo
-   * when the server has no input yet). Duplicates are ignored for loss accounting.
+   * when the server has no input yet). Duplicates are ignored for loss accounting. `timing` false: the receive time is
+   * unreliable (handled after a main-thread stall), so the snapshot counts for loss only, not offset, jitter or RTT.
    */
-  onSnapshot(serverTick: number, arrivalMs: number, clientTimeEcho = -1, serverHoldMs = 0): void {
+  onSnapshot(serverTick: number, arrivalMs: number, clientTimeEcho = -1, serverHoldMs = 0, timing = true): void {
     const t0 = arrivalMs - this.windowMs;
+    if (!timing) {
+      this.recordTick(serverTick, arrivalMs);
+      this.ticks.trim(t0);
+      return;
+    }
     this.offsets.push(arrivalMs, arrivalMs - serverTick * this.tickMs);
     this.offsets.trim(t0);
     this.offsetMin = this.offsets.min();
@@ -163,12 +169,7 @@ export class TimeSync {
     }
     this.offsetUpdatedMs = arrivalMs;
     this.samples++;
-    if (serverTick > this.newestTick) {
-      this.newestTick = serverTick;
-      this.ticks.push(arrivalMs, serverTick);
-    } else if (!this.hasTick(serverTick)) {
-      this.ticks.push(arrivalMs, serverTick);
-    }
+    this.recordTick(serverTick, arrivalMs);
     this.ticks.trim(t0);
     if (clientTimeEcho >= 0 && serverHoldMs < 255) {
       const rtt = ((Math.floor(arrivalMs) - clientTimeEcho) & 0xffff) - serverHoldMs;
@@ -229,6 +230,15 @@ export class TimeSync {
     this.jitter = 0;
     this.newestTick = -1;
     this.samples = 0;
+  }
+
+  private recordTick(serverTick: number, arrivalMs: number): void {
+    if (serverTick > this.newestTick) {
+      this.newestTick = serverTick;
+      this.ticks.push(arrivalMs, serverTick);
+    } else if (!this.hasTick(serverTick)) {
+      this.ticks.push(arrivalMs, serverTick);
+    }
   }
 
   private hasTick(tick: number): boolean {

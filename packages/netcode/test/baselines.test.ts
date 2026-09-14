@@ -1,4 +1,5 @@
 import { createBitReader, createBitWriter } from "@twobullets/protocol/bits";
+import { createShotEvent } from "@twobullets/protocol/messages/events";
 import { EntityPresence, encodeSnapshot, type Snapshot } from "@twobullets/protocol/messages/snapshot";
 import { describe, expect, it } from "vitest";
 import { ClientSnapshotStore, ServerSnapshotBaselines } from "../src/baselines";
@@ -62,5 +63,34 @@ describe("baselines", () => {
     expect(server.baselineFor(11 + 128)).toBeNull();
     server.reset();
     expect(server.baselineFor(12)).toBeNull();
+  });
+
+  it("a snapshot whose baseline is gone still exposes its events (eventsOnly), until the next decode", () => {
+    const client = new ClientSnapshotStore();
+    const w = createBitWriter(1500);
+    const r = createBitReader(new Uint8Array(0));
+    const decode = (s: Snapshot, base: Snapshot | null) => {
+      w.reset();
+      encodeSnapshot(w, s, base);
+      r.reset(w.bytes().slice());
+      return client.decode(r, s.header.serverTick);
+    };
+    expect(decode(snap(100, 0), null)).not.toBeNull();
+    expect(client.eventsOnly).toBeNull();
+    const shot = { ...createShotEvent(), shooter: 1, weapon: 1, shotId: 77 };
+    const withEvents: Snapshot = { ...snap(105, 5), shots: [shot] };
+    // Delta against tick 103, which the client never decoded.
+    expect(decode(withEvents, snap(103, 3))).toBeNull();
+    const events = client.eventsOnly;
+    expect(events?.header.serverTick).toBe(105);
+    expect(events?.shots).toHaveLength(1);
+    expect(events?.shots?.[0]?.shotId).toBe(77);
+    expect(client.newestTick).toBe(100);
+    // Malformed: nothing.
+    r.reset(new Uint8Array([w.bytes()[0]!, 1]));
+    expect(client.decode(r, 105)).toBeNull();
+    expect(client.eventsOnly).toBeNull();
+    expect(decode(snap(106, 6), client.get(100))).not.toBeNull();
+    expect(client.eventsOnly).toBeNull();
   });
 });

@@ -232,6 +232,60 @@ describe("NetCombat event decoding", () => {
     expect(client.receiver.ackSeq).toBe(-1);
   });
 
+  it("a snapshot dropped for a missing baseline still delivers its shots, hits and reliable events", () => {
+    const { serverEnd, recorder, combat, client, w } = setup();
+    const move = createMoveState();
+    const shooter = createEntityState();
+    writeRemoteEntity(SHOOTER, SHOOTER_FEET, move, quantizeYaw(YAW), quantizePitch(PITCH), Btn.fire, shooter);
+    const victim = createEntityState();
+    writeRemoteEntity(VICTIM, VICTIM_FEET, move, 0, quantizePitch(0), 0, victim);
+    const header = (tick: number) => ({ serverTick: tick, baselineTick: null, lastProcessedInputTick: -1, clientTimeEcho: 0, serverHoldMs: 0, inputBufferDepthQ: 0, sections: 0 });
+    const state = (tick: number): Snapshot => ({ header: header(tick), owner: createOwnerBlock(), entities: [shooter, victim] });
+    const send = (snapshot: Snapshot, baseline: Snapshot | null) => {
+      w.reset();
+      encodeSnapshot(w, snapshot, baseline);
+      serverEnd.sendDatagram(w.bytes());
+    };
+    // A decoded snapshot first: the client knows where the shooter stands.
+    send(state(TICK), null);
+    expect(client.stats.decodeFailures).toBe(0);
+
+    const sender = new ReliableEventSender();
+    sender.push(writeHitConfirm(VICTIM, 1, hitZoneMaskBit("body"), 30, false, false, false, false, createReliableEventStore()));
+    const eye = { x: SHOOTER_FEET.x, y: SHOOTER_FEET.y + 1.62, z: SHOOTER_FEET.z };
+    const shot = createShotEvent();
+    writeShotEvent(SHOOTER, 0, "rifle", 9, 1, quantizeYaw(YAW), quantizePitch(PITCH), eye, shooter, shot);
+    const hit = createPlayerHitEvent();
+    writePlayerHitEvent(VICTIM, "head", false, 0, 1, hit);
+    // A shooter the client has never seen can't be placed.
+    const stranger = createShotEvent();
+    writeShotEvent(9, 0, "rifle", 1, 1, 0, quantizePitch(0), eye, shooter, stranger);
+    // Delta against a tick the client never received: the state can't be decoded, the events can.
+    send({ ...state(TICK + 1), shots: [shot, stranger], hits: [hit], reliable: [...sender.select(2000)] }, state(TICK - 4));
+    expect(client.stats.decodeFailures).toBe(1);
+    expect(client.store.newestTick).toBe(TICK);
+    expect(client.receiver.stats.delivered).toBe(1);
+    expect(recorder.confirms).toHaveLength(1);
+    expect(recorder.confirms[0]).toMatchObject({ victim: VICTIM, zone: "body", damage: 30 });
+    expect(client.stats.shotsReceived).toBe(2);
+    expect(client.stats.hitsReceived).toBe(1);
+
+    combat.update(TICK + 1);
+    expect(recorder.shots).toHaveLength(1);
+    expect(recorder.shots[0]!.shooter).toBe(SHOOTER);
+    expect(recorder.shots[0]!.shot.shotId).toBe(9);
+    expect(recorder.shots[0]!.shot.origin.x).toBeCloseTo(eye.x, 1);
+    expect(recorder.shots[0]!.shot.origin.y).toBeCloseTo(eye.y, 1);
+    expect(combat.stats.shotsDropped).toBe(1);
+    expect(recorder.hits).toHaveLength(1);
+    expect(recorder.hits[0]).toMatchObject({ victim: VICTIM, zone: "head" });
+
+    // The resend in the next (decodable) snapshot is a duplicate.
+    send({ ...state(TICK + 2), reliable: [...sender.select(2000)] }, null);
+    expect(client.receiver.stats.delivered).toBe(1);
+    expect(recorder.confirms).toHaveLength(1);
+  });
+
   it("life rules: downed clears combat input and crawls, dead freezes, alive is open", () => {
     const all = Btn.fire | Btn.aim | Btn.reload | Btn.sprint | Btn.interact;
     expect(netInputButtons(all, LifeCode.alive)).toBe(all);

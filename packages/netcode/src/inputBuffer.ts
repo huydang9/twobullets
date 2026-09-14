@@ -96,7 +96,7 @@ export class ServerInputBuffer {
   get syntheticStreak(): number {
     return this.syntheticRun;
   }
-  /** Smoothed (newest buffered tick − simulated tick); negative while inputs arrive late. */
+  /** Smoothed (newest buffered tick − simulated tick); while inputs arrive late, (newest arrived − simulated tick) ≤ 0. */
   get depthTicks(): number {
     return this.depth;
   }
@@ -115,6 +115,9 @@ export class ServerInputBuffer {
       return InsertResult.duplicate;
     }
     if (tick <= this.lastTaken || tick < serverTick) {
+      // Still an arrival for the depth: a client running behind reads as its real lateness, not as time since the last
+      // accepted input (which saturates the client's controller and winds it up).
+      if (tick > this.lastArrived) this.lastArrived = tick;
       this.stats.late++;
       return InsertResult.late;
     }

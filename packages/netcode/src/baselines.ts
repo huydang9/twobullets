@@ -93,10 +93,20 @@ export class ClientSnapshotStore {
   private readonly scratch = createSnapshotBuffer();
   private readonly lookup = (tick: number): Snapshot | null => this.ring.get(tick);
   private newest = -1;
+  private eventsOnlyValid = false;
 
   constructor(size = BASELINE_RING) {
     this.size = size;
     this.ring = new SnapshotRing(size, true);
+  }
+
+  /**
+   * After `decode` returned null for a snapshot whose event sections parsed (its baseline was gone, or the body after
+   * the events was bad): that snapshot with only `header`, `shots`, `hits` and `reliable` valid — never read its owner,
+   * weapon, vitals or entities. Null otherwise. Valid until the next `decode`.
+   */
+  get eventsOnly(): Snapshot | null {
+    return this.eventsOnlyValid ? this.scratch : null;
   }
 
   /** Newest decoded tick: the `ackSnapshotTick` of the next input packet (−1 = none). */
@@ -110,7 +120,11 @@ export class ClientSnapshotStore {
    * `referenceTick` is the client's estimate of the server tick (or the newest received) for u16 unwrap.
    */
   decode(r: BitReader, referenceTick: number): Snapshot | null {
-    if (!decodeSnapshotInto(r, referenceTick, this.lookup, this.scratch)) return null;
+    this.eventsOnlyValid = false;
+    if (!decodeSnapshotInto(r, referenceTick, this.lookup, this.scratch)) {
+      this.eventsOnlyValid = this.scratch.eventsValid && this.scratch.header.serverTick > this.newest - this.size;
+      return null;
+    }
     // A very late snapshot would evict a newer baseline sharing its ring slot.
     if (this.scratch.header.serverTick <= this.newest - this.size) return null;
     const stored = this.ring.put(this.scratch);
@@ -125,5 +139,6 @@ export class ClientSnapshotStore {
   reset(): void {
     this.ring.clear();
     this.newest = -1;
+    this.eventsOnlyValid = false;
   }
 }

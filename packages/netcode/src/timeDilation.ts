@@ -18,6 +18,8 @@ export interface TimeDilationOptions {
   readonly resyncTicks?: number;
 }
 
+const JITTER_HYSTERESIS_MS = 1.5;
+
 export class TimeDilation {
   private readonly baseTarget: number;
   private readonly gain: number;
@@ -28,6 +30,7 @@ export class TimeDilation {
   private readonly depthAlpha: number;
   private readonly resyncTicks: number;
   private target: number;
+  private jitterStep = 0;
   private depth = 0;
   private integral = 0;
   private lastMs = -1;
@@ -62,9 +65,16 @@ export class TimeDilation {
     return this.samples > 0 && Math.abs(this.depth - this.target) > this.resyncTicks;
   }
 
-  /** Target 1 tick, 2 above 8 ms upstream jitter σ, 3 above 16 ms (the client can only measure downstream σ). */
-  setJitter(jitterMs: number): void {
-    this.target = this.baseTarget + (jitterMs > 16 ? 2 : jitterMs > 8 ? 1 : 0);
+  /**
+   * Target 1 tick, 2 above 8 ms upstream jitter σ, 3 above 16 ms (the client can only measure downstream σ), plus
+   * `extraTicks` (e.g. for inputs sent in bursts by a slow or irregular frame loop).
+   */
+  setJitter(jitterMs: number, extraTicks = 0): void {
+    let step = jitterMs > 16 ? 2 : jitterMs > 8 ? 1 : 0;
+    // Hysteresis: σ hovering around a threshold (≈ 8–9 ms on a "typical" link) mustn't flip the target every second.
+    if (step < this.jitterStep && jitterMs > 8 * this.jitterStep - JITTER_HYSTERESIS_MS) step = this.jitterStep;
+    this.jitterStep = step;
+    this.target = this.baseTarget + step + extraTicks;
   }
 
   /** Feed `inputBufferDepthQ / 4` from each snapshot, with its arrival time. */
@@ -75,7 +85,9 @@ export class TimeDilation {
     if (this.lastMs >= 0) {
       const dt = Math.max(0, nowMs - this.lastMs);
       const leak = Math.exp(-dt / this.tau);
-      this.integral = this.integral * leak + e * (1 - leak);
+      // Anti-windup: the output saturates at ±maxError, so a larger error mustn't keep charging the integral.
+      const ei = e < -this.maxError ? -this.maxError : e > this.maxError ? this.maxError : e;
+      this.integral = this.integral * leak + ei * (1 - leak);
     }
     this.lastMs = nowMs;
     const u = this.kp * e + this.ki * this.integral;
