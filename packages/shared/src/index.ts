@@ -19,3 +19,5 @@ export * from "./input";
 export * from "./inputRing";
 export * from "./tickClock";
 export * from "./hitreg/index";
+export * from "./bots/types";
+export * from "./match/types";
