@@ -3,6 +3,7 @@ import { NavFlag, type NavPath, type NavQuery, type PathOptions, type PathStatus
 import { buildNavGrid } from "./buildNavGrid";
 import { navMainComponent, isValidZoneCenter } from "./helpers";
 import { NavGridData } from "./navGrid";
+import { auditBuildingLinks } from "./linkAudit";
 import { GridNavQuery, createNavQuery } from "./navQuery";
 import { deserializeNavGrid, serializeNavGrid } from "./serialize";
 import { emptyPath, testWorld } from "./testWorld";
@@ -164,6 +165,42 @@ describe("nav grid: building layers", () => {
     expect(nav.lineWalkable(P(-3.2, 0, 0), P(3.2, 0, 2))).toBe(false);
     expect(nav.lineWalkable(P(-3.2, 0, -2), P(-3.2, 0, 2))).toBe(true);
     expect(nav.lineWalkable(P(0, -0.1, 10), P(0, -0.1, 3))).toBe(false);
+    // The room straight above or below is not a straight walk (stairs are the way).
+    expect(nav.lineWalkable(P(-3.2, 0, -2), P(-3.2, 3, 2))).toBe(false);
+    expect(nav.lineWalkable(P(-3.2, 3, -2), P(-3.2, 0, 2))).toBe(false);
+    expect(nav.lineWalkable(P(-3.2, 3, -2), P(-3.2, 3, 2))).toBe(true);
+    // Up the flight itself is a straight walk on the stairs layer.
+    expect(nav.lineWalkable(P(0.88, 0, 1.4), P(0.88, 2.7, -1.35))).toBe(true);
+  });
+
+  it("sweeps every building-to-terrain link with the controller capsule clear of walls and frames", () => {
+    const buildings = [
+      { id: "house", prefab: "house_two_story", position: [-15, 0, -15], yaw: 0 },
+      { id: "container", prefab: "container_open_blue", position: [15, 0, -15], yaw: 0.3 },
+      { id: "radar", prefab: "radar_station", position: [-15, 0, 15], yaw: -0.7 },
+      { id: "ruin", prefab: "house_small_ruined", position: [15, 0, 15], yaw: 0.4 },
+      { id: "booth", prefab: "guard_booth", position: [0, 0, 0], yaw: 1.2 },
+    ] as const;
+    const world = buildNavGrid(testWorld({ height: () => -0.1, buildings }));
+    expect(auditBuildingLinks(world)).toEqual([]);
+    const q = createNavQuery(world);
+    const o = P(0, 0, 0);
+    const outside = q.nearest(P(0, -0.1, -25), 1, o);
+    for (const b of buildings) {
+      const inside = q.nearest(P(b.position[0], 0.15, b.position[2]), 2, o);
+      expect(q.reachable(outside, inside), b.id).toBe(true);
+    }
+    // The old probe stepped over the container's 5 cm skin: its links now all leave through the open end (local +Z).
+    const d = world;
+    const c = d.placements.find((p) => p.id === "container")!;
+    for (let i = 0; i < d.arrays.linkFrom.length; i++) {
+      const from = d.arrays.linkFrom[i]!;
+      if (from < d.terrainNodes || d.spanPlacement[from - d.terrainNodes] !== d.placements.indexOf(c)) continue;
+      const to = d.arrays.linkTo[i]!;
+      const dx = d.nodeX(to) - c.x;
+      const dz = d.nodeZ(to) - c.z;
+      expect(dx * c.sin + dz * c.cos).toBeGreaterThan(3);
+    }
   });
 
   it("flags crouch passages and routes around them when crouching is not allowed", () => {

@@ -45,6 +45,8 @@ const CLOSED = -2;
 const INF = 3.4e38;
 const OCTILE = Math.SQRT2 - 1;
 const TIE_BREAK = 1 - 1e-4;
+/** lineWalkable's end must be within this height of the target point, m (rejects the room right above or below). */
+const LINE_FLOOR_TOLERANCE = 1;
 /** Unit directions for sampleRing (deterministic sin/cos, no per-call math). */
 const RING_DIRECTIONS = 256;
 const RING_SIN = new Float64Array(RING_DIRECTIONS);
@@ -300,7 +302,8 @@ export class GridNavQuery implements NavQuery {
     const d = this.data;
     const ref = this.nearestRef(from.x, from.y, from.z, 1.5);
     if (ref < 0) return false;
-    if (ref < d.terrainNodes) return this.terrainLine(from.x, from.z, to.x, to.z);
+    // The line must end on the target's floor: same layer, height within LINE_FLOOR_TOLERANCE.
+    if (ref < d.terrainNodes) return this.terrainLine(from.x, from.z, to.x, to.z) && Math.abs(d.terrainHeight(to.x, to.z) - to.y) <= LINE_FLOOR_TOLERANCE;
     const g = ref - d.terrainNodes;
     const p = d.placements[d.spanPlacement[g]!]!;
     const layer = d.layers[p.layer]!;
@@ -308,7 +311,8 @@ export class GridNavQuery implements NavQuery {
     const az = (from.x - p.x) * p.sin + (from.z - p.z) * p.cos;
     const bx = (to.x - p.x) * p.cos - (to.z - p.z) * p.sin;
     const bz = (to.x - p.x) * p.sin + (to.z - p.z) * p.cos;
-    return this.spanLine(layer, p.base, g - p.base, ax, az, bx, bz, -1, true);
+    if (!this.spanLine(layer, p.base, g - p.base, ax, az, bx, bz, -1, true)) return false;
+    return Math.abs(p.y + layer.spanY[this.lineSpan]! - to.y) <= LINE_FLOOR_TOLERANCE;
   }
 
   sampleRing(center: Vec3, minRadius: number, maxRadius: number, seed: number, out: Float32Array, max: number): number {

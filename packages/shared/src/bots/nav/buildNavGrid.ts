@@ -19,7 +19,8 @@ import {
   type NavPlacement,
   type NavPrefabLayer,
 } from "./navGrid";
-import { buildPrefabLayer, type PartBuckets } from "./prefabLayer";
+import { buildPrefabLayer, sweepBlocks, type PartBuckets } from "./prefabLayer";
+import { MOVEMENT } from "../../constants";
 
 // buildNavGrid (docs/bots/design.md §3.2): terrain layer 0.5 m, per-prefab building span layers 0.25 m, links between
 // them, connected components with small islands cleared, and the 4 m coarse guide grid. Pure and deterministic.
@@ -36,6 +37,8 @@ export const NAV_DEFAULTS = {
   propStepHeight: 0.26,
   /** How far a building edge span looks outward for terrain to link to, m. */
   linkReach: 1.5,
+  /** Links are swept with the full controller capsule radius, so a link never grazes a door frame or wall. */
+  linkRadius: MOVEMENT.capsuleRadius,
 } as const;
 
 /** Temporary terrain flag bits during the build (cleared before the grid is returned). */
@@ -408,6 +411,7 @@ export function buildNavGrid(input: NavBuildInput): NavGridData {
       const wx0 = p.x + lx0 * p.cos + lz0 * p.sin;
       const wz0 = p.z - lx0 * p.sin + lz0 * p.cos;
       if (wy - grid.terrainHeight(wx0, wz0) > NAV_DEFAULTS.linkReach + NAV_STEP_HEIGHT) continue;
+      const headroom = t + ((spanFlags[g]! & NavFlag.crouchOnly) !== 0 ? CROUCH_CLEARANCE : STAND_CLEARANCE);
       for (const [ddx, ddz] of ORTHO) {
         const ncx = cx + ddx;
         const ncz = cz + ddz;
@@ -415,7 +419,6 @@ export function buildNavGrid(input: NavBuildInput): NavGridData {
         for (let d = bcs; d <= NAV_DEFAULTS.linkReach + 1e-6; d += bcs) {
           const lx = lx0 + ddx * d;
           const lz = lz0 + ddz * d;
-          if (bk.blocks(lx, lz, 0.05, t + NAV_STEP_HEIGHT, t + CROUCH_CLEARANCE)) break;
           const wx = p.x + lx * p.cos + lz * p.sin;
           const wz = p.z - lx * p.sin + lz * p.cos;
           const cell = grid.cellAt(wx, wz);
@@ -427,6 +430,10 @@ export function buildNavGrid(input: NavBuildInput): NavGridData {
           const cellZ = grid.nodeZ(cell);
           const hc = grid.terrainHeight(cellX, cellZ);
           if (Math.abs(hc - wy) > NAV_STEP_HEIGHT + 0.05) break;
+          // Sweep the capsule from the span center to the terrain cell center in prefab-local space.
+          const ex = cellX - p.x;
+          const ez = cellZ - p.z;
+          if (sweepBlocks(bk.parts, lx0, lz0, ex * p.cos - ez * p.sin, ex * p.sin + ez * p.cos, NAV_DEFAULTS.linkRadius, t + NAV_STEP_HEIGHT, headroom)) break;
           const cost = Math.sqrt((cellX - wx0) * (cellX - wx0) + (cellZ - wz0) * (cellZ - wz0) + (hc - wy) * (hc - wy));
           linkPairs.push(cell, T + g, cost);
           break;

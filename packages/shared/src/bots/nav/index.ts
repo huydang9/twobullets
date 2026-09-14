@@ -5,3 +5,4 @@ export { NAV_GRID_VERSION, NavGridData, asNavGridData, type NavBuildStats, type 
 export { deserializeNavGrid, serializeNavGrid } from "./serialize";
 export { isValidZoneCenter, navMainComponent, navStats } from "./helpers";
 export { mapNavProbes, resolveProbes, type NavProbe, type NavProbeKind, type ProbeResult } from "./mapProbes";
+export { auditBuildingLinks, type LinkViolation } from "./linkAudit";

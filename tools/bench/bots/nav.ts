@@ -68,6 +68,10 @@ for (const layer of data.layers) {
   log(`  ${layer.prefab.padEnd(20)} ${layer.cols}×${layer.rows} cols, spans ${layer.spanY.length}, crouch ${crouch}, stairs ${stairs}, door ${door}`);
 }
 
+const { auditBuildingLinks } = await import("../../../packages/shared/src/bots/nav/linkAudit.ts");
+const violations = auditBuildingLinks(grid);
+log(`link audit (controller capsule sweep): ${violations.length} links through walls${violations.length ? `: ${JSON.stringify(violations.slice(0, 5))}` : ""}`);
+
 // Probes.
 const probes = nav.mapNavProbes(MAP_V1, terrain, layout);
 const scratch = { x: 0, y: 0, z: 0 };

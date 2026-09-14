@@ -122,6 +122,52 @@ export class PartBuckets {
   }
 }
 
+/**
+ * True when a square capsule of half-width `r` swept along the segment (ax, az) → (bx, bz) overlaps a part in the
+ * height band (y0, y1), start and end included. Exact for boxes (segment against the part rect grown by `r`); wedges use
+ * their highest point over the swept rect.
+ */
+export function sweepBlocks(parts: readonly NavPart[], ax: number, az: number, bx: number, bz: number, r: number, y0: number, y1: number): boolean {
+  const minX = (ax < bx ? ax : bx) - r;
+  const maxX = (ax > bx ? ax : bx) + r;
+  const minZ = (az < bz ? az : bz) - r;
+  const maxZ = (az > bz ? az : bz) + r;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    if (p.minX >= maxX - EPS || p.maxX <= minX + EPS || p.minZ >= maxZ - EPS || p.maxZ <= minZ + EPS) continue;
+    if (p.minY >= y1 - EPS) continue;
+    const top = p.wedge ? wedgeMaxInRect(p, minX, maxX, minZ, maxZ) : p.maxY;
+    if (top <= y0 + EPS) continue;
+    if (segmentHitsRect(ax, az, bx, bz, p.minX - r + EPS, p.minZ - r + EPS, p.maxX + r - EPS, p.maxZ + r - EPS)) return true;
+  }
+  return false;
+}
+
+/** Segment against an open rect (slab clipping). */
+function segmentHitsRect(ax: number, az: number, bx: number, bz: number, x0: number, z0: number, x1: number, z1: number): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dz = bz - az;
+  if (Math.abs(dx) < 1e-12) {
+    if (ax <= x0 || ax >= x1) return false;
+  } else {
+    let a = (x0 - ax) / dx;
+    let b = (x1 - ax) / dx;
+    if (a > b) [a, b] = [b, a];
+    if (a > t0) t0 = a;
+    if (b < t1) t1 = b;
+    if (t0 >= t1) return false;
+  }
+  if (Math.abs(dz) < 1e-12) return az > z0 && az < z1;
+  let a = (z0 - az) / dz;
+  let b = (z1 - az) / dz;
+  if (a > b) [a, b] = [b, a];
+  if (a > t0) t0 = a;
+  if (b < t1) t1 = b;
+  return t0 < t1;
+}
+
 export function partTopAt(p: NavPart, x: number, z: number): number {
   if (!p.wedge) return p.maxY;
   const y = (p.w - p.nx * x - p.nz * z) / p.ny;

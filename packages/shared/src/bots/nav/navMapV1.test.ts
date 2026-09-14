@@ -5,6 +5,7 @@ import { buildTerrain } from "../../map/terrain/terrain";
 import { NavFlag, type NavPath, type PathStatus } from "../types";
 import { buildNavGrid } from "./buildNavGrid";
 import { isValidZoneCenter } from "./helpers";
+import { auditBuildingLinks } from "./linkAudit";
 import { mapNavProbes, resolveProbes, type NavProbe } from "./mapProbes";
 import { createNavQuery } from "./navQuery";
 import { deserializeNavGrid, serializeNavGrid } from "./serialize";
@@ -14,7 +15,7 @@ import { emptyPath } from "./testWorld";
  * Recorded Map v1 nav checksum (like MAP_V1_BAKE): a layout, prefab or nav build change fails here. Rerun
  * `node tools/bench/bots/nav.ts` and update after intentional changes.
  */
-const MAP_V1_NAV_CHECKSUM = "34f6ddee";
+const MAP_V1_NAV_CHECKSUM = "21e550b3";
 
 /** Known unreachable areas, by probe name prefix (none since the radar station's stair got its bottom step). */
 const KNOWN_GAPS: readonly string[] = [];
@@ -87,6 +88,49 @@ describe("Map v1 navigation", () => {
       }
       expect(top, r.probe.name).toBeGreaterThan(r.probe.y - 0.35);
       expect(flags & NavFlag.stairs, r.probe.name).toBe(NavFlag.stairs);
+    }
+  });
+
+  it("never links a building interior to the terrain through a wall (controller capsule sweep)", () => {
+    expect(auditBuildingLinks(grid)).toEqual([]);
+    // Every building with a walkable interior keeps at least one link (closed containers have none).
+    const linked = new Set<number>();
+    for (let i = 0; i < grid.arrays.linkFrom.length; i++) {
+      const from = grid.arrays.linkFrom[i]!;
+      if (from >= grid.terrainNodes) linked.add(grid.spanPlacement[from - grid.terrainNodes]!);
+    }
+    const unlinked = grid.placements.filter((p, i) => !linked.has(i)).map((p) => layout.buildings.find((b) => b.id === p.id)!.prefab);
+    expect(new Set(unlinked)).toEqual(new Set(["container_closed"]));
+  });
+
+  it("climbs the town-house stairs straight to the right floor, without back-and-forth", () => {
+    for (const id of ["town_house_ne2", "town_house_s_east"]) {
+      const p = grid.placements.find((b) => b.id === id)!;
+      const at = (lx: number, ly: number, lz: number) => ({ x: p.x + lx * p.cos + lz * p.sin, y: p.y + ly, z: p.z - lx * p.sin + lz * p.cos });
+      const outside = at(0, -0.1, 9);
+      const cases = [
+        { from: outside, to: at(-3.2, 3, 0), floor: 3 },
+        { from: at(3.2, 3, 0), to: outside, floor: -0.1 },
+        { from: at(1, 1.5, -0.1), to: at(-3.2, 3, 0), floor: 3 },
+        { from: at(1, 1.5, -0.1), to: at(3.2, 0, 2), floor: 0 },
+        { from: at(1, 2.7, -1.3), to: at(3.2, 3, 0), floor: 3 },
+      ];
+      for (const c of cases) {
+        const probe = (v: { x: number; y: number; z: number }): NavProbe => ({ name: id, kind: "room", ...v, maxDistance: 1, upper: false });
+        expect(run(probe(c.from), probe(c.to)), `${id} ${JSON.stringify(c)}`).toBe("found");
+        const up = c.to.y > c.from.y;
+        let stairLegs = 0;
+        for (let i = 1; i < path.count; i++) {
+          const dy = path.points[i * 3 + 1]! - path.points[(i - 1) * 3 + 1]!;
+          expect(up ? dy : -dy, `${id} waypoint ${i}`).toBeGreaterThan(-0.2);
+          if ((path.flags[i]! & path.flags[i - 1]! & NavFlag.stairs) !== 0) stairLegs++;
+        }
+        expect(stairLegs, id).toBeLessThanOrEqual(1);
+        expect(Math.abs(path.points[(path.count - 1) * 3 + 1]! - p.y - c.floor), id).toBeLessThan(0.15);
+      }
+      // A straight walk never joins the floor above or below.
+      expect(nav.lineWalkable(at(-0.4, 0, -2), at(-0.4, 3, -2))).toBe(false);
+      expect(nav.lineWalkable(at(-0.4, 3, -2), at(-0.4, 0, -2))).toBe(false);
     }
   });
 
