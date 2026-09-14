@@ -16,3 +16,4 @@ export * from "./map/mapV1";
 export * from "./map/layout/index";
 export * from "./map/buildings/index";
 export * from "./map/buildings/babylon/index";
+export * from "./equipment/index";

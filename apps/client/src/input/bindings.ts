@@ -19,6 +19,18 @@ export const KEY_BINDINGS = {
   slot2: ["Digit2"],
   slot3: ["Digit3"],
   slot4: ["Digit4"],
+  // Equipment (docs/equipment/design.md §8). R doubles as "cook" while a grenade's pin is pulled.
+  throwable: ["Digit5"],
+  cycleThrowable: ["KeyG"],
+  /** Tap: pick up / interact. Hold: revive a downed teammate. */
+  interact: ["KeyF"],
+  inventory: ["Tab"],
+  holster: ["KeyX"],
+  useBandage: ["Digit7"],
+  useFirstAid: ["Digit8"],
+  useMedkit: ["Digit9"],
+  /** Energy drink, falling back to a painkiller. */
+  useBoost: ["Digit0"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type Action = keyof typeof KEY_BINDINGS;
