@@ -1,10 +1,11 @@
 import { prepareAnimation, replay, setText } from "../anim";
-import { el, textNode } from "../dom";
+import { t, type MessageKey } from "../../i18n";
+import { el, elT, textNode } from "../dom";
 
 export interface DeathRecapInfo {
-  /** "Explosion", "Burned", "Fall damage"… */
+  /** "Vụ nổ", "Bị thiêu cháy", "Rơi từ trên cao"… */
   readonly cause: string;
-  /** "Yourself", "Soldier 3", or null for the world. */
+  /** "Chính bạn", "Lính 3", or null for the world. */
   readonly killer: string | null;
   readonly weapon: string | null;
   /** Killer or blast distance, m. */
@@ -37,18 +38,18 @@ export class DeathRecap {
 
   constructor(parent: HTMLElement) {
     this.root = el("div", "tb-death", undefined, parent);
-    el("div", "tb-death__title", "ELIMINATED", this.root);
+    elT("div", "tb-death__title", "recap.title", this.root);
     this.cause = textNode(el("div", "tb-death__cause", undefined, this.root));
     const stats = el("div", "tb-death__stats", undefined, this.root);
-    const row = (label: string): [HTMLDivElement, Text] => {
+    const row = (label: MessageKey): [HTMLDivElement, Text] => {
       const node = el("div", "tb-death__row", undefined, stats);
-      el("span", "tb-death__label", label, node);
+      elT("span", "tb-death__label", label, node);
       return [node, textNode(el("span", "tb-death__value", undefined, node))];
     };
-    const [killerRow, killer] = row("Killed by");
-    const [weaponRow, weapon] = row("Weapon");
-    const [distanceRow, distance] = row("Distance");
-    this.damage = row("Damage taken")[1];
+    const [killerRow, killer] = row("recap.killedBy");
+    const [weaponRow, weapon] = row("recap.weapon");
+    const [distanceRow, distance] = row("recap.distance");
+    this.damage = row("recap.damageTaken")[1];
     this.killer = killer;
     this.weapon = weapon;
     this.distance = distance;
@@ -70,8 +71,8 @@ export class DeathRecap {
     this.rows.weapon.hidden = info.weapon === null;
     setText(this.weapon, info.weapon ?? "");
     this.rows.distance.hidden = info.distance === null;
-    setText(this.distance, info.distance === null ? "" : `${Math.round(info.distance)} m`);
-    setText(this.damage, `${Math.round(info.damageTaken)} (${info.hits} ${info.hits === 1 ? "hit" : "hits"})`);
+    setText(this.distance, info.distance === null ? "" : t("common.meters", { m: Math.round(info.distance) }));
+    setText(this.damage, t("recap.damageValue", { damage: Math.round(info.damageTaken), count: info.hits }));
     this.respawnAt = info.respawnAt;
     this.respawnRow.hidden = info.respawnAt === null;
     this.shownSeconds = -1;
@@ -89,6 +90,6 @@ export class DeathRecap {
     const seconds = Math.max(0, Math.ceil((this.respawnAt - now) / 1000));
     if (seconds === this.shownSeconds) return;
     this.shownSeconds = seconds;
-    setText(this.respawn, `RESPAWNING IN ${seconds}`);
+    setText(this.respawn, t("recap.respawnIn", { seconds }));
   }
 }

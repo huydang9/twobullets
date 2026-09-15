@@ -1,5 +1,6 @@
+import { getLanguage, renderTemplate, t } from "../i18n";
 import { prepareAnimation, replay, setText } from "./anim";
-import { el, textNode } from "./dom";
+import { el, elT, textNode } from "./dom";
 import { targetName } from "./format";
 
 const SHOW_KEYFRAMES: Keyframe[] = [
@@ -16,9 +17,11 @@ export interface KillInfo {
   readonly distance: number;
 }
 
-/** Brief centre-bottom "YOU KILLED DUMMY" line with weapon / distance / kill count; one element replayed per kill. */
+/** Brief centre-bottom "BẠN ĐÃ HẠ GỤC DUMMY" line with weapon / distance / kill count; one element replayed per kill. */
 export class KillNotice {
   private readonly card: HTMLDivElement;
+  private readonly title: HTMLDivElement;
+  private readonly nameNode: HTMLSpanElement;
   private readonly name: Text;
   private readonly weapon: Text;
   private readonly distance: Text;
@@ -29,25 +32,33 @@ export class KillNotice {
   constructor(parent: HTMLElement) {
     const root = el("div", "tb-killnotice", undefined, parent);
     this.card = el("div", "tb-killnotice__card", undefined, root);
-    const title = el("div", "tb-killnotice__title", "YOU KILLED ", this.card);
-    this.name = textNode(el("span", "tb-killnotice__name", undefined, title));
+    this.title = el("div", "tb-killnotice__title", undefined, this.card);
+    this.nameNode = el("span", "tb-killnotice__name");
+    this.name = textNode(this.nameNode);
 
     const meta = el("div", "tb-killnotice__meta", undefined, this.card);
-    el("span", "tb-killnotice__headshot", "HEADSHOT", meta);
+    elT("span", "tb-killnotice__headshot", "killNotice.headshot", meta);
     this.weapon = textNode(el("span", "tb-killnotice__weapon", undefined, meta));
     this.distance = textNode(el("span", "tb-killnotice__distance", undefined, meta));
     this.count = textNode(el("span", "tb-killnotice__count", undefined, meta));
 
     this.show = prepareAnimation(this.card, SHOW_KEYFRAMES, { duration: 2600 });
+    this.resetText();
+  }
+
+  /** Lays the title out for the current language (the name node is kept). */
+  resetText(): void {
+    renderTemplate(this.title, t("killNotice.youKilled"), { name: this.nameNode });
   }
 
   notify(kill: KillInfo): void {
     this.kills++;
+    const locale = getLanguage();
     this.card.toggleAttribute("data-headshot", kill.headshot);
-    setText(this.name, targetName(kill.targetId).toUpperCase());
-    setText(this.weapon, kill.weaponName.toUpperCase());
-    setText(this.distance, `${Math.round(kill.distance)} M`);
-    setText(this.count, this.kills === 1 ? "1 KILL" : `${this.kills} KILLS`);
+    setText(this.name, targetName(kill.targetId).toLocaleUpperCase(locale));
+    setText(this.weapon, kill.weaponName.toLocaleUpperCase(locale));
+    setText(this.distance, t("killNotice.distance", { m: Math.round(kill.distance) }));
+    setText(this.count, t("killNotice.kills", { count: this.kills }));
     replay(this.show);
   }
 }

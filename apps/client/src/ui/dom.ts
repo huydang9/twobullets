@@ -1,3 +1,5 @@
+import { bindText, type MessageKey, type MessageParams } from "../i18n";
+
 /** Tiny DOM helper: creates an element with a class and optional text. */
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -10,6 +12,17 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (text !== undefined) node.textContent = text;
   parent?.appendChild(node);
   return node;
+}
+
+/** Like {@link el}, with a translated label that follows language switches. */
+export function elT<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className: string,
+  key: MessageKey,
+  parent?: HTMLElement,
+  params?: MessageParams,
+): HTMLElementTagNameMap[K] {
+  return bindText(el(tag, className, undefined, parent), key, params);
 }
 
 /** Appends an empty text node to `parent` and returns it, for cheap `data` updates. */

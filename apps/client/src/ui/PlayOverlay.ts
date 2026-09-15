@@ -1,31 +1,34 @@
-import { el } from "./dom";
+import { bindText, getLanguage, LANGUAGES, onLanguageChange, setLanguage, t, unbindText, type Language, type MessageKey } from "../i18n";
+import { el, elT } from "./dom";
 
-type ControlRow = readonly [keys: readonly string[], action: string];
+/** A key cap: printed as is ("W", "Esc") or a translated word ({ t: "key.mouse" }). */
+type KeyCap = string | { readonly t: MessageKey };
+type ControlRow = readonly [keys: readonly KeyCap[], action: MessageKey];
 
 const CONTROLS: readonly ControlRow[] = [
-  [["W", "A", "S", "D"], "Move"],
-  [["Mouse"], "Look"],
-  [["Space"], "Jump"],
-  [["Shift"], "Sprint"],
-  [["C"], "Crouch"],
-  [["LMB"], "Fire"],
-  [["RMB"], "Aim"],
-  [["R"], "Reload"],
-  [["1–3", "Wheel"], "Switch weapon"],
-  [["5", "G"], "Throwable · cycle"],
-  [["R"], "Cook frag (pin pulled)"],
-  [["F"], "Pick up · revive"],
-  [["7", "8", "9", "0"], "Heal · boost"],
+  [["W", "A", "S", "D"], "controls.move"],
+  [[{ t: "key.mouse" }], "controls.look"],
+  [["Space"], "controls.jump"],
+  [["Shift"], "controls.sprint"],
+  [["C"], "controls.crouch"],
+  [[{ t: "key.lmb" }], "controls.fire"],
+  [[{ t: "key.rmb" }], "controls.aim"],
+  [["R"], "controls.reload"],
+  [["1–3", { t: "key.wheel" }], "controls.switchWeapon"],
+  [["5", "G"], "controls.throwable"],
+  [["R"], "controls.cook"],
+  [["F"], "controls.interact"],
+  [["7", "8", "9", "0"], "controls.heal"],
 ];
 
 const SYSTEM_CONTROLS: readonly ControlRow[] = [
-  [["Esc"], "Release mouse"],
-  [["F3"], "Debug stats"],
-  [["F8"], "Physics debug"],
-  [["F9"], "Inspector"],
+  [["Esc"], "controls.releaseMouse"],
+  [["F3"], "controls.debugStats"],
+  [["F8"], "controls.physicsDebug"],
+  [["F9"], "controls.inspector"],
 ];
 
-const CREDITS_PLACEHOLDER = "No third-party asset credits yet.";
+const LANGUAGE_SHORT: Readonly<Record<Language, string>> = { vi: "VI", en: "EN" };
 
 /** One labelled radio row of the match setup; `labels[i]` is shown for `options[i]` (default: the value). */
 export interface MatchSetupChoice {
@@ -36,16 +39,21 @@ export interface MatchSetupChoice {
   onChange(value: string): void;
 }
 
-/** Offline bot match setup shown above "click to play" (`?bots=1`). */
+/**
+ * Offline bot match setup shown above "click to play" (`?bots=1`). Labels arrive translated; the owner calls
+ * `setMatchSetup` again after a language switch.
+ */
 export interface MatchSetup {
   readonly difficulties: readonly string[];
+  /** Shown for `difficulties[i]` (default: the value). */
+  readonly difficultyLabels?: readonly string[];
   readonly difficulty: string;
   onDifficulty(difficulty: string): void;
-  /** Heading of the difficulty row (default "Bot difficulty"). */
+  /** Heading of the difficulty row (default "Độ khó bot"). */
   readonly difficultyLabel?: string;
   /** More rows under the difficulty (match size, team mode). */
   readonly choices?: readonly MatchSetupChoice[];
-  /** Replaces "CLICK TO PLAY". */
+  /** Replaces "NHẤP ĐỂ CHƠI". */
   readonly playLabel?: string;
   /** Small line under the picker ("Map v1 · 5 teams × 2 · seed 1234"). */
   readonly details?: string;
@@ -63,19 +71,21 @@ export class PlayOverlay {
   private readonly creditsToggle: HTMLButtonElement;
   private readonly creditsSection: HTMLDivElement;
   private readonly creditsList: HTMLUListElement;
+  private readonly languageButtons: HTMLButtonElement[] = [];
   private locked = false;
   private hintTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(parent: HTMLElement, onPlayClick: () => void) {
     this.node = el("div", "tb-overlay", undefined, parent);
     const panel = el("div", "tb-overlay__panel", undefined, this.node);
+    this.languageSwitch(panel);
 
     const header = el("header", "tb-title", undefined, panel);
     el("h1", "tb-title__name", "TWOBULLETS", header);
-    el("div", "tb-title__tagline", "Prototype · Battle Royale", header);
+    elT("div", "tb-title__tagline", "overlay.tagline", header);
 
-    this.play = el("div", "tb-play", "CLICK TO PLAY", panel);
-    this.hint = el("div", "tb-hint", "Mouse lock was blocked. Wait a moment, then click again.", panel);
+    this.play = elT("div", "tb-play", "overlay.clickToPlay", panel);
+    this.hint = elT("div", "tb-hint", "overlay.lockBlocked", panel);
     this.hint.hidden = true;
 
     const controls = el("div", "tb-controls", undefined, panel);
@@ -85,7 +95,7 @@ export class PlayOverlay {
     // Clicks inside the credits area must not start the game.
     const credits = el("div", "tb-credits", undefined, panel);
     credits.addEventListener("click", (event) => event.stopPropagation());
-    this.creditsToggle = el("button", "tb-credits__toggle", "Credits", credits);
+    this.creditsToggle = elT("button", "tb-credits__toggle", "overlay.credits", credits);
     this.creditsToggle.type = "button";
     this.creditsToggle.setAttribute("aria-expanded", "false");
     this.creditsSection = el("div", "tb-credits__section", undefined, credits);
@@ -114,6 +124,7 @@ export class PlayOverlay {
     this.hideHint();
     // A focused button would swallow Space (jump) once the game has the mouse.
     this.creditsToggle.blur();
+    for (const button of this.languageButtons) button.blur();
   }
 
   set visible(visible: boolean) {
@@ -125,11 +136,18 @@ export class PlayOverlay {
   setMatchSetup(setup: MatchSetup | null): void {
     this.matchSetup?.remove();
     this.matchSetup = null;
-    this.play.textContent = setup?.playLabel ?? "CLICK TO PLAY";
+    if (setup?.playLabel !== undefined) unbindText(this.play, setup.playLabel);
+    else bindText(this.play, "overlay.clickToPlay");
     if (!setup) return;
     const root = el("div", "tb-matchsetup", undefined);
     root.addEventListener("click", (event) => event.stopPropagation());
-    radioRow(root, { label: setup.difficultyLabel ?? "Bot difficulty", options: setup.difficulties, value: setup.difficulty, onChange: (value) => setup.onDifficulty(value) });
+    radioRow(root, {
+      label: setup.difficultyLabel ?? t("setup.difficulty"),
+      options: setup.difficulties,
+      ...(setup.difficultyLabels ? { labels: setup.difficultyLabels } : {}),
+      value: setup.difficulty,
+      onChange: (value) => setup.onDifficulty(value),
+    });
     for (const choice of setup.choices ?? []) radioRow(root, choice);
     if (setup.details) el("div", "tb-matchsetup__details", setup.details, root);
     this.play.before(root);
@@ -138,10 +156,38 @@ export class PlayOverlay {
 
   /** Replaces the attribution lines (plain text). Rare, so the list is simply rebuilt. */
   setCredits(lines: readonly string[]): void {
-    const items = lines.length > 0 ? lines : [CREDITS_PLACEHOLDER];
     this.creditsList.replaceChildren();
-    for (const line of items) el("li", "tb-credits__line", line, this.creditsList);
+    if (lines.length === 0) elT("li", "tb-credits__line", "overlay.creditsEmpty", this.creditsList);
+    for (const line of lines) el("li", "tb-credits__line", line, this.creditsList);
     this.creditsList.toggleAttribute("data-empty", lines.length === 0);
+  }
+
+  /** VI | EN switch in the panel corner; applies at once (bound labels re-translate, owners of dynamic text rebuild). */
+  private languageSwitch(panel: HTMLElement): void {
+    const group = el("div", "tb-lang", undefined, panel);
+    group.setAttribute("role", "radiogroup");
+    group.addEventListener("click", (event) => event.stopPropagation());
+    const sync = (language: Language): void => {
+      group.setAttribute("aria-label", t("common.language"));
+      LANGUAGES.forEach((code, i) => {
+        const button = this.languageButtons[i]!;
+        button.setAttribute("aria-checked", String(code === language));
+        button.title = t(`common.languageName.${code}`);
+      });
+    };
+    for (const code of LANGUAGES) {
+      const button = el("button", "tb-lang__option", LANGUAGE_SHORT[code], group);
+      button.type = "button";
+      button.lang = code;
+      button.setAttribute("role", "radio");
+      button.addEventListener("click", () => {
+        button.blur();
+        setLanguage(code);
+      });
+      this.languageButtons.push(button);
+    }
+    sync(getLanguage());
+    onLanguageChange(sync);
   }
 
   private hideHint(): void {
@@ -174,7 +220,10 @@ function controlList(list: HTMLUListElement, rows: readonly ControlRow[]): void 
   for (const [keys, action] of rows) {
     const row = el("li", "tb-controls__row", undefined, list);
     const keyCell = el("span", "tb-controls__keys", undefined, row);
-    for (const key of keys) el("kbd", "tb-key", key, keyCell);
-    el("span", "tb-controls__action", action, row);
+    for (const key of keys) {
+      if (typeof key === "string") el("kbd", "tb-key", key, keyCell);
+      else elT("kbd", "tb-key", key.t, keyCell);
+    }
+    elT("span", "tb-controls__action", action, row);
   }
 }

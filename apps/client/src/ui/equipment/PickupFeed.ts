@@ -24,7 +24,7 @@ interface FeedLine {
   bornAt: number;
 }
 
-/** Right-side pickup feed ("+ 60 5.56mm", "+ Bandage ×5"). Fixed pool; the newest line goes to the bottom. */
+/** Right-side pickup feed ("+ 60 5.56mm", "+ Băng gạc ×5"). Fixed pool; the newest line goes to the bottom. */
 export class PickupFeed {
   private readonly root: HTMLDivElement;
   private readonly lines: FeedLine[] = [];

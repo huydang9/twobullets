@@ -1,6 +1,6 @@
 import { VITALS } from "@twobullets/shared";
 import { clamp01, prepareAnimation, replay, setText } from "./anim";
-import { el, textNode } from "./dom";
+import { el, elT, textNode } from "./dom";
 
 type HealthTier = "ok" | "low" | "critical";
 
@@ -40,7 +40,7 @@ export class HealthPanel {
   /** @param vignetteParent full-screen layer that receives the hurt flash and low-health vignette. */
   constructor(parent: HTMLElement, vignetteParent: HTMLElement) {
     this.root = el("div", "tb-health", undefined, parent);
-    el("div", "tb-health__knocked", "KNOCKED", this.root);
+    elT("div", "tb-health__knocked", "hud.knocked", this.root);
 
     // Segment widths follow the tiers (0–20, 20–60, 60–90, 90–100), so a segment filling up is a tier reached.
     this.boost = el("div", "tb-boost", undefined, this.root);

@@ -1,7 +1,7 @@
 import { getWeaponDef, type ThrowableKind, type WeaponId, type WeaponState } from "@twobullets/shared";
 import { prepareAnimation, replay, setText } from "./anim";
 import { el, textNode } from "./dom";
-import { THROWABLE_SHORT } from "./equipment/labels";
+import { throwableShort } from "./equipment/labels";
 
 interface SlotView {
   readonly node: HTMLDivElement;
@@ -78,9 +78,14 @@ export class WeaponSlots {
     this.throwableShown = key;
     this.throwable.hidden = kind === null;
     if (kind === null) return;
-    setText(this.throwableName, THROWABLE_SHORT[kind]);
+    setText(this.throwableName, throwableShort(kind));
     setText(this.throwableCount, count > 1 ? ` ×${count}` : "");
     this.cycleHint.hidden = kinds < 2;
+  }
+
+  /** The language changed: rewrite the throwable name on the next update. */
+  resetText(): void {
+    this.throwableShown = "";
   }
 
   /** G cycled the selection. */

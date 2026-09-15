@@ -1,6 +1,7 @@
-import { killFeedLine, type MatchEvent } from "@twobullets/shared";
+import type { MatchEvent } from "@twobullets/shared";
 import { prepareAnimation, replay, setText } from "../anim";
 import { el, textNode } from "../dom";
+import { killFeedText } from "./strings";
 
 const POOL_SIZE = 6;
 const LINE_MS = 7000;
@@ -41,7 +42,7 @@ export class MatchFeed {
 
   /** Adds the event's line, if it has one. `team(slot)` resolves teams for highlighting; `viewerTeam` may be null. */
   push(event: MatchEvent, nameOf: (slot: number) => string, team: (slot: number) => number, viewerTeam: number | null, now: number): void {
-    const text = killFeedLine(event, nameOf);
+    const text = killFeedText(event, nameOf);
     if (text === null) return;
     const line = this.acquire();
     setText(line.text, text);

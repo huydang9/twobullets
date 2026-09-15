@@ -1,7 +1,7 @@
 import type { FireMode, WeaponDef, WeaponPhase, WeaponSlotState } from "@twobullets/shared";
 import { prepareAnimation, replay, setText } from "./anim";
-import { el, textNode } from "./dom";
-import { FIRE_MODE_LABEL } from "./format";
+import { el, elT, textNode } from "./dom";
+import { fireModeLabel } from "./format";
 
 /** Magazine at or below this fraction counts as low (amber count + reload hint). */
 const LOW_AMMO_FRACTION = 0.25;
@@ -47,8 +47,8 @@ export class AmmoPanel {
     const hintRow = el("div", "tb-ammo__hints", undefined, this.root);
     const reload = el("div", "tb-ammo__hint", undefined, hintRow);
     el("kbd", "tb-key", "R", reload);
-    el("span", "", "RELOAD", reload);
-    this.hints = { reload, noammo: el("div", "tb-ammo__hint tb-ammo__hint--noammo", "NO AMMO", hintRow) };
+    elT("span", "", "hud.reload", reload);
+    this.hints = { reload, noammo: elT("div", "tb-ammo__hint tb-ammo__hint--noammo", "hud.noAmmo", hintRow) };
     for (const node of Object.values(this.hints)) node.hidden = true;
 
     this.counts = el("div", "tb-ammo__counts", undefined, this.root);
@@ -74,7 +74,7 @@ export class AmmoPanel {
     setText(this.name, weapon.name);
     if (weapon.fireMode !== this.shownMode) {
       this.shownMode = weapon.fireMode;
-      setText(this.fireMode, FIRE_MODE_LABEL[weapon.fireMode]);
+      setText(this.fireMode, fireModeLabel(weapon.fireMode));
     }
     if (slot.magazine !== this.shownMagazine) {
       this.shownMagazine = slot.magazine;
@@ -110,6 +110,11 @@ export class AmmoPanel {
       this.phase = phase;
       this.root.dataset.phase = phase;
     }
+  }
+
+  /** The language changed: rewrite cached labels on the next update. */
+  resetText(): void {
+    this.shownMode = undefined;
   }
 
   onEquip(): void {

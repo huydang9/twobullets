@@ -1,6 +1,6 @@
 import { SIMULATION, type MatchView } from "@twobullets/shared";
 import { clamp01 } from "../anim";
-import type { MatchHudFrame } from "../match/MatchHud";
+import { zoneLabel, type MatchHudFrame } from "../match/MatchHud";
 import type { MapTeammate, MapViewer, MapViewSource, MapZoneInfo } from "./types";
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -22,13 +22,6 @@ export function cameraMapSource(camera: MapCamera): MapViewSource {
     },
   };
 }
-
-const ZONE_LABEL = {
-  idle: "Play area revealed in",
-  waiting: "Restricting play area in",
-  shrinking: "Restricting play area",
-  closed: "Final zone",
-} as const;
 
 /**
  * Offline match: the viewer from the match HUD frame (camera position and heading, the human or the spectated actor),
@@ -78,7 +71,7 @@ export function matchMapSource(view: MatchView, frame: MatchHudFrame): MapViewSo
         out.label = "";
         return;
       }
-      out.label = ZONE_LABEL[zone.stage];
+      out.label = zoneLabel(zone.stage);
       if (zone.stage === "idle") {
         const ticks = state.combatStartTick + Math.round(config.zone.firstAnnounceSeconds * config.timeScale * SIMULATION.tickRate) - state.tick;
         out.seconds = Math.max(0, Math.ceil(ticks / SIMULATION.tickRate));

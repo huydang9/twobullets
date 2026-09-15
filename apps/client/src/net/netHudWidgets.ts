@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 // Small networked-play HUD pieces with no offline counterpart: the incoming damage direction indicator and the death /
 // reviving banner. Inline styles (like NetDebugHud) so hud.css stays untouched; DOM is built once and pooled.
 
@@ -90,7 +92,7 @@ const BANNER_STYLE =
   "background:rgba(10,10,10,0.62);color:#eee;font:600 13px/1.5 system-ui,sans-serif;letter-spacing:0.04em;pointer-events:none;z-index:3";
 const TITLE_STYLE = "font-size:22px;font-weight:700;letter-spacing:0.08em;color:#ff5a4a;margin-bottom:4px";
 
-/** Centre banner while dead ("YOU WERE KILLED", cause, respawn countdown) or while reviving a teammate. */
+/** Centre banner while dead ("BẠN ĐÃ BỊ HẠ GỤC", cause, respawn countdown) or while reviving a teammate. */
 export class NetLifeBanner {
   private readonly root: HTMLDivElement;
   private readonly title: Text;
@@ -122,7 +124,7 @@ export class NetLifeBanner {
   showDeath(cause: string, respawnSeconds: number, now: number): void {
     this.mode = "dead";
     this.respawnAt = now + respawnSeconds * 1000;
-    this.title.data = "YOU WERE KILLED";
+    this.title.data = t("death.title");
     this.line.data = cause;
     this.root.hidden = false;
   }
@@ -131,7 +133,7 @@ export class NetLifeBanner {
   showReviving(progress: number, name: string): void {
     if (this.mode === "dead") return;
     this.mode = "reviving";
-    this.title.data = "REVIVING";
+    this.title.data = t("net.reviving");
     this.line.data = name;
     this.detail.data = `${Math.min(100, Math.round(progress * 100))}%`;
     this.root.hidden = false;
@@ -149,7 +151,7 @@ export class NetLifeBanner {
   update(now: number): void {
     if (this.mode !== "dead") return;
     const left = Math.max(0, Math.ceil((this.respawnAt - now) / 1000));
-    const text = left > 0 ? `Spectating · respawning in ${left} s` : "Respawning…";
+    const text = left > 0 ? t("net.spectatingRespawn", { seconds: left }) : t("net.respawning");
     if (this.detail.data !== text) this.detail.data = text;
   }
 

@@ -4,7 +4,6 @@ import { LifeCode } from "@twobullets/protocol/codes";
 import { MAX_ENTITY_SLOTS } from "@twobullets/protocol/messages/snapshot";
 import { RemoteFlags, StanceCode } from "@twobullets/protocol/quantize";
 import type { LifeState } from "@twobullets/shared/equipment/vitals";
-import { killCauseName } from "@twobullets/shared/match/rules";
 import type { MatchEvent } from "@twobullets/shared/match/types";
 import type { FiredShot, HitZone, WeaponId } from "@twobullets/shared/weapons/types";
 import { WEAPONS } from "@twobullets/shared/weapons/weapons";
@@ -12,8 +11,10 @@ import { WorldRaycaster } from "@twobullets/sim";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { EquipmentView } from "../equipment/types";
 import type { WeaponPresentation } from "../fx/WeaponPresentation";
+import { t } from "../i18n";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController } from "../player/PlayerController";
+import { killCauseLabel } from "../ui/equipment/labels";
 import { MatchFeed } from "../ui/match/MatchFeed";
 import type { CombatFeedback, NetDamageTaken, NetHitConfirm, NetKill, NetOwnerVitals } from "./NetCombat";
 import { NET_RESPAWN_SECONDS, REVIVE_RANGE_M, REVIVE_SECONDS, REVIVE_VERTICAL_RANGE_M } from "./netCombatRules";
@@ -23,9 +24,9 @@ import type { PredictedHitSink } from "./RemoteHitboxes";
 import { RemotePlayers, SLOT_NAMES } from "./RemotePlayers";
 import type { RemoteRoster } from "./RemoteRoster";
 
-/** Display name of a slot ("Player Bravo"), matching the HUD's formatting of `RemotePlayers.bodyId`. */
+/** Display name of a slot ("Người chơi Bravo"), matching the HUD's formatting of `RemotePlayers.bodyId`. */
 export function netPlayerName(slot: number): string {
-  return `Player ${SLOT_NAMES[slot] ?? slot}`;
+  return t("net.playerName", { name: SLOT_NAMES[slot] ?? slot });
 }
 
 /** Remote shots whose world impacts are queued (dust, holes, ricochet sounds) at bullet flight time. */
@@ -206,7 +207,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
   }
 
   killFeed(event: MatchEvent): void {
-    this.feed.push(event, (slot) => (slot === this.ownSlot ? "You" : netPlayerName(slot)), (slot) => (slot === this.ownSlot ? this.ownTeam : this.teams[slot]!), this.ownTeam, performance.now());
+    this.feed.push(event, (slot) => (slot === this.ownSlot ? t("common.you") : netPlayerName(slot)), (slot) => (slot === this.ownSlot ? this.ownTeam : this.teams[slot]!), this.ownTeam, performance.now());
   }
 
   vitals(vitals: Readonly<NetOwnerVitals>, previousLife: LifeState): void {
@@ -215,7 +216,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     const { presentation } = this.deps;
     if (vitals.life === "dead") {
       presentation.weaponLowered = true;
-      if (!this.banner.dead) this.banner.showDeath("You died", NET_RESPAWN_SECONDS, performance.now());
+      if (!this.banner.dead) this.banner.showDeath(t("death.cause.died"), NET_RESPAWN_SECONDS, performance.now());
     } else {
       if (previousLife === "dead") {
         this.banner.hide();
@@ -257,17 +258,24 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
   private deathCause(kill: NetKill): string {
     switch (kill.cause) {
       case "bleedOut":
-        return "You bled out";
+        return t("death.cause.bleedOut");
       case "teamWipe":
-        return "Your team was wiped out";
+        return t("death.cause.teamWiped");
       case "fall":
-        return "You died from a fall";
+        return t("death.cause.fall");
       case "outOfBounds":
-        return "You left the map";
-      default:
-        if (kill.killer < 0) return "You died";
-        if (kill.killer === this.ownSlot) return `You killed yourself with ${killCauseName(kill.cause)}`;
-        return `${netPlayerName(kill.killer)} killed you with ${killCauseName(kill.cause)}${kill.headshot ? " (Headshot)" : ""}${kill.friendlyFire ? " (Team kill)" : ""} · ${kill.distanceM} m`;
+        return t("death.cause.outOfBounds");
+      default: {
+        if (kill.killer < 0) return t("death.cause.died");
+        if (kill.killer === this.ownSlot) return t("death.cause.suicide", { weapon: killCauseLabel(kill.cause) });
+        const cause = t("death.cause.killedBy", {
+          killer: netPlayerName(kill.killer),
+          weapon: killCauseLabel(kill.cause),
+          headshot: kill.headshot ? t("feed.headshot") : "",
+          teamKill: kill.friendlyFire ? t("feed.teamKill") : "",
+        });
+        return t("death.cause.distance", { cause, m: kill.distanceM });
+      }
     }
   }
 

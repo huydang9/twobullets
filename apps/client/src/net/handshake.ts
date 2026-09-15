@@ -1,5 +1,6 @@
 import { DisconnectReason, type Hello, type TransportKind } from "@twobullets/protocol/messages/control";
 import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol/version";
+import { t, type MessageKey } from "../i18n";
 
 // Everything about joining a local server-match (M3) in one place: URL shape, the dev token endpoint, Hello fields,
 // timeouts and close codes. Spec relayed from T3.4:
@@ -70,28 +71,30 @@ export function helloFor(joinToken: string, transport: TransportKind, maxDatagra
   return { protocolVersion: PROTOCOL_VERSION, contentHash: CONTENT_HASH, joinToken, maxDatagramSize, transport };
 }
 
-const REASON_TEXT: Record<number, string> = {
-  [DisconnectReason.clientLeave]: "left the match",
-  [DisconnectReason.versionMismatch]: "version mismatch (rebuild client and server)",
-  [DisconnectReason.badToken]: "join token rejected",
-  [DisconnectReason.notAssigned]: "not assigned to this match",
-  [DisconnectReason.matchFull]: "match or team full",
-  [DisconnectReason.replaced]: "replaced by a newer connection",
-  [DisconnectReason.kicked]: "kicked",
-  [DisconnectReason.rateLimited]: "rate limited",
-  [DisconnectReason.timeout]: "timed out",
-  [DisconnectReason.matchEnded]: "match ended",
-  [DisconnectReason.serverShutdown]: "server shut down",
-  [DisconnectReason.internalError]: "server error",
+const REASON_KEY: Record<number, MessageKey> = {
+  [DisconnectReason.clientLeave]: "net.reason.clientLeave",
+  [DisconnectReason.versionMismatch]: "net.reason.versionMismatch",
+  [DisconnectReason.badToken]: "net.reason.badToken",
+  [DisconnectReason.notAssigned]: "net.reason.notAssigned",
+  [DisconnectReason.matchFull]: "net.reason.matchFull",
+  [DisconnectReason.replaced]: "net.reason.replaced",
+  [DisconnectReason.kicked]: "net.reason.kicked",
+  [DisconnectReason.rateLimited]: "net.reason.rateLimited",
+  [DisconnectReason.timeout]: "net.reason.timeout",
+  [DisconnectReason.matchEnded]: "net.reason.matchEnded",
+  [DisconnectReason.serverShutdown]: "net.reason.serverShutdown",
+  [DisconnectReason.internalError]: "net.reason.internalError",
 };
 
+/** Translated disconnect reason, for the connection banner. */
 export function describeDisconnectReason(reason: number): string {
-  return REASON_TEXT[reason] ?? `reason ${reason}`;
+  const key = REASON_KEY[reason];
+  return key ? t(key) : t("net.reason.code", { code: reason });
 }
 
 /** Close code → text, decoding 4000 + reason. */
 export function describeCloseCode(code: number): string {
   if (code >= CLOSE_CODE_REASON_BASE && code < CLOSE_CODE_REASON_BASE + 256) return describeDisconnectReason(code - CLOSE_CODE_REASON_BASE);
-  if (code === 1006) return "connection lost";
-  return `socket closed (${code})`;
+  if (code === 1006) return t("net.reason.connectionLost");
+  return t("net.reason.socketClosed", { code });
 }

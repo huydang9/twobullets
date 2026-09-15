@@ -124,6 +124,7 @@
 }
 
 .tb-overlay__panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -135,6 +136,39 @@
   background: var(--tb-panel-strong);
   border: 1px solid rgba(255, 255, 255, 0.08);
   text-shadow: none;
+}
+
+/* VI | EN switch in the panel corner. */
+.tb-lang {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 2px;
+  cursor: default;
+}
+
+.tb-lang__option {
+  padding: 2px 7px;
+  font: 500 11px/1.4 var(--tb-font);
+  letter-spacing: 0.12em;
+  color: var(--tb-text-faint);
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.tb-lang__option:hover {
+  color: var(--tb-text);
+}
+
+.tb-lang__option[aria-checked="true"] {
+  color: var(--tb-text);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-lang__option:focus-visible {
+  outline: 1px solid var(--tb-stroke-strong);
 }
 
 .tb-title {
@@ -1459,7 +1493,7 @@
   justify-content: center;
   align-items: baseline;
   gap: 6px;
-  width: 260px;
+  width: 300px;
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;

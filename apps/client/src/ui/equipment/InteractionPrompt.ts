@@ -15,8 +15,8 @@ const DENIED_KEYFRAMES: Keyframe[] = [
 ];
 
 /**
- * "F  Pick up AR-4" / "F  Revive" beside the crosshair, plus a short amber notice underneath for refused actions
- * ("Not enough space"). The prompt text is rewritten only when it changes.
+ * "F  Nhặt AR-4" / "F  Hồi sinh" beside the crosshair, plus a short amber notice underneath for refused actions
+ * ("Không đủ chỗ"). The prompt text is rewritten only when it changes.
  */
 export class InteractionPrompt {
   private readonly prompt: HTMLDivElement;
@@ -43,7 +43,7 @@ export class InteractionPrompt {
   }
 
   /**
-   * @param verb "Pick up" | "Swap" | "Equip" | "Revive", or null to hide.
+   * @param verb translated "Pick up" | "Swap" | "Equip" | "Revive", or null to hide.
    * @param blocked F would fail right now (no space): the prompt is dimmed.
    */
   update(verb: string | null, name = "", blocked = false): void {

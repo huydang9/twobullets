@@ -1,7 +1,7 @@
 import { Matrix, Vector3, Viewport, type Camera } from "@babylonjs/core";
 import type { HitZone } from "@twobullets/shared";
 import { prepareAnimation, replay, setText } from "./anim";
-import { el, textNode } from "./dom";
+import { el, elT, textNode } from "./dom";
 
 const POOL_SIZE = 24;
 const LIFETIME_MS = 800;
@@ -60,7 +60,7 @@ export class DamageNumbers {
       const body = el("div", "tb-dmg__body", undefined, root);
       const label = el("div", "tb-dmg__label", undefined, body);
       const text = textNode(label);
-      el("div", "tb-dmg__tag", "KILL", label);
+      elT("div", "tb-dmg__tag", "hud.kill", label);
       root.hidden = true;
       this.pool.push({
         root,

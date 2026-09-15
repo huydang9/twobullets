@@ -2,6 +2,7 @@ import { Camera, Vector3, type IObserver, type Scene } from "@babylonjs/core";
 import type { Vec3, WeaponEvent } from "@twobullets/shared";
 import type { CombatView, DamageEvent, ShotEvent } from "../combat/types";
 import type { AreaDamageEvent, EquipmentView } from "../equipment/types";
+import { onLanguageChange } from "../i18n";
 import { AmmoPanel } from "./AmmoPanel";
 import { Compass } from "./Compass";
 import type { Crosshair } from "./Crosshair";
@@ -51,6 +52,7 @@ export class CombatHud implements EquipmentHudHost {
   private readonly ammo: AmmoPanel;
   private readonly equipment: EquipmentHud;
   private readonly observers: IObserver[];
+  private readonly unsubscribeLanguage: () => void;
   private readonly forwardAxis: Vector3;
   private readonly forward = new Vector3();
   private bearing = 0;
@@ -90,6 +92,12 @@ export class CombatHud implements EquipmentHudHost {
       combat.onWeaponEvent.add(this.handleWeaponEvent),
       combat.onDamage.add(this.handleDamage),
     ];
+    this.unsubscribeLanguage = onLanguageChange(() => {
+      this.ammo.resetText();
+      this.slots.resetText();
+      this.killFeed.resetText();
+      this.killNotice.resetText();
+    });
   }
 
   set visible(visible: boolean) {
@@ -158,6 +166,7 @@ export class CombatHud implements EquipmentHudHost {
   dispose(): void {
     for (const observer of this.observers) observer.remove();
     this.observers.length = 0;
+    this.unsubscribeLanguage();
     this.equipment.dispose();
     this.layer.remove();
   }

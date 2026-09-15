@@ -24,6 +24,7 @@ import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages
 import type { ReliableEvent } from "@twobullets/protocol/messages/events";
 import type { Mutable, Snapshot } from "@twobullets/protocol/messages/snapshot";
 import { Btn, type PlayerInput } from "@twobullets/shared/input";
+import { t } from "../i18n";
 import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, helloFor, WELCOME_TIMEOUT_MS } from "./handshake";
 import type { LocalPlayerNet } from "./LocalPlayerNet";
 import type { NetEventSink } from "./NetCombat";
@@ -288,7 +289,7 @@ export class NetClient {
     this.frameIntervalMs += 0.1 * (Math.min(wallMs, STALL_MIN_MS) - this.frameIntervalMs);
     let frameMs = dtSec * 1000;
     if (state === "handshaking") {
-      if (now - this.stateStartedMs > WELCOME_TIMEOUT_MS) this.fail("no Welcome from the server (handshake timeout)");
+      if (now - this.stateStartedMs > WELCOME_TIMEOUT_MS) this.fail(t("net.reason.handshakeTimeout"));
     } else if (state === "syncing") {
       this.maybePing(now, SYNC_PING_INTERVAL_MS);
       this.maybeStart(now, dtSec);
@@ -325,7 +326,7 @@ export class NetClient {
     this.writer.reset();
     encodeDisconnect(this.writer, { reason: DisconnectReason.clientLeave, detail: 0 });
     this.sendStream();
-    this.setState("disconnected", "left the match");
+    this.setState("disconnected", t("net.reason.clientLeave"));
     this.session.close(CLOSE_CODE_CLIENT_LEAVE);
   }
 
@@ -370,7 +371,7 @@ export class NetClient {
       }
       case MsgId.Disconnect: {
         const message = decodeDisconnect(reader);
-        this.setState("disconnected", message ? describeDisconnectReason(message.reason) : "disconnected by the server");
+        this.setState("disconnected", message ? describeDisconnectReason(message.reason) : t("net.reason.byServer"));
         break;
       }
       case MsgId.Resync:

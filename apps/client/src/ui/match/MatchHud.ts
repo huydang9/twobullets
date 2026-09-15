@@ -1,9 +1,9 @@
 import { SIMULATION, VITALS, type ActorState, type MatchEvent, type MatchView, type ZoneCircle } from "@twobullets/shared";
 import { clamp01, prepareAnimation, replay, setText } from "../anim";
 import { compassMarkerOffset } from "../Compass";
-import { el, textNode } from "../dom";
+import { onLanguageChange, t, type MessageKey } from "../../i18n";
+import { el, elT, textNode } from "../dom";
 import { MatchFeed } from "./MatchFeed";
-import { MATCH_STRINGS } from "./strings";
 
 const RAD_TO_DEG = 180 / Math.PI;
 /** Teammates farther than this show distance and direction on their card, m. */
@@ -66,6 +66,7 @@ export class MatchHud {
   private readonly spectating: HTMLDivElement;
   private readonly spectatingName: Text;
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeLanguage: () => void;
   private readonly barValue = [-1];
   private markerOffset = Number.NaN;
   private shown = { alive: -1, teams: -1, kills: -1, zoneKey: "", zoneSeconds: -1, outside: -1, marker: -1, countdown: -1, tint: -1 };
@@ -78,17 +79,17 @@ export class MatchHud {
     this.root = el("div", "tb-mhud", undefined, parent);
 
     const stats = el("div", "tb-mhud__stats", undefined, this.root);
-    const stat = (label: string, hidden = false): Text => {
+    const stat = (label: MessageKey, hidden = false): Text => {
       const node = el("div", "tb-mhud__stat", undefined, stats);
       const value = textNode(el("span", "tb-mhud__stat-value", undefined, node));
-      el("span", "tb-mhud__stat-label", label, node);
+      elT("span", "tb-mhud__stat-label", label, node);
       node.hidden = hidden;
       return value;
     };
-    this.alive = stat(MATCH_STRINGS.hud.alive);
+    this.alive = stat("match.alive");
     // Solo: every player is a team, so the teams count would repeat "alive".
-    this.teams = stat(MATCH_STRINGS.hud.teams, view.config.teamSize <= 1);
-    this.kills = stat(MATCH_STRINGS.hud.kills);
+    this.teams = stat("match.teams", view.config.teamSize <= 1);
+    this.kills = stat("match.kills");
     this.feed = new MatchFeed(this.root);
 
     this.zone = el("div", "tb-mhud__zone", undefined, this.root);
@@ -117,12 +118,20 @@ export class MatchHud {
     for (let i = 0; i < 3; i++) this.cards.push(createCard(team));
 
     this.spectating = el("div", "tb-mhud__spectating", undefined, this.root);
-    el("span", "tb-mhud__spectating-label", "Spectating", this.spectating);
+    elT("span", "tb-mhud__spectating-label", "match.spectating", this.spectating);
     this.spectatingName = textNode(el("span", "tb-mhud__spectating-name", undefined, this.spectating));
-    el("span", "tb-mhud__spectating-hint", "[ ] switch", this.spectating);
+    elT("span", "tb-mhud__spectating-hint", "match.spectatingHint", this.spectating);
     this.spectating.hidden = true;
 
     this.unsubscribe = view.onEvent((event) => this.handleEvent(event));
+    this.unsubscribeLanguage = onLanguageChange(() => {
+      this.shown.zoneKey = "";
+      this.shown.outside = -1;
+      for (const card of this.cards) {
+        card.shown = "?";
+        card.slot = -1;
+      }
+    });
   }
 
   set visible(visible: boolean) {
@@ -136,8 +145,8 @@ export class MatchHud {
   }
 
   nameOf = (slot: number): string => {
-    if (slot === this.frame.localSlot) return "You";
-    return this.view.state.actors[slot]?.name ?? `Slot ${slot}`;
+    if (slot === this.frame.localSlot) return t("common.you");
+    return this.view.state.actors[slot]?.name ?? t("match.slot", { slot });
   };
 
   teamOf = (slot: number): number => this.view.state.actors[slot]?.team ?? -1;
@@ -161,6 +170,7 @@ export class MatchHud {
 
   dispose(): void {
     this.unsubscribe();
+    this.unsubscribeLanguage();
     this.root.remove();
   }
 
@@ -212,7 +222,7 @@ export class MatchHud {
     if (key !== shown.zoneKey) {
       shown.zoneKey = key;
       this.zone.hidden = key === "pre" || key === "ended";
-      setText(this.zoneLabel, ZONE_LABEL[key] ?? "");
+      setText(this.zoneLabel, zoneLabel(key));
       this.zoneBar.hidden = key !== "shrinking";
       shown.zoneSeconds = -1;
     }
@@ -232,7 +242,7 @@ export class MatchHud {
     if (outside !== shown.outside) {
       shown.outside = outside;
       this.outside.hidden = outside === 0;
-      if (outside > 0) setText(this.outsideText, `Outside safe zone · ${outside} m · ${zone.dps} HP/s`);
+      if (outside > 0) setText(this.outsideText, t("zone.outside", { m: outside, dps: zone.dps }));
     }
     const tint = outside > 0 ? 1 : 0;
     if (tint !== shown.tint) {
@@ -246,7 +256,7 @@ export class MatchHud {
     if (markerMeters !== shown.marker) {
       shown.marker = markerMeters;
       this.marker.hidden = markerMeters < 0;
-      if (markerMeters >= 0) setText(this.markerDistance, `${markerMeters} m`);
+      if (markerMeters >= 0) setText(this.markerDistance, t("common.meters", { m: markerMeters }));
     }
     if (markerMeters >= 0) {
       const bearing = Math.atan2(target.cx - x, target.cz - z) * RAD_TO_DEG;
@@ -285,7 +295,7 @@ export class MatchHud {
     const downed = actor.life === "downed";
     const dead = actor.life === "dead";
     const reviving = downed && actor.reviverSlot >= 0;
-    const status = dead ? "DEAD" : reviving ? "REVIVING" : downed ? "KNOCKED" : "";
+    const status = dead ? t("mate.dead") : reviving ? t("mate.reviving") : downed ? t("mate.knocked") : "";
     if (status !== card.shown) {
       card.shown = status;
       setText(card.status, status);
@@ -303,7 +313,7 @@ export class MatchHud {
     const far = !dead && distance > TEAMMATE_DISTANCE_SHOWN;
     card.arrow.hidden = !far;
     if (far) {
-      setText(card.distance, `${Math.round(distance)} m`);
+      setText(card.distance, t("common.meters", { m: Math.round(distance) }));
       const relative = Math.round(Math.atan2(dx, dz) * RAD_TO_DEG - frame.headingDegrees);
       if (relative !== card.values[3]) {
         card.values[3] = relative;
@@ -315,12 +325,18 @@ export class MatchHud {
   }
 }
 
-const ZONE_LABEL: Readonly<Record<string, string>> = {
-  idle: "Play area revealed in",
-  waiting: "Restricting play area in",
-  shrinking: "Restricting play area",
-  closed: "Final zone",
+const ZONE_LABEL_KEY: Readonly<Record<string, MessageKey>> = {
+  idle: "zone.idle",
+  waiting: "zone.waiting",
+  shrinking: "zone.shrinking",
+  closed: "zone.closed",
 };
+
+/** Zone timer label for a zone stage ("Vùng an toàn thu hẹp sau"), or "" when none is shown. Shared with the map. */
+export function zoneLabel(stage: string): string {
+  const key = ZONE_LABEL_KEY[stage];
+  return key ? t(key) : "";
+}
 
 function createCard(parent: HTMLElement): TeammateCard {
   const root = el("div", "tb-mate", undefined, parent);

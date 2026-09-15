@@ -1,7 +1,7 @@
 import type { MapData } from "@twobullets/shared";
 import { KEY_BINDINGS } from "../../input/bindings";
 import { setText } from "../anim";
-import { el, textNode } from "../dom";
+import { el, elT, textNode } from "../dom";
 import { formatClock } from "../match/MatchHud";
 import { MapProjection, drawMapImage, drawRunLine, drawTeammates, drawViewer, drawZone, fitCanvas, markerFont } from "./mapDraw";
 import type { MapImage } from "./mapImage";
@@ -79,7 +79,7 @@ export class MapScreen {
     this.frame = el("div", "tb-map__frame", undefined, this.root);
     this.base = el("canvas", "tb-map__canvas", undefined, this.frame);
     this.overlay = el("canvas", "tb-map__canvas", undefined, this.frame);
-    this.loading = el("div", "tb-map__loading", "Loading map…", this.frame);
+    this.loading = elT("div", "tb-map__loading", "map.loading", this.frame);
     const baseCtx = this.base.getContext("2d", { alpha: false });
     const overlayCtx = this.overlay.getContext("2d");
     if (!baseCtx || !overlayCtx) throw new Error("[map] 2D canvas unavailable");
@@ -88,7 +88,12 @@ export class MapScreen {
 
     const footer = el("div", "tb-map__footer", undefined, this.root);
     this.zoomText = textNode(el("span", "tb-map__zoom", undefined, footer));
-    footer.append(key("M"), " / ", key("Esc"), " close   ", key("N"), " zoom   wheel zoom · drag pan");
+    footer.append(key("M"), " / ", key("Esc"), " ");
+    elT("span", "", "map.close", footer);
+    footer.append("   ", key("N"), " ");
+    elT("span", "", "map.zoom", footer);
+    footer.append("   ");
+    elT("span", "", "map.mouseHint", footer);
 
     const options = { signal: this.events.signal };
     window.addEventListener("keydown", this.handleKey, { capture: true, signal: this.events.signal });

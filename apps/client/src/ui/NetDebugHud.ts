@@ -1,6 +1,7 @@
 import type { InputManager } from "../input/InputManager";
 import type { NetStats } from "../net/NetClient";
 import type { NetCombatStats } from "../net/NetCombat";
+import { t } from "../i18n";
 import { el, textNode } from "./dom";
 
 const KEY = "F6";
@@ -101,10 +102,10 @@ export class NetDebugHud {
 
   private updateBanner(stats: NetStats): void {
     let message = "";
-    if (stats.state === "handshaking") message = "Connecting to match server…";
-    else if (stats.state === "syncing") message = "Synchronizing clock…";
-    else if (stats.state === "disconnected") message = `Disconnected: ${stats.disconnectReason || "connection closed"}`;
-    else if (stats.interrupted) message = "Connection interrupted";
+    if (stats.state === "handshaking") message = t("net.connecting");
+    else if (stats.state === "syncing") message = t("net.syncing");
+    else if (stats.state === "disconnected") message = t("net.disconnected", { reason: stats.disconnectReason || t("net.reason.connectionClosed") });
+    else if (stats.interrupted) message = t("net.interrupted");
     this.banner.hidden = message === "";
     if (message !== "" && this.bannerText.data !== message) this.bannerText.data = message;
   }

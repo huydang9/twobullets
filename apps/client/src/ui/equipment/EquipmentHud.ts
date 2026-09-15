@@ -1,6 +1,6 @@
 import type { IObserver } from "@babylonjs/core";
-import { ITEMS, THROWABLE_KINDS, VITALS, type DamageKind, type InventoryState, type LootItem, type ThrowableKind, type Vec3, type WeaponSlot } from "@twobullets/shared";
-import { previewLootAction } from "../../equipment/loot/lootAction";
+import { THROWABLE_KINDS, VITALS, type DamageKind, type InventoryState, type LootItem, type ThrowableKind, type Vec3, type WeaponSlot } from "@twobullets/shared";
+import { previewLootAction, type LootActionPreview } from "../../equipment/loot/lootAction";
 import {
   LOCAL_PLAYER_ID,
   type AreaDamageEvent,
@@ -12,6 +12,7 @@ import {
   type UseEvent,
   type VitalsViewEvent,
 } from "../../equipment/types";
+import { onLanguageChange, t, type MessageKey } from "../../i18n";
 import { el } from "../dom";
 import type { HealthPanel } from "../HealthPanel";
 import type { WeaponSlots } from "../WeaponSlots";
@@ -19,12 +20,18 @@ import { ArmorStatus } from "./ArmorStatus";
 import { CookIndicator } from "./CookIndicator";
 import { DeathRecap } from "./DeathRecap";
 import { InteractionPrompt } from "./InteractionPrompt";
-import { DEATH_CAUSE_TEXT, INVENTORY_ERROR_TEXT, USE_CANCEL_TEXT, USE_REJECT_TEXT, areaWeaponName, itemLabel } from "./labels";
+import { areaWeaponName, deathCauseText, inventoryErrorText, itemLabel, itemNameUpper, useCancelText, useRejectText } from "./labels";
 import { PickupFeed } from "./PickupFeed";
 import { UseIndicator } from "./UseIndicator";
 
 /** Offline respawn delay (mirrors RESPAWN_SECONDS in player/PlayerLife.ts). */
 export const OFFLINE_RESPAWN_SECONDS = 5;
+
+const LOOT_VERB_KEY: Readonly<Record<LootActionPreview["verb"], MessageKey>> = {
+  "Pick up": "prompt.pickUp",
+  Swap: "prompt.swap",
+  Equip: "prompt.equip",
+};
 
 /** The combat HUD parts the equipment HUD drives or reports into. */
 export interface EquipmentHudHost {
@@ -65,6 +72,7 @@ export class EquipmentHud {
   private shownInventory: InventoryState | null = null;
   private shownTarget: LootItem | null | undefined;
   private shownSlot: WeaponSlot | null = null;
+  private readonly unsubscribeLanguage: () => void;
 
   constructor(private readonly host: EquipmentHudHost) {
     const centre = el("div", "tb-equip", undefined, host.layer);
@@ -74,6 +82,10 @@ export class EquipmentHud {
     this.pickups = new PickupFeed(host.layer);
     this.death = new DeathRecap(host.layer);
     this.armor = new ArmorStatus(host.dock);
+    this.unsubscribeLanguage = onLanguageChange(() => {
+      this.shownInventory = null;
+      this.shownTarget = undefined;
+    });
   }
 
   /** True while a throwable is drawn (no weapon slot is active). */
@@ -144,23 +156,24 @@ export class EquipmentHud {
   }
 
   dispose(): void {
+    this.unsubscribeLanguage();
     this.bind(null);
   }
 
   private updateProgress(view: EquipmentView, use: ItemUseView | null, downed: boolean): void {
     if (use) {
-      this.use.update(use.progress, ITEMS[use.itemId].name.toUpperCase(), use.seconds * (1 - use.progress));
+      this.use.update(use.progress, itemNameUpper(use.itemId), use.seconds * (1 - use.progress));
       return;
     }
     const vitals = view.vitals;
     if (downed && vitals.reviverId >= 0) {
       const progress = vitals.reviveProgress / VITALS.reviveSeconds;
-      this.use.update(progress, "BEING REVIVED", VITALS.reviveSeconds - vitals.reviveProgress, "revive");
+      this.use.update(progress, t("use.beingRevived"), VITALS.reviveSeconds - vitals.reviveProgress, "revive");
       return;
     }
     const revive = view.revive;
     if (revive && revive.progress !== null) {
-      this.use.update(revive.progress, "REVIVING", VITALS.reviveSeconds * (1 - revive.progress), "revive");
+      this.use.update(revive.progress, t("use.reviving"), VITALS.reviveSeconds * (1 - revive.progress), "revive");
       return;
     }
     this.use.update(null, "", 0);
@@ -176,7 +189,7 @@ export class EquipmentHud {
     const revive = view.revive;
     if (revive?.targetName) {
       this.shownTarget = undefined;
-      this.prompt.update(revive.progress === null ? "Revive" : null, revive.targetName);
+      this.prompt.update(revive.progress === null ? t("prompt.revive") : null, revive.targetName);
       return;
     }
     const target = view.lootTarget;
@@ -191,7 +204,7 @@ export class EquipmentHud {
     // Same inventory rule and replace slot as the pickup itself.
     const action = previewLootAction(view.inventory, target, slot);
     const name = action.replaces ? `${itemLabel(action.replaces)} → ${itemLabel(target)}` : itemLabel(target);
-    this.prompt.update(action.verb, name, action.blocked !== null);
+    this.prompt.update(t(LOOT_VERB_KEY[action.verb]), name, action.blocked !== null);
   }
 
   private syncThrowable(selected: ThrowableKind | null, counts: Readonly<Record<ThrowableKind, number>>): void {
@@ -214,7 +227,7 @@ export class EquipmentHud {
         break;
       case "pickupFailed":
       case "dropFailed":
-        this.prompt.refuse(INVENTORY_ERROR_TEXT[event.error]);
+        this.prompt.refuse(inventoryErrorText(event.error));
         break;
       case "throwableSelected":
         if (event.kind) this.host.slots.cycled();
@@ -225,8 +238,8 @@ export class EquipmentHud {
   };
 
   private readonly handleUse = (event: UseEvent): void => {
-    if (event.type === "cancelled") this.use.flash(USE_CANCEL_TEXT[event.reason]);
-    else if (event.type === "rejected") this.prompt.refuse(USE_REJECT_TEXT[event.reason]);
+    if (event.type === "cancelled") this.use.flash(useCancelText(event.reason));
+    else if (event.type === "rejected") this.prompt.refuse(useRejectText(event.reason));
   };
 
   private readonly handleArmor = (event: ArmorEvent): void => {
@@ -273,8 +286,8 @@ export class EquipmentHud {
     const weapon = lastKind && cause !== "bleed" && cause !== "fall" ? areaWeaponName(lastKind) : null;
     const distance = lastPosition && viewer && (lastKind === "explosion" || lastKind === "bullet") ? Math.hypot(lastPosition.x - viewer.x, lastPosition.y - viewer.y, lastPosition.z - viewer.z) : null;
     this.death.show({
-      cause: DEATH_CAUSE_TEXT[cause],
-      killer: killerId === LOCAL_PLAYER_ID ? "Yourself" : killerId > 0 ? `Soldier ${killerId}` : null,
+      cause: deathCauseText(cause),
+      killer: killerId === LOCAL_PLAYER_ID ? t("recap.yourself") : killerId > 0 ? t("recap.soldier", { id: killerId }) : null,
       weapon,
       distance,
       damageTaken: this.life.damage,

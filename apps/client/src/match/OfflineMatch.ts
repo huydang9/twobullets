@@ -6,7 +6,6 @@ import {
   createInventory,
   createNavQuery,
   isValidZoneCenter,
-  killCauseName,
   navStats,
   planTeamSpawns,
   resolveMatchSize,
@@ -25,6 +24,7 @@ import { CharacterBody, DEATH_PILE_ID_BASE, WorldRaycaster, type MatchSim, type 
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { EquipmentSystem } from "../equipment/EquipmentSystem";
+import { onLanguageChange } from "../i18n";
 import type { WeaponPresentation } from "../fx/WeaponPresentation";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
@@ -34,7 +34,7 @@ import type { Hud } from "../ui/Hud";
 import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
-import { MATCH_STRINGS } from "../ui/match/strings";
+import { deathCauseText, MATCH_STRINGS } from "../ui/match/strings";
 import type { Environment } from "../world/environment";
 import type { MapRuntime } from "../world/mapRuntime";
 import { ZoneWall } from "../world/zone/ZoneWall";
@@ -65,8 +65,6 @@ export interface OfflineMatchDeps {
 const RAD_TO_DEG = 180 / Math.PI;
 const FROZEN_GATES: MoveGates = { speedScale: 0, allowSprint: false, allowJump: false, crawl: false };
 const NO_WEAPONS = { allowWeapons: false } as const;
-const REASON_TEXT = { lastTeam: "Last team standing", allDead: "Everyone is down", timeCap: "Time limit reached" } as const;
-
 /**
  * Offline battle royale on Map v1 (docs/bots/design.md §9): hosts the headless MatchSim in the client's fixed 60 Hz tick
  * with the human as an external actor, renders bots as pooled soldiers, bridges shots/impacts to FX and audio, draws the
@@ -111,6 +109,7 @@ export class OfflineMatch {
   private ticksThisFrame = 0;
   private ticking = false;
   private readonly trace: MatchTrace;
+  private readonly unsubscribeLanguage: () => void;
 
   private constructor(
     private readonly deps: OfflineMatchDeps,
@@ -150,6 +149,10 @@ export class OfflineMatch {
     this.resultScreen = new ResultScreen(this.layer);
     this.frame = { focusSlot: this.humanSlot ?? 1, localSlot: this.humanSlot, viewerX: 0, viewerZ: 0, headingDegrees: 0 };
     this.showSetup();
+    // The setup picker's labels are plain strings: rebuild it in the new language until the match starts.
+    this.unsubscribeLanguage = onLanguageChange(() => {
+      if (!this.sim) this.showSetup();
+    });
 
     // Frozen through the countdown, after the end and once eliminated.
     player.setMoveGates(() => (this.humanFrozen() ? FROZEN_GATES : equipment.modifiers));
@@ -224,6 +227,7 @@ export class OfflineMatch {
 
   dispose(): void {
     window.removeEventListener("keydown", this.handleKey);
+    this.unsubscribeLanguage();
     this.tickObserver?.remove();
     this.presentationBridge?.dispose();
     this.debugOverlay?.dispose();
@@ -261,12 +265,13 @@ export class OfflineMatch {
     const { teamCount } = resolveMatchSize({ maxPlayers: this.maxPlayers, teamMode: this.teamMode });
     this.deps.hud.setMatchSetup({
       difficulties: BOT_DIFFICULTIES,
+      difficultyLabels: BOT_DIFFICULTIES.map((difficulty) => text.difficultyName(difficulty)),
       difficulty: this.difficulty,
       difficultyLabel: text.difficulty,
       onDifficulty: (difficulty) => this.setDifficulty(difficulty as BotDifficulty),
       choices: [
         { label: text.players, options: sizes.map(String), value: String(this.maxPlayers), onChange: (value) => this.setMatchSize(Number(value), this.teamMode) },
-        { label: text.teamMode, options: TEAM_MODES, labels: TEAM_MODES.map((mode) => text.modes[mode]), value: this.teamMode, onChange: (value) => this.setMatchSize(this.maxPlayers, value as TeamMode) },
+        { label: text.teamMode, options: TEAM_MODES, labels: TEAM_MODES.map((mode) => text.modeName(mode)), value: this.teamMode, onChange: (value) => this.setMatchSize(this.maxPlayers, value as TeamMode) },
       ],
       playLabel: text.start,
       details: text.details({ players: this.maxPlayers, teams: teamCount, mode: this.teamMode, teammate: this.options.teammate, zoneScale: this.options.zoneScale, seed: this.seed }),
@@ -425,7 +430,7 @@ export class OfflineMatch {
     ];
     this.deathScreen.show(
       {
-        cause: kill ? this.deathCause(kill) : "You died",
+        cause: kill ? deathCauseText(kill, this.hudView?.nameOf ?? ((slot: number) => String(slot))) : MATCH_STRINGS.screens.died,
         placement: team?.placement ?? null,
         teamCount: sim.config.teamCount,
         kills: me?.kills ?? 0,
@@ -454,33 +459,13 @@ export class OfflineMatch {
         teamKills: team?.kills ?? 0,
         damage: me?.damageDealt ?? 0,
         survivedSeconds: survived(state.combatStartTick, me && me.deathTick >= 0 ? me.deathTick : state.tick),
-        reason: state.endReason ? REASON_TEXT[state.endReason] : "",
+        reason: state.endReason ? MATCH_STRINGS.screens.endReason(state.endReason) : "",
       },
       [
         { label: MATCH_STRINGS.screens.newMatch, primary: true, run: () => reloadNewMatch(this.difficulty, this) },
-        { label: "Close", run: () => this.closeScreens() },
+        { label: MATCH_STRINGS.screens.close, run: () => this.closeScreens() },
       ],
     );
-  }
-
-  private deathCause(kill: Extract<MatchEvent, { type: "kill" }>): string {
-    const name = this.hudView?.nameOf ?? ((slot: number) => String(slot));
-    switch (kill.cause) {
-      case "zone":
-        return "You died to the zone";
-      case "fall":
-        return "You died from a fall";
-      case "outOfBounds":
-        return "You left the map";
-      case "bleedOut":
-        return kill.knockedBy >= 0 ? `You bled out after ${name(kill.knockedBy)} knocked you` : "You bled out";
-      case "teamWipe":
-        return kill.killer >= 0 ? `${name(kill.killer)} wiped out your team` : "Your team was wiped out";
-      default:
-        if (kill.killer < 0) return "You died";
-        if (kill.killer === kill.victim) return `You killed yourself with ${killCauseName(kill.cause)}`;
-        return `${name(kill.killer)} killed you with ${killCauseName(kill.cause)}${kill.headshot ? " (Headshot)" : ""}${kill.teamKill ? " (Team kill)" : ""}`;
-    }
   }
 
   private spectate(slot: number | null): void {

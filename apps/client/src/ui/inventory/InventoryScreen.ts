@@ -20,10 +20,11 @@ import {
   type WeaponSlot,
 } from "@twobullets/shared";
 import type { EquipmentItemActions, EquipmentItemsView, ItemEvent } from "../../equipment/types";
+import { onLanguageChange, t, type MessageKey } from "../../i18n";
 import { KEY_BINDINGS } from "../../input/bindings";
 import { setText } from "../anim";
-import { el, textNode } from "../dom";
-import { INVENTORY_ERROR_TEXT, itemSummary, itemTooltip, type ItemTooltip } from "../equipment/labels";
+import { el, elT, textNode } from "../dom";
+import { inventoryErrorText, itemName, itemSummary, itemTooltip, type ItemTooltip } from "../equipment/labels";
 import { ItemIcons, type ItemIconSource } from "./icons";
 import "./inventory.css";
 
@@ -51,15 +52,15 @@ type DragSource =
 
 const STACK_IDS = ITEM_IDS.filter(isStackItem);
 const BAG_GROUPS = [
-  { title: "AMMO", categories: ["ammo"] },
-  { title: "THROWABLES", categories: ["throwable"] },
-  { title: "HEALING", categories: ["heal"] },
-  { title: "BOOSTS", categories: ["boost"] },
-] as const;
-const WEAPON_SLOT_LABELS = ["PRIMARY 1", "PRIMARY 2", "SIDEARM"] as const;
+  { title: "inv.group.ammo", categories: ["ammo"] },
+  { title: "inv.group.throwables", categories: ["throwable"] },
+  { title: "inv.group.healing", categories: ["heal"] },
+  { title: "inv.group.boosts", categories: ["boost"] },
+] as const satisfies readonly { readonly title: MessageKey; readonly categories: readonly string[] }[];
+const WEAPON_SLOT_LABELS = ["inv.slot.primary1", "inv.slot.primary2", "inv.slot.sidearm"] as const satisfies readonly MessageKey[];
 const GEAR_SLOTS = ["helmet", "vest", "backpack"] as const;
 type GearSlot = (typeof GEAR_SLOTS)[number];
-const ATTACHMENT_SLOTS = ["Muzzle", "Grip", "Magazine", "Scope"] as const;
+const ATTACHMENT_SLOTS = ["inv.attachment.muzzle", "inv.attachment.grip", "inv.attachment.magazine", "inv.attachment.scope"] as const satisfies readonly MessageKey[];
 const NOTICE_MS = 1800;
 const AUTO_PICKUP_STORAGE_KEY = "twobullets.autoPickup";
 const TOOLTIP_LINES = 5;
@@ -147,6 +148,8 @@ export class InventoryScreen {
   private readonly autoPickup: HTMLInputElement;
   private readonly itemObserver: Observer<ItemEvent>;
   private readonly events = new AbortController();
+  private readonly unsubscribeLanguage: () => void;
+  private readonly attachmentTitles: [HTMLDivElement, MessageKey][] = [];
 
   private open = false;
   private dragging: DragSource | null = null;
@@ -170,27 +173,27 @@ export class InventoryScreen {
     const panel = el("div", "tb-inv__panel", undefined, this.root);
 
     // ---- Vicinity
-    const nearby = this.column(panel, "tb-inv__col tb-inv__col--nearby", "VICINITY");
+    const nearby = this.column(panel, "tb-inv__col tb-inv__col--nearby", "inv.vicinity");
     this.nearbyCount = textNode(el("span", "tb-inv__title-count", undefined, nearby.firstElementChild as HTMLElement));
     this.nearbyList = el("div", "tb-inv__list", undefined, nearby);
-    this.nearbyEmpty = el("div", "tb-inv__empty", "Nothing within reach", this.nearbyList);
+    this.nearbyEmpty = elT("div", "tb-inv__empty", "inv.nothingNearby", this.nearbyList);
     this.dropZone(nearby, (source, event) => this.dropToGround(source, event.ctrlKey || event.shiftKey));
 
     // ---- Bag
-    const bag = this.column(panel, "tb-inv__col tb-inv__col--bag", "BAG");
+    const bag = this.column(panel, "tb-inv__col tb-inv__col--bag", "inv.bag");
     const capacity = el("div", "tb-inv__capacity", undefined, bag);
     const capacityHead = el("div", "tb-inv__capacity-head", undefined, capacity);
-    el("span", "tb-inv__label", "CAPACITY", capacityHead);
+    elT("span", "tb-inv__label", "inv.capacity", capacityHead);
     const capacityText = el("span", "tb-inv__capacity-text", undefined, capacityHead);
     this.capacityUsed = textNode(el("span", "tb-inv__capacity-used", undefined, capacityText));
     this.capacityMax = textNode(el("span", "tb-inv__capacity-max", undefined, capacityText));
     const bar = el("div", "tb-inv__bar tb-inv__bar--capacity", undefined, capacity);
     this.capacityFill = el("div", "tb-inv__bar-fill", undefined, bar);
     const bagList = el("div", "tb-inv__list", undefined, bag);
-    this.bagEmpty = el("div", "tb-inv__empty", "Bag is empty", bagList);
+    this.bagEmpty = elT("div", "tb-inv__empty", "inv.bagEmpty", bagList);
     for (const group of BAG_GROUPS) {
       const node = el("div", "tb-inv__group", undefined, bagList);
-      el("div", "tb-inv__group-title", group.title, node);
+      elT("div", "tb-inv__group-title", group.title, node);
       const ids = STACK_IDS.filter((id) => (group.categories as readonly string[]).includes(ITEMS[id].category));
       for (const itemId of ids) {
         const row = this.row(node);
@@ -210,14 +213,14 @@ export class InventoryScreen {
     });
 
     // ---- Equipment
-    const gearCol = this.column(panel, "tb-inv__col tb-inv__col--gear", "EQUIPMENT");
+    const gearCol = this.column(panel, "tb-inv__col tb-inv__col--gear", "inv.equipment");
     const weapons = el("div", "tb-inv__weapons", undefined, gearCol);
     WEAPON_SLOT_LABELS.forEach((label, index) => {
       const slot = index as WeaponSlot;
       const node = el("div", "tb-inv__weapon", undefined, weapons);
       const head = el("div", "tb-inv__weapon-head", undefined, node);
       el("span", "tb-key", String(index + 1), head);
-      el("span", "tb-inv__label", label, head);
+      elT("span", "tb-inv__label", label, head);
       const name = textNode(el("span", "tb-inv__weapon-name", undefined, head));
       const body = el("div", "tb-inv__weapon-body", undefined, node);
       const art = el("div", "tb-inv__weapon-art", undefined, body);
@@ -227,7 +230,7 @@ export class InventoryScreen {
       const reserve = textNode(el("span", "tb-inv__weapon-reserve", undefined, ammo));
       const caliber = textNode(el("span", "tb-inv__weapon-caliber", undefined, ammo));
       const attachments = el("div", "tb-inv__attachments", undefined, node);
-      for (const attachment of ATTACHMENT_SLOTS) el("div", "tb-inv__attachment", undefined, attachments).title = `${attachment} (attachments are not in the game yet)`;
+      for (const attachment of ATTACHMENT_SLOTS) this.attachmentTitles.push([el("div", "tb-inv__attachment", undefined, attachments), attachment]);
       this.draggable(node, () => (this.equipment.inventory.weapons[slot] ? { kind: "weapon", slot } : null), icon.img);
       node.addEventListener("contextmenu", (event) => {
         event.preventDefault();
@@ -242,10 +245,10 @@ export class InventoryScreen {
     });
 
     const gearRow = el("div", "tb-inv__gear", undefined, gearCol);
-    const gearCell = (key: GearSlot, label: string): GearCell => {
+    const gearCell = (key: GearSlot, label: MessageKey): GearCell => {
       const node = el("div", "tb-inv__cell", undefined, gearRow);
       const head = el("div", "tb-inv__cell-head", undefined, node);
-      el("span", "tb-inv__label", label, head);
+      elT("span", "tb-inv__label", label, head);
       const level = textNode(el("span", "tb-inv__cell-level", undefined, head));
       const icon = this.iconSlot(el("div", "tb-inv__icon tb-inv__icon--gear", undefined, node));
       const barNode = el("div", "tb-inv__bar tb-inv__bar--thin", undefined, node);
@@ -270,7 +273,7 @@ export class InventoryScreen {
       });
       return { node, icon, level, detail, bar: fill, shown: "" };
     };
-    this.gear = { helmet: gearCell("helmet", "HELMET"), vest: gearCell("vest", "VEST"), backpack: gearCell("backpack", "BACKPACK") };
+    this.gear = { helmet: gearCell("helmet", "inv.gear.helmet"), vest: gearCell("vest", "inv.gear.vest"), backpack: gearCell("backpack", "inv.gear.backpack") };
 
     const throwRow = el("div", "tb-inv__throwables", undefined, gearCol);
     el("span", "tb-key", "5", throwRow);
@@ -295,19 +298,19 @@ export class InventoryScreen {
     const footer = el("div", "tb-inv__footer", undefined, this.root);
     const hints = el("div", "tb-inv__hints", undefined, footer);
     for (const [key, text] of [
-      ["Drag", "move"],
-      ["Right-click", "use / equip / drop"],
-      ["Shift+drag", "drop part of a stack"],
-      ["Tab", "close"],
+      ["inv.hint.drag", "inv.hint.dragAction"],
+      ["inv.hint.rightClick", "inv.hint.rightClickAction"],
+      ["inv.hint.shiftDrag", "inv.hint.shiftDragAction"],
+      ["inv.hint.tab", "inv.hint.tabAction"],
     ] as const) {
       const hint = el("span", "tb-inv__hint", undefined, hints);
-      el("span", "tb-key", key, hint);
-      el("span", "", text, hint);
+      elT("span", "tb-key", key, hint);
+      elT("span", "", text, hint);
     }
     const toggle = el("label", "tb-inv__toggle", undefined, footer);
     this.autoPickup = el("input", "", undefined, toggle);
     this.autoPickup.type = "checkbox";
-    el("span", "", "Auto pickup", toggle);
+    elT("span", "", "inv.autoPickup", toggle);
     this.equipment.autoPickup = readAutoPickup(this.equipment.autoPickup);
     this.autoPickup.checked = this.equipment.autoPickup;
     this.autoPickup.addEventListener("change", () => {
@@ -339,8 +342,8 @@ export class InventoryScreen {
     this.splitRange.addEventListener("input", () => (this.splitNumber.value = this.splitRange.value));
     this.splitNumber.addEventListener("input", () => (this.splitRange.value = this.splitNumber.value));
     const buttons = el("div", "tb-inv__split-buttons", undefined, this.splitter);
-    el("button", "tb-inv__button", "Drop", buttons).addEventListener("click", () => this.confirmSplit());
-    el("button", "tb-inv__button tb-inv__button--quiet", "Cancel", buttons).addEventListener("click", () => this.closeSplit());
+    elT("button", "tb-inv__button", "inv.drop", buttons).addEventListener("click", () => this.confirmSplit());
+    elT("button", "tb-inv__button tb-inv__button--quiet", "inv.cancel", buttons).addEventListener("click", () => this.closeSplit());
     this.splitter.addEventListener("keydown", (event) => {
       if (event.code === "Enter") this.confirmSplit();
     });
@@ -352,6 +355,18 @@ export class InventoryScreen {
       if (locked && this.open) this.setOpen(false);
     });
     this.itemObserver = equipment.onItem.add(this.handleItemEvent);
+    // Bound labels translate themselves; cached rows, cards and cells rewrite on the next render.
+    this.setAttachmentTitles();
+    this.unsubscribeLanguage = onLanguageChange(() => {
+      this.setAttachmentTitles();
+      this.shownInventory = null;
+      this.shownNearby = "";
+      for (const row of [...this.bagRows.values(), ...this.nearbyRows]) row.shown = "";
+      for (const card of this.weaponCards) card.shown = "";
+      for (const cell of Object.values(this.gear)) cell.shown = "";
+      this.closeSplit();
+      this.hideTip();
+    });
   }
 
   get isOpen(): boolean {
@@ -401,6 +416,7 @@ export class InventoryScreen {
 
   dispose(): void {
     this.events.abort();
+    this.unsubscribeLanguage();
     this.itemObserver.remove();
     clearTimeout(this.noticeTimer);
     this.icons.dispose();
@@ -430,7 +446,7 @@ export class InventoryScreen {
         const def = ITEMS[itemId];
         const selected = def.category === "throwable" && inventory.selectedThrowable === def.id;
         row.node.toggleAttribute("data-selected", selected);
-        this.updateRow(row, itemId, def.name, selected ? `${itemSummary(itemId)} · selected` : itemSummary(itemId), def.category === "ammo" ? `${quantity}` : `×${quantity}`);
+        this.updateRow(row, itemId, itemName(itemId), selected ? t("inv.selected", { summary: itemSummary(itemId) }) : itemSummary(itemId), def.category === "ammo" ? `${quantity}` : `×${quantity}`);
       }
       group.node.hidden = !groupAny;
       any ||= groupAny;
@@ -445,7 +461,7 @@ export class InventoryScreen {
       card.shown = key;
       card.node.toggleAttribute("data-empty", !weapon);
       if (!weapon) {
-        setText(card.name, "Empty");
+        setText(card.name, t("inv.empty"));
         setText(card.magazine, "");
         setText(card.reserve, "");
         setText(card.caliber, "");
@@ -456,7 +472,7 @@ export class InventoryScreen {
       setText(card.name, def.name);
       setText(card.magazine, `${weapon.magazine}`);
       setText(card.reserve, ` / ${reserve}`);
-      setText(card.caliber, ITEMS[ammoForWeapon(weapon.weaponId)].name);
+      setText(card.caliber, itemName(ammoForWeapon(weapon.weaponId)));
       card.magazine.parentElement?.toggleAttribute("data-empty", weapon.magazine === 0);
       this.setIcon(card.icon, weaponItemId(weapon.weaponId));
     });
@@ -495,7 +511,7 @@ export class InventoryScreen {
       const item = items[index] ?? null;
       row.item = item;
       row.node.hidden = item === null;
-      if (item) this.updateRow(row, item.itemId, ITEMS[item.itemId].name, groundSummary(item), groundQuantity(item), `${item.lootId}:${item.quantity}:${item.durability ?? ""}:${item.magazine ?? ""}`);
+      if (item) this.updateRow(row, item.itemId, itemName(item.itemId), groundSummary(item), groundQuantity(item), `${item.lootId}:${item.quantity}:${item.durability ?? ""}:${item.magazine ?? ""}`);
     });
     this.nearbyEmpty.hidden = items.length > 0;
     setText(this.nearbyCount, items.length > 0 ? `${items.length}` : "");
@@ -516,8 +532,8 @@ export class InventoryScreen {
     const key = `${itemId ?? ""}:${condition === null ? "" : condition.toFixed(2)}`;
     if (key === cell.shown) return;
     cell.shown = key;
-    setText(cell.level, itemId ? `Lv.${level}` : "");
-    setText(cell.detail, itemId ? detail : "Empty");
+    setText(cell.level, itemId ? t("inv.level", { level }) : "");
+    setText(cell.detail, itemId ? detail : t("inv.empty"));
     cell.node.toggleAttribute("data-empty", !itemId);
     if (itemId) cell.node.dataset.level = String(level);
     else delete cell.node.dataset.level;
@@ -527,6 +543,10 @@ export class InventoryScreen {
       cell.bar.toggleAttribute("data-low", condition < 0.3);
     }
     this.setIcon(cell.icon, itemId);
+  }
+
+  private setAttachmentTitles(): void {
+    for (const [node, key] of this.attachmentTitles) node.title = t("inv.attachmentSoon", { slot: t(key) });
   }
 
   private setIcon(slot: IconSlot, itemId: ItemId | null): void {
@@ -583,7 +603,7 @@ export class InventoryScreen {
     if (quantity <= 0) return;
     this.hideTip();
     this.splitting = itemId;
-    setText(this.splitTitle, `Drop ${ITEMS[itemId].name}`);
+    setText(this.splitTitle, t("inv.dropItem", { name: itemName(itemId) }));
     for (const input of [this.splitRange, this.splitNumber]) {
       input.min = "1";
       input.max = String(quantity);
@@ -618,7 +638,7 @@ export class InventoryScreen {
 
   private readonly handleItemEvent = (event: ItemEvent): void => {
     if (!this.open) return;
-    if (event.type === "pickupFailed" || event.type === "dropFailed") this.showNotice(INVENTORY_ERROR_TEXT[event.error]);
+    if (event.type === "pickupFailed" || event.type === "dropFailed") this.showNotice(inventoryErrorText(event.error));
   };
 
   private readonly handleKey = (event: KeyboardEvent): void => {
@@ -687,10 +707,10 @@ export class InventoryScreen {
 
   // ---- DOM helpers ---------------------------------------------------------------------------------------------------
 
-  private column(parent: HTMLElement, className: string, title: string): HTMLDivElement {
+  private column(parent: HTMLElement, className: string, title: MessageKey): HTMLDivElement {
     const column = el("div", className, undefined, parent);
     const head = el("div", "tb-inv__title", undefined, column);
-    el("span", "", title, head);
+    elT("span", "", title, head);
     return column;
   }
 
@@ -770,7 +790,7 @@ function backpackItemId(level: number): BackpackItemId {
 /** Sub line for a ground item: weapons show their loaded rounds, armor its level summary. */
 function groundSummary(item: LootItem): string {
   const def = ITEMS[item.itemId];
-  if (def.category === "weapon") return `${itemSummary(item.itemId)}${item.magazine ? ` · ${item.magazine} loaded` : ""}`;
+  if (def.category === "weapon") return item.magazine ? t("inv.loaded", { summary: itemSummary(item.itemId), count: item.magazine }) : itemSummary(item.itemId);
   return itemSummary(item.itemId);
 }
 

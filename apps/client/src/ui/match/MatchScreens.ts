@@ -1,3 +1,4 @@
+import { t } from "../../i18n";
 import { prepareAnimation, replay } from "../anim";
 import { el } from "../dom";
 import { formatClock } from "./MatchHud";
@@ -72,7 +73,7 @@ class MatchScreen {
 }
 
 export interface DeathInfo {
-  /** "Bot Kilo killed you with AR-4 (Headshot)", "You died to the zone"… */
+  /** "Bot Kilo đã hạ gục bạn bằng AR-4 (Headshot)", "Bạn chết ngoài bo"… */
   readonly cause: string;
   /** Team placement when the team is out, else null (a teammate is still in play). */
   readonly placement: number | null;
@@ -82,15 +83,15 @@ export interface DeathInfo {
   readonly survivedSeconds: number;
 }
 
-/** "YOU WERE KILLED": cause, placement once the team is out, kills/damage/survival, spectate and new match. */
+/** "BẠN ĐÃ BỊ HẠ GỤC": cause, placement once the team is out, kills/damage/survival, spectate and new match. */
 export class DeathScreen extends MatchScreen {
   constructor(parent: HTMLElement) {
     super(parent, "death");
   }
 
   show(info: DeathInfo, actions: readonly ScreenAction[]): void {
-    const subtitle = info.placement !== null ? `#${info.placement} of ${info.teamCount}` : MATCH_STRINGS.screens.teamStillFighting;
-    this.render("YOU WERE KILLED", info.cause, statRows(info, subtitle), actions);
+    const subtitle = info.placement !== null ? t("death.placementOf", { place: info.placement, count: info.teamCount }) : MATCH_STRINGS.screens.teamStillFighting;
+    this.render(t("death.title"), info.cause, statRows(info, subtitle), actions);
   }
 }
 
@@ -101,11 +102,11 @@ export interface ResultInfo {
   readonly teamKills: number;
   readonly damage: number;
   readonly survivedSeconds: number;
-  /** "Last team standing", "Time limit"… */
+  /** "Đội cuối cùng trụ lại", "Hết thời gian"… */
   readonly reason: string;
 }
 
-/** Match result: "#1 WINNER" or "#3 of 5", kills, damage, survival time; new match. */
+/** Match result: "#1 CHIẾN THẮNG!" or "HẠNG #3 / 5", kills, damage, survival time; new match. */
 export class ResultScreen extends MatchScreen {
   constructor(parent: HTMLElement) {
     super(parent, "result");
@@ -114,21 +115,21 @@ export class ResultScreen extends MatchScreen {
   show(info: ResultInfo, actions: readonly ScreenAction[]): void {
     const winner = info.placement === 1;
     const rows: (readonly [string, string])[] = [
-      ["Placement", `#${info.placement} / ${info.teamCount}`],
-      ["Kills", String(info.kills)],
-      ["Team kills", String(info.teamKills)],
-      ["Damage dealt", String(Math.round(info.damage))],
-      ["Survived", formatClock(info.survivedSeconds)],
+      [t("stats.placement"), t("result.placementValue", { place: info.placement, count: info.teamCount })],
+      [t("stats.kills"), String(info.kills)],
+      [t("stats.teamKills"), String(info.teamKills)],
+      [t("stats.damage"), String(Math.round(info.damage))],
+      [t("stats.survived"), formatClock(info.survivedSeconds)],
     ];
-    this.render(winner ? "#1 WINNER" : `#${info.placement} OF ${info.teamCount}`, info.reason, rows, actions, winner);
+    this.render(winner ? t("result.winner") : t("result.placement", { place: info.placement, count: info.teamCount }), info.reason, rows, actions, winner);
   }
 }
 
 function statRows(info: DeathInfo, placement: string): (readonly [string, string])[] {
   return [
-    ["Placement", placement],
-    ["Kills", String(info.kills)],
-    ["Damage dealt", String(Math.round(info.damage))],
-    ["Survived", formatClock(info.survivedSeconds)],
+    [t("stats.placement"), placement],
+    [t("stats.kills"), String(info.kills)],
+    [t("stats.damage"), String(Math.round(info.damage))],
+    [t("stats.survived"), formatClock(info.survivedSeconds)],
   ];
 }

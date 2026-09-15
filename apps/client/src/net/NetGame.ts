@@ -10,6 +10,7 @@ import type { WeaponPresentation } from "../fx/WeaponPresentation";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
 import type { Hud } from "../ui/Hud";
+import { t } from "../i18n";
 import { NetDebugHud } from "../ui/NetDebugHud";
 import type { Environment } from "../world/environment";
 import { devPlayerId, fetchDevToken, parseNetParam, type NetEndpoint } from "./handshake";
@@ -182,7 +183,7 @@ export class NetGame {
     this.clock.stop();
     this.roster.clear();
     this.combatEvents?.clear();
-    this.hud?.showError("Connecting to match server…");
+    this.hud?.showError(t("net.connecting"));
     try {
       const { endpoint, sub, team } = this.config;
       const token = await fetchDevToken(endpoint, sub, team);
@@ -205,7 +206,7 @@ export class NetGame {
       console.info(`[net] ${transport.kind} ${endpoint.wsUrl} as ${sub} (team ${team})`);
     } catch (error) {
       console.error("[net] connect failed", error);
-      this.hud?.showError(`Cannot reach match server: ${error instanceof Error ? error.message : String(error)}`);
+      this.hud?.showError(t("net.cannotReach", { error: error instanceof Error ? error.message : String(error) }));
     } finally {
       this.connecting = false;
     }

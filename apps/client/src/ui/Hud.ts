@@ -5,7 +5,7 @@ import type { CombatView } from "../combat/types";
 import type { EquipmentView } from "../equipment/types";
 import { CombatHud } from "./CombatHud";
 import { Crosshair } from "./Crosshair";
-import { el } from "./dom";
+import { el, elT } from "./dom";
 import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEquipment";
 import { MapHud, type MapHudOptions, type MapViewSource } from "./map";
 import { PlayOverlay, type MatchSetup } from "./PlayOverlay";
@@ -74,7 +74,7 @@ export class Hud {
     this.stats = new StatsPanel(this.container, import.meta.env.DEV);
     this.crosshair = new Crosshair(this.container);
     this.overlay = new PlayOverlay(this.container, handlers.onPlayClick);
-    this.inspectorTag = el("div", "tb-inspector-tag", "INSPECTOR OPEN · F9 TO CLOSE", this.container);
+    this.inspectorTag = elT("div", "tb-inspector-tag", "overlay.inspectorOpen", this.container);
     this.refreshVisibility();
     void loadAudioCredits(import.meta.env.BASE_URL).then((lines) => {
       this.audioCredits = lines;
