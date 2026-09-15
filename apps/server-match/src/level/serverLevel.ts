@@ -1,7 +1,12 @@
+import { FakeNavQuery, type FakeNavBox } from "@twobullets/shared/bots/brain/fakeNav";
+import { buildNavGrid } from "@twobullets/shared/bots/nav/buildNavGrid";
+import { createNavQuery } from "@twobullets/shared/bots/nav/navQuery";
+import type { NavGrid, NavQuery } from "@twobullets/shared/bots/types";
 import type { LevelData } from "@twobullets/shared/level/types";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
 import { buildMapLayout, type MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import { MAP_V1 } from "@twobullets/shared/map/mapV1";
+import { REAL_MAPS } from "@twobullets/shared/map/real/index";
 import { decodeTerrainBake } from "@twobullets/shared/map/terrain/bake";
 import { buildTerrain, type Terrain } from "@twobullets/shared/map/terrain/terrain";
 import type { MapData } from "@twobullets/shared/map/types";
@@ -10,7 +15,7 @@ import type { TeamSpawnPlan, ZoneSpec } from "@twobullets/shared/match/types";
 import { DEFAULT_ZONE_SPEC, type ZoneCenterCheck } from "@twobullets/shared/match/zone";
 import { createMapSimWorld, createSimWorld, type HavokModule, type SimWorld } from "@twobullets/sim";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SpawnPlanner } from "../match/slots";
 
@@ -33,6 +38,18 @@ export interface MatchLevel {
   /** Map data load (terrain + layout), ms; 0 for the arena. */
   readonly loadMs: number;
   readonly source: "arena" | "bake" | "generated";
+  /**
+   * Bot navigation for one match (server bots): a fresh query over the map's nav grid, built on first use and shared by
+   * later matches on the same map in this process. Absent: an open fake nav.
+   */
+  readonly createNav?: () => MatchNav;
+}
+
+export interface MatchNav {
+  readonly nav: NavQuery;
+  /** Grid build time for this call, ms (0 when cached or fake). */
+  readonly buildMs: number;
+  readonly kind: "grid" | "cached" | "fake";
 }
 
 /** Arena-sized zone: Map v1's schedule with radii for a 120 m blockout. */
@@ -70,7 +87,23 @@ export function arenaMatchLevel(level: LevelData = ARENA_LEVEL, zone: ZoneSpec =
     createWorld: (havok) => createSimWorld(havok, level),
     loadMs: 0,
     source: "arena",
+    createNav: () => ({ nav: arenaNav(level, zone), buildMs: 0, kind: "fake" }),
   };
+}
+
+/** Blockout nav: open ground at the spawn height with the tall blocks' footprints as obstacles. */
+function arenaNav(level: LevelData, zone: ZoneSpec): NavQuery {
+  const boxes: FakeNavBox[] = [];
+  const groundY = level.spawnPoints[0]?.position[1] ?? 0;
+  for (const b of level.blocks) {
+    if (b.kind !== "box" || b.surface === "ground" || b.position[1] - b.size[1] / 2 > groundY + 1.5 || b.position[1] + b.size[1] / 2 < groundY + 0.6) continue;
+    const c = Math.abs(Math.cos(b.rotationY ?? 0));
+    const sn = Math.abs(Math.sin(b.rotationY ?? 0));
+    const hx = (b.size[0] * c + b.size[2] * sn) / 2;
+    const hz = (b.size[0] * sn + b.size[2] * c) / 2;
+    boxes.push({ minX: b.position[0] - hx, minZ: b.position[2] - hz, maxX: b.position[0] + hx, maxZ: b.position[2] + hz });
+  }
+  return new FakeNavQuery({ groundY, halfExtent: zone.initial.r, boxes });
 }
 
 /** A built map's data source: the `MapData` plus the terrain bake file name in the map assets directory. */
@@ -85,12 +118,15 @@ export type ServerMapLoader = () => Promise<ServerMapSource>;
 const MAP_LOADERS = new Map<string, ServerMapLoader>([["v1", async () => ({ map: MAP_V1, bakeFile: "mapV1.terrain.bin" })]]);
 
 /**
- * Extension point for registry maps (real-world maps in packages/shared/src/map/real). When the registry is ready, wire
- * each id once at startup, e.g. `registerServerMap(id, async () => { const m = await loadRealMap(id); return { map:
- * m.map, bakeFile: `${id}.terrain.bin` }; })`. Any `MapData` with a terrain spec, flatten list, POIs and spawns works.
+ * Adds (or replaces) a map id. Any `MapData` with a terrain spec, flatten list, POIs and spawns works. The real-world
+ * registry (packages/shared/src/map/real) is registered below; its modules load on first use.
  */
 export function registerServerMap(mapId: string, loader: ServerMapLoader): void {
   MAP_LOADERS.set(mapId, loader);
+}
+
+for (const entry of REAL_MAPS) {
+  registerServerMap(entry.info.id, async () => ({ map: (await entry.load()).map, bakeFile: basename(entry.info.bakeUrl) }));
 }
 
 export function knownServerMapIds(): string[] {
@@ -111,6 +147,8 @@ interface LoadedMap {
   readonly source: "bake" | "generated";
   readonly ms: number;
   readonly bakeProblem: string | null;
+  /** Built on the first match that needs bots. */
+  navGrid: NavGrid | null;
 }
 
 const loaded = new Map<string, Promise<LoadedMap>>();
@@ -133,7 +171,7 @@ async function loadMap(loader: ServerMapLoader, assetsDir: string): Promise<Load
   const source = terrain ? "bake" : "generated";
   terrain ??= buildTerrain(map.terrain, map.flatten);
   const layout = buildMapLayout(map, terrain);
-  return { map, terrain, layout, source, ms: performance.now() - started, bakeProblem };
+  return { map, terrain, layout, source, ms: performance.now() - started, bakeProblem, navGrid: null };
 }
 
 export interface ResolveLevelOptions {
@@ -142,7 +180,7 @@ export interface ResolveLevelOptions {
 }
 
 /**
- * The level for a `MatchConfig.mapId`: `arena` (dev blockout) or a registered map (`v1`). Rejects unknown ids. Map data
+ * The level for a `MatchConfig.mapId`: `arena` (dev blockout) or a registered map (`v1`, the real-world ids). Rejects unknown ids. Map data
  * is cached per process, so a second call for the same map is instant.
  */
 export async function resolveServerLevel(mapId: string, options: ResolveLevelOptions = {}): Promise<MatchLevel> {
@@ -171,5 +209,11 @@ export async function resolveServerLevel(mapId: string, options: ResolveLevelOpt
     createWorld: (havok) => Promise.resolve(createMapSimWorld(havok, input)),
     loadMs: first ? data.ms : 0,
     source: data.source,
+    createNav: () => {
+      if (data.navGrid !== null) return { nav: createNavQuery(data.navGrid), buildMs: 0, kind: "cached" };
+      const started = performance.now();
+      data.navGrid = buildNavGrid({ map, terrain, layout });
+      return { nav: createNavQuery(data.navGrid), buildMs: performance.now() - started, kind: "grid" };
+    },
   };
 }

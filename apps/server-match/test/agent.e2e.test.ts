@@ -145,7 +145,8 @@ describe("server-api allocator → server-match --mode=agent (real processes)", 
       expect(client.disconnect).toBeNull();
       expect(client.welcome).toMatchObject({ playerSlot: 0, teamId: 0, teamSize: 2, maxPlayers: 4, phase: PhaseCode.Warmup });
       expect(await until(() => client.phase !== null && client.snapshotsReceived >= 10, 10_000)).toBe(true);
-      expect(client.phase).toMatchObject({ phase: PhaseCode.Warmup, playersAlive: 1 });
+      // The lobby's three bot seats are in the match from allocation (server bots), next to the host.
+      expect(client.phase).toMatchObject({ phase: PhaseCode.Warmup, playersAlive: 4, teamsAlive: 2 });
       expect(await until(() => r.app.matches.get(matchId)!.connected.has(host.account.id), 5000)).toBe(true);
 
       // The same token again is refused (single use).
@@ -166,7 +167,7 @@ describe("server-api allocator → server-match --mode=agent (real processes)", 
     expect(result).toMatchObject({ outcome: "cancelled" });
     expect(matchExited(r)).toBe(true);
     const log = r.lines.join("\n");
-    expect(log).toMatch(/\[agent\] allocated .* on v1 \((bake|generated), map load \d+ ms, ready in \d+ ms\)/);
+    expect(log).toMatch(/\[agent\] allocated .* on v1 \((bake|generated), map load \d+ ms, ready in \d+ ms\): .*, 3 normal bots, nav grid \d+ ms/);
     if (process.env.E2E_LOG) writeFileSync(process.env.E2E_LOG, r.lines.join("\n"));
     rig = null;
   }, 60_000);

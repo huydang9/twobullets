@@ -18,8 +18,8 @@ beforeAll(async () => {
 }, 60_000);
 
 describe("resolveServerLevel", () => {
-  it("knows arena and v1, rejects unknown ids, and caches map data per process", async () => {
-    expect(knownServerMapIds()).toEqual(["arena", "v1"]);
+  it("knows arena, v1 and the real-world maps, rejects unknown ids, and caches map data per process", async () => {
+    expect(knownServerMapIds()).toEqual(["arena", "v1", "cz-holasovice", "vn-camthanh", "jp-shirakawago"]);
     const arena = await resolveServerLevel("arena");
     expect(arena).toMatchObject({ mapId: "arena", source: "arena", zone: ARENA_ZONE_SPEC });
     await expect(resolveServerLevel("vn-hoian")).rejects.toThrow(/unknown map "vn-hoian"/);

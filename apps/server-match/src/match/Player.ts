@@ -10,6 +10,7 @@ import { createWeaponState } from "@twobullets/shared/weapons/weaponStep";
 import type { PlayerBody } from "@twobullets/sim";
 import { ViewDelayEstimator } from "../hitreg/ViewDelay";
 import { ClientReplication, type ReplicatedPlayer } from "../snapshot/SnapshotBuilder";
+import type { BotSeat } from "../bots/ServerBots";
 
 // One slot's character and connection state on the match server. Movement/weapon state is predicted by the client;
 // vitals and armor are server-owned (replicated in the owner vitals group and remote flags).
@@ -55,6 +56,8 @@ export class Player implements ReplicatedPlayer {
   pitchQ = LEVEL_PITCH_Q;
   buttons = 0;
   session: Session | null = null;
+  /** Server bot driving this slot's input buffer (never has a session), or null for a human. */
+  bot: BotSeat | null = null;
   lastRecvMs = 0;
   disconnectedAtMs = -1;
   rateWindowStartMs = 0;

@@ -38,6 +38,9 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/server-match ./apps/server-match
 COPY apps/server-api ./apps/server-api
+# Terrain bakes for built maps (Map v1 and the real-world maps); a missing bake makes the match process generate the terrain.
+COPY apps/client/public/assets/map/*.terrain.bin ./assets/map/
+ENV TB_MAP_ASSETS_DIR=/repo/assets/map
 ARG TB_BUILD=dev
 ENV TB_BUILD=${TB_BUILD}
 RUN mkdir -p /data && chown node:node /data

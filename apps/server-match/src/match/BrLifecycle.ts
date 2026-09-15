@@ -22,7 +22,8 @@ import type { ServerCombat } from "./ServerCombat";
 // Server battle royale loop (plan.md B1, netcode.md §8): Warmup → LandingSelect → Glide → Combat → End on match ticks,
 // with the shared rules (zone schedule and damage, knocks, team eliminations, placements, time cap).
 //   Warmup: joins open, damage off, the dead respawn. Ends `warmupSeconds` after the first human joins, sooner once every
-//     rostered human is connected (`allJoinedSeconds`); holds while no human is connected.
+//     rostered human is connected (`allJoinedSeconds`); holds while no human is connected. Bots don't count as humans
+//     and stand still until combat; at the end, `fillWithBots` puts bots in the slots nobody took.
 //   LandingSelect / Glide: MVP hooks with zero default length. Glide start puts every player on its team start with a
 //     fresh loadout (B3 replaces this with landing marker → spawn at altitude → glide).
 //   Combat: damage on, no respawns, no new joins; zone phases announced one at a time (centers from the match seed and a
@@ -69,6 +70,8 @@ export interface LifecycleHost {
   readonly isValidZoneCenter: ZoneCenterCheck | null;
   /** Team start, fresh loadout and vitals. */
   placeAtStart(p: Player): void;
+  /** Warmup is over: server bots take the slots nobody joined (`rules.fillWithBots`). Returns the bots added. */
+  fillBots?(): number;
   /** Lifecycle phase for the host agent (contracts `MatchPhase`). */
   lifecyclePhase(phase: MatchPhase): void;
   /** The result is final (sent once). */
@@ -259,7 +262,10 @@ export class BrLifecycle {
       this.phaseEndTick = end;
       this.broadcastPhase();
     }
-    if (end > 0 && tick >= end) this.setPhase("LandingSelect", tick, tick + this.ticks(this.o.landingSeconds));
+    if (end > 0 && tick >= end) {
+      this.host.fillBots?.();
+      this.setPhase("LandingSelect", tick, tick + this.ticks(this.o.landingSeconds));
+    }
   }
 
   /** B3 hook: spawn at altitude above the team's landing choice and glide. MVP: team starts on the ground. */
@@ -279,7 +285,8 @@ export class BrLifecycle {
       s.kills = s.knocks = s.damageDealt = s.deaths = s.revives = 0;
     }
     refreshTeamCounts(this.teams, this.host.slots);
-    // Teams nobody joined are out from the start and share the last place.
+    // Bots sit in their roster seats from the start (and fill empty slots at warmup end with `fillWithBots`), so only
+    // teams with nobody in them at all are out from the start; they share the last place.
     for (const team of this.teams) {
       if (team.inPlay > 0) continue;
       team.eliminated = true;

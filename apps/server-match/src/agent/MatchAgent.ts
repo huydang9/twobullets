@@ -114,9 +114,11 @@ export class MatchAgent {
       return;
     }
     const humans = config.teams.reduce((n, t) => n + t.accountIds.filter((id) => !id.startsWith("bot:")).length, 0);
+    const nav = match.navInfo;
+    const bots = nav === null ? "no bots" : `${match.bots?.count ?? 0} ${match.bots?.difficulty ?? ""} bots, nav ${nav.kind}${nav.kind === "grid" ? ` ${nav.buildMs.toFixed(0)} ms` : ""}`;
     this.log(
       `[agent] allocated ${config.matchId} on ${config.mapId} (${level.source}, map load ${level.loadMs.toFixed(0)} ms, ready in ${(performance.now() - started).toFixed(0)} ms): ` +
-        `${config.maxPlayers} players ${config.teamMode ?? `teams of ${config.maxTeamSize}`}, ${humans} humans, hid ${config.hostId}, rss ${(process.memoryUsage.rss() / 1e6).toFixed(0)} MB`,
+        `${config.maxPlayers} players ${config.teamMode ?? `teams of ${config.maxTeamSize}`}, ${humans} humans, ${bots}, hid ${config.hostId}, rss ${(process.memoryUsage.rss() / 1e6).toFixed(0)} MB`,
     );
   }
 

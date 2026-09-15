@@ -68,6 +68,11 @@ export interface TeamAssignment {
   readonly accountIds: readonly string[];
 }
 
+/** Server bot tuning (mirrors @twobullets/shared/bots `BotDifficulty`). */
+export type BotDifficulty = "easy" | "normal" | "hard";
+export const BOT_DIFFICULTIES: readonly BotDifficulty[] = ["easy", "normal", "hard"];
+export const DEFAULT_BOT_DIFFICULTY: BotDifficulty = "normal";
+
 export interface MatchRules {
   readonly friendlyFire: boolean;
   /** Knocked players are revived by a teammate in this many seconds; 0 disables knock-down. */
@@ -95,6 +100,8 @@ export interface MatchConfig {
   readonly teamMode?: TeamMode;
   readonly teams: readonly TeamAssignment[];
   readonly rules: MatchRules;
+  /** Server bots (`bot:<n>` seats and `rules.fillWithBots` fills). Absent = DEFAULT_BOT_DIFFICULTY. */
+  readonly botDifficulty?: BotDifficulty;
 }
 
 /** Join JWT claims (ADR 0106, D17). Verified offline against cached JWKS; the header carries `kid`. */

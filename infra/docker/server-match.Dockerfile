@@ -31,6 +31,9 @@ COPY --from=deps /repo /repo
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/server-match ./apps/server-match
+# Terrain bakes for built maps (Map v1 and the real-world maps); a missing bake means generating the terrain at allocate.
+COPY apps/client/public/assets/map/*.terrain.bin ./assets/map/
+ENV TB_MAP_ASSETS_DIR=/repo/assets/map
 USER node
 EXPOSE 7350
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

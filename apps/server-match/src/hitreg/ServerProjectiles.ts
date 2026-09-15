@@ -19,6 +19,9 @@ export interface ProjectileHitSink {
   worldHit?(shooter: number, weaponId: WeaponId, point: Vec3): void;
 }
 
+/** Every flight segment (bot hearing: near misses). `tEnd` is the fraction flown, `struck` whether it hit something. */
+export type ProjectileSegmentListener = (shooter: number, weaponId: WeaponId, from: Vec3, to: Vec3, tEnd: number, struck: boolean) => void;
+
 export interface ServerProjectileStats {
   spawned: number;
   segments: number;
@@ -33,6 +36,8 @@ export interface ServerProjectileStats {
 export class ServerProjectiles {
   readonly buffer: ProjectileBuffer;
   readonly stats: ServerProjectileStats = { spawned: 0, segments: 0, worldRays: 0, playerHits: 0, worldHits: 0, expired: 0, historyMisses: 0 };
+  /** Optional per-segment hook (null = no cost). */
+  onSegment: ProjectileSegmentListener | null = null;
   private readonly history: LagCompHistory;
   private readonly raycastWorld: RaycastFn;
   private viewDelay: Float64Array;
@@ -129,12 +134,15 @@ export class ServerProjectiles {
         }
       }
 
+      const listener = this.onSegment;
       if (victim < 0 && worldHit === null) {
+        if (listener !== null) listener(shooter, b.weaponId(i), from, to, 1, false);
         if (b.advance(i, seg, reachesMaxRange)) i++;
         else this.expire(i);
         continue;
       }
 
+      if (listener !== null) listener(shooter, b.weaponId(i), from, to, best, true);
       const p = this.point;
       p.x = from.x + (to.x - from.x) * best;
       p.y = from.y + (to.y - from.y) * best;

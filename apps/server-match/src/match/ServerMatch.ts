@@ -1,4 +1,5 @@
 import type { JoinClaims, MatchConfig, MatchPhase, MatchResult } from "@twobullets/contracts";
+import { isBotAccountId } from "@twobullets/contracts/claims";
 import type { Clock, Session } from "@twobullets/netcode";
 import { writeOwnerMove } from "@twobullets/netcode/replication";
 import {
@@ -26,12 +27,16 @@ import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
 import { Btn, PlayerActionType, type MoveGates, type PlayerInput } from "@twobullets/shared/input";
 import { createMoveState, fallDamage } from "@twobullets/shared/movement/movement";
 import type { Stance, Vec3 } from "@twobullets/shared/movement/types";
+import { createZoneState } from "@twobullets/shared/match/zone";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
+import type { BotBrainFactory } from "@twobullets/shared/bots/types";
+import type { BrPhase } from "@twobullets/shared/match/types";
 import { stepPlayer, type HavokModule, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
 import { createHmac } from "node:crypto";
 import type { AttachResult, Match } from "../host/MatchHost";
 import { disconnectSession } from "../session/control";
-import { arenaMatchLevel, type MatchLevel } from "../level/serverLevel";
+import { ServerBots } from "../bots/ServerBots";
+import { arenaMatchLevel, type MatchLevel, type MatchNav } from "../level/serverLevel";
 import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
 import { BrLifecycle, type BrLifecycleOptions, type LifecycleHost } from "./BrLifecycle";
 import { freshPlayerState, Player } from "./Player";
@@ -42,6 +47,8 @@ import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slo
 // registration and vitals (ServerCombat), and snapshots. Lifecycle (contracts MatchPhase): Booting (sim world loading) →
 // Allocated (ready, accepting joins) → Warmup → Ended. With `lifecycle` (agent mode, `--flow=br`) the battle royale loop
 // runs (BrLifecycle): Warmup → LandingSelect → Glide → Combat → Ended/Cancelled, then the match closes itself.
+// Server bots (ServerBots) take the roster's `bot:<n>` seats when the world is ready and, with `rules.fillWithBots` in a BR
+// match, every slot still empty when warmup ends; their brains write into the same input buffers humans' packets do.
 
 export interface ServerMatchOptions {
   readonly config: MatchConfig;
@@ -74,6 +81,8 @@ export interface ServerMatchOptions {
   readonly onClosed?: () => void;
   /** Debug/test hook, runs at the end of every tick. */
   readonly onTickEnd?: (tick: number, match: ServerMatch) => void;
+  /** Bot brain override (tests). Default: the shared `createBotBrain`. */
+  readonly botBrainFactory?: BotBrainFactory;
 }
 
 export interface MatchStats {
@@ -94,6 +103,7 @@ const INTERP_FLOOR_WS_MS = 50;
 const INTERP_FLOOR_WT_MS = 25;
 const MAX_REWIND_MS = 200;
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+const BOT_PHASE: Readonly<Record<BrLifecycle["phase"], BrPhase>> = { Warmup: "warmup", LandingSelect: "landing", Glide: "glide", Combat: "combat", End: "ended" };
 const PHASE_CODES = { Warmup: PhaseCode.Warmup, LandingSelect: PhaseCode.LandingSelect, Glide: PhaseCode.Glide, Combat: PhaseCode.Combat, End: PhaseCode.End } as const;
 
 export class ServerMatch implements Match, CombatHost {
@@ -106,6 +116,10 @@ export class ServerMatch implements Match, CombatHost {
   combat: ServerCombat | null = null;
   /** Null in the sandbox and until the world is ready. */
   lifecycle: BrLifecycle | null = null;
+  /** Null when the match has no bot seats (and can't fill any), and until the world is ready. */
+  bots: ServerBots | null = null;
+  /** Bot nav built for this match (grid build ms, or a cached/fake nav); null without bots. */
+  navInfo: Omit<MatchNav, "nav"> | null = null;
   readonly level: MatchLevel;
   private phaseValue: MatchPhase = "Booting";
   private closed = false;
@@ -157,6 +171,7 @@ export class ServerMatch implements Match, CombatHost {
       combat.attach(this, teamCount, teamSize);
       this.combat = combat;
       if (this.phaseValue !== "Booting") return;
+      if (this.needsBots()) this.startBots(world, combat);
       if (options.lifecycle) {
         this.lifecycle = new BrLifecycle(this.lifecycleHost(combat, teamCount, teamSize), options.lifecycle, this.clock.now(), this.next);
         this.setPhase("Warmup");
@@ -243,6 +258,11 @@ export class ServerMatch implements Match, CombatHost {
     const players = this.active;
     const frozen = lifecycle !== null && lifecycle.frozen;
     combat.beginTick(tick);
+    const bots = this.bots;
+    if (bots !== null && !frozen) {
+      const phase: BrPhase = lifecycle === null ? "combat" : BOT_PHASE[lifecycle.phase];
+      bots.beginTick(tick, players, phase, phase !== "combat");
+    }
     if (BODY_BLOCKING_SUPPORTED && this.config.rules.bodyBlocking) this.syncBodiesForBlocking();
     const killY = this.level.killY;
     for (let i = 0; i < players.length; i++) {
@@ -357,6 +377,7 @@ export class ServerMatch implements Match, CombatHost {
       zone: this.level.zone,
       isValidZoneCenter: this.level.isValidZoneCenter,
       placeAtStart: (p) => this.respawn(p),
+      fillBots: () => this.fillEmptySlotsWithBots(),
       lifecyclePhase: (phase) => this.setPhase(phase),
       result: (result) => this.options.onResult?.(result),
       close: () => this.end(this.closeReason),
@@ -374,6 +395,79 @@ export class ServerMatch implements Match, CombatHost {
     p.buttons = 0;
     p.poseDiscontinuous = true;
     this.combat!.history.clear(p.slot);
+    this.bots?.reset(p);
+  }
+
+  private needsBots(): boolean {
+    if (this.options.lifecycle && this.config.rules.fillWithBots) return true;
+    for (const t of this.config.teams) for (const id of t.accountIds) if (isBotAccountId(id)) return true;
+    return false;
+  }
+
+  /** Nav for this match, the bot driver, and the roster's bot seats (slot = team · size + index in the team list). */
+  private startBots(world: SimWorld, combat: ServerCombat): void {
+    const made = this.level.createNav?.() ?? arenaMatchLevel().createNav!();
+    this.navInfo = { buildMs: made.buildMs, kind: made.kind };
+    const lifecycleZone = (): BrLifecycle["zoneState"] | null => this.lifecycle?.zoneState ?? null;
+    const idleZone = idleZoneState(this.level);
+    const bots = new ServerBots({
+      matchSeed: this.config.matchSeed,
+      maxSlots: this.slots.length,
+      difficulty: this.config.botDifficulty,
+      nav: made.nav,
+      raycastWorld: world.raycastWorld,
+      history: combat.history,
+      zone: () => lifecycleZone() ?? idleZone,
+      brainFactory: this.options.botBrainFactory,
+    });
+    this.bots = bots;
+    combat.onDamage = (victim, attacker, amount, kind, dirX, dirZ) => bots.onDamage(victim, attacker, amount, kind, dirX, dirZ);
+    combat.projectiles.onSegment = (shooter, weaponId, from, to, tEnd, struck) => bots.onSegment(shooter, weaponId, from, to, tEnd, struck);
+    const teamSize = matchTeamSize(this.config);
+    for (const team of this.config.teams) {
+      team.accountIds.forEach((id, index) => {
+        const slot = team.teamId * teamSize + index;
+        if (isBotAccountId(id) && index < teamSize && slot < this.slots.length && this.slots[slot] === null) this.addBot(slot, id);
+      });
+    }
+  }
+
+  /** A bot player in `slot`: body at the slot's spawn, M4 loadout, brain attached. Bots never have a session. */
+  private addBot(slot: number, accountId: string): Player {
+    const spawn = this.spawnFor(slot);
+    const player = new Player(slot, Math.floor(slot / matchTeamSize(this.config)), accountId, this.world!.createBody(spawn.feet), spawn);
+    player.armor = this.combat!.armorForSpawn();
+    this.slots[slot] = player;
+    this.byAccount.set(accountId, player);
+    this.rebuildActive();
+    this.bots!.attach(player);
+    return player;
+  }
+
+  /** BR warmup is over: bots take every slot nobody joined (`rules.fillWithBots`). Returns the bots added. */
+  fillEmptySlotsWithBots(): number {
+    if (this.bots === null || !this.config.rules.fillWithBots || this.world === null) return 0;
+    let next = 0;
+    for (const p of this.active) {
+      if (!isBotAccountId(p.accountId)) continue;
+      const n = Number(p.accountId.slice(p.accountId.indexOf(":") + 1));
+      if (Number.isInteger(n) && n >= next) next = n + 1;
+    }
+    for (const t of this.config.teams) {
+      for (const id of t.accountIds) {
+        const n = isBotAccountId(id) ? Number(id.slice(id.indexOf(":") + 1)) : NaN;
+        if (Number.isInteger(n) && n >= next) next = n + 1;
+      }
+    }
+    let added = 0;
+    for (let slot = 0; slot < this.slots.length; slot++) {
+      if (this.slots[slot] !== null) continue;
+      let id = `bot:${next++}`;
+      while (this.byAccount.has(id)) id = `bot:${next++}`;
+      this.addBot(slot, id);
+      added++;
+    }
+    return added;
   }
 
   private step(p: Player, input: PlayerInput, combat: ServerCombat): void {
@@ -397,6 +491,7 @@ export class ServerMatch implements Match, CombatHost {
       const e = events[k]!;
       if (e.type === "landed") combat.landed(p, fallDamage(e.fallSpeed));
     }
+    this.bots?.afterStep(p, shots, events);
   }
 
   /**
@@ -572,3 +667,7 @@ export class ServerMatch implements Match, CombatHost {
   }
 }
 
+/** The zone a bot sees outside BR combat: the level's initial circle, not shrinking. */
+function idleZoneState(level: MatchLevel): BrLifecycle["zoneState"] {
+  return createZoneState(level.zone);
+}

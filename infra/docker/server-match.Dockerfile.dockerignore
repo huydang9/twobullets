@@ -10,6 +10,8 @@ assets-src
 docs
 tools
 apps/client/public
+# Terrain bakes the match server loads (TB_MAP_ASSETS_DIR).
+!apps/client/public/assets/map/*.terrain.bin
 apps/client/src
 apps/bot/src
 apps/server-api

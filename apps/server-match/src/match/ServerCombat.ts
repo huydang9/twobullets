@@ -88,6 +88,8 @@ export class ServerCombat implements ProjectileHitSink {
   damageEnabled: boolean;
   /** The dead respawn after NET_RESPAWN_SECONDS (sandbox and BR warmup); off in BR combat. */
   respawnEnabled = true;
+  /** Damage dealt to a player (server bots' DamageTaken). `dirX/dirZ`: horizontal direction the damage travelled. */
+  onDamage: ((victim: Player, attacker: number, amount: number, kind: DamageKind, dirX: number, dirZ: number) => void) | null = null;
   private readonly dt: number;
   private readonly respawnTicks: number;
   private readonly spawnArmor: (() => ArmorLoadout) | null;
@@ -141,9 +143,13 @@ export class ServerCombat implements ProjectileHitSink {
 
   /** A shot the weapon step fired for `p` this tick (only alive players fire). */
   fire(p: Player, shot: AimedShot, viewOffset8: number): void {
-    const clampsBefore = p.viewDelay.stats.clamps;
-    const d = p.viewDelay.validate(viewOffset8, this.history.maxRewindTicks);
-    if (p.viewDelay.stats.clamps !== clampsBefore) this.stats.viewDelayClamps++;
+    // Server bots aim at present-time poses: no rewind.
+    let d = 0;
+    if (p.bot === null) {
+      const clampsBefore = p.viewDelay.stats.clamps;
+      d = p.viewDelay.validate(viewOffset8, this.history.maxRewindTicks);
+      if (p.viewDelay.stats.clamps !== clampsBefore) this.stats.viewDelayClamps++;
+    }
     this.projectiles.spawn(shot, p.slot, d);
     this.shots.add(this.tickNow, p.slot, shot, p.yawQ, p.pitchQ);
     this.stats.shotsFired++;
@@ -292,6 +298,7 @@ export class ServerCombat implements ProjectileHitSink {
     r.killed = outcome.killed;
     if (outcome.dealt <= 0 && r.absorbed <= 0) return r;
     this.stats.damageEvents++;
+    if (this.onDamage !== null && outcome.dealt > 0) this.onDamage(v, attacker, outcome.dealt, kind, -toX, -toZ);
     const attackerPlayer = attacker >= 0 ? this.host!.slots[attacker] : null;
     if (attackerPlayer && attackerPlayer.teamId !== v.teamId) attackerPlayer.combat.damageDealt = Math.round((attackerPlayer.combat.damageDealt + outcome.dealt) * 10) / 10;
     if (notify && v.session !== null) v.net.push(writeDamageTaken(attacker, outcome.dealt, zone, kind, toX, toZ, this.store));
