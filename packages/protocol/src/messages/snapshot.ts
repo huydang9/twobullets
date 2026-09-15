@@ -1,5 +1,5 @@
 import type { BitReader, BitWriter } from "../bits";
-import { WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
+import { MAX_PLAYER_SLOTS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
 import {
   BLOOM_BITS,
   COOLDOWN_BITS,
@@ -52,8 +52,8 @@ import { MsgId } from "./ids";
 export const SNAPSHOT_MAX_BYTES = 1000;
 /** Per-client baseline ring (D9). */
 export const BASELINE_RING = 128;
-/** Player slots 0..15. */
-export const MAX_ENTITY_SLOTS = 16;
+/** Player slots 0..19 (v3; the 5-bit slot-limit field allows up to 31). */
+export const MAX_ENTITY_SLOTS = MAX_PLAYER_SLOTS;
 
 export const SnapshotSection = { owner: 1, entities: 2, shots: 4, reliable: 8, throwables: 16, versions: 32, hits: 64 } as const;
 /** Weapon slots in the owner ammo group (3-bit count). */
@@ -143,7 +143,7 @@ export const EntityPresence = { absent: 0, full: 1, audibleOnly: 2, removed: 3 }
 export type EntityPresence = (typeof EntityPresence)[keyof typeof EntityPresence];
 
 export interface EntityState {
-  /** Player slot 0..15. */
+  /** Player slot 0..MAX_ENTITY_SLOTS-1. */
   readonly slot: number;
   readonly presence: EntityPresence;
   readonly xMm: number;
@@ -858,7 +858,7 @@ export function snapshotSections(snapshot: Snapshot): number {
 
 /**
  * Encodes against `baseline` (null = full). Use `encodeSnapshotCapped` to enforce the size cap. Entities must be
- * sorted by slot with unique slots < 16, and all values in their quantized ranges (use quantize.ts), or the stored
+ * sorted by slot with unique slots < MAX_ENTITY_SLOTS, and all values in their quantized ranges (use quantize.ts), or the stored
  * baseline and the client's decoded copy diverge. `header.baselineTick` must equal `baseline.header.serverTick` (or
  * null).
  */
@@ -910,6 +910,7 @@ export function encodeSnapshot(w: BitWriter, snapshot: Snapshot, baselineIn: Sna
   if (stats) stats.ownerBits = w.bitLength - mark;
   if (entities.length > 0) {
     const slotLimit = entities[entities.length - 1]!.slot + 1;
+    if (slotLimit > MAX_ENTITY_SLOTS) throw new RangeError(`Snapshot entities must be sorted by unique slot < ${MAX_ENTITY_SLOTS}`);
     w.write(slotLimit, 5);
     let next = 0;
     for (let slot = 0; slot < slotLimit; slot++) {
@@ -924,7 +925,7 @@ export function encodeSnapshot(w: BitWriter, snapshot: Snapshot, baselineIn: Sna
       else if (e.presence === EntityPresence.audibleOnly) writeAudibleEntity(w, e);
       if (stats && next - 1 < stats.entityBits.length) stats.entityBits[next - 1] = w.bitLength - mark;
     }
-    if (next !== entities.length) throw new RangeError("Snapshot entities must be sorted by unique slot < 16");
+    if (next !== entities.length) throw new RangeError(`Snapshot entities must be sorted by unique slot < ${MAX_ENTITY_SLOTS}`);
   }
 }
 
@@ -1075,8 +1076,7 @@ function readEventSections(r: BitReader, sections: number, out: MutableSnapshot)
     for (let i = 0; i < n; i++) {
       if (out.hitPool.length <= i) out.hitPool.push(createPlayerHitEvent());
       const e = out.hitPool[i]!;
-      readPlayerHitEvent(r, e);
-      if (r.overflowed) return false;
+      if (!readPlayerHitEvent(r, e) || r.overflowed) return false;
       out.hits.push(e);
     }
   }

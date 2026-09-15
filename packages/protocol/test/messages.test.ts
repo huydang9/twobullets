@@ -187,11 +187,13 @@ describe("control messages", () => {
     expect(decodeHello(createBitReader(w.bytes()))).toEqual(m);
   });
 
-  it("Welcome is 40 bytes", () => {
+  it("Welcome is 42 bytes and carries slot 19, team 19, team size and player count", () => {
     const w = createBitWriter(64);
     const m: Welcome = {
-      playerSlot: 9,
-      teamId: 4,
+      playerSlot: 19,
+      teamId: 19,
+      teamSize: 1,
+      maxPlayers: 20,
       serverTick: 4_000_000_000,
       tickRate: 60,
       snapshotRate: 60,
@@ -205,8 +207,11 @@ describe("control messages", () => {
       flags: 5,
     };
     encodeWelcome(w, m);
-    expect(w.byteLength).toBe(40);
+    expect(w.byteLength).toBe(42);
     expect(decodeWelcome(createBitReader(w.bytes()))).toEqual(m);
+    w.reset();
+    encodeWelcome(w, { ...m, playerSlot: 20 });
+    expect(decodeWelcome(createBitReader(w.bytes()))).toBeNull();
   });
 
   it("Disconnect, Resync, Ping", () => {

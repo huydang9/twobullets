@@ -4,7 +4,7 @@ import { createBitWriter } from "../src/bits";
 import { encodeInputPacket } from "../src/messages/input";
 import { encodeKillFeed } from "../src/messages/control";
 import { SHOT_EVENT_BITS, PLAYER_HIT_EVENT_BITS, ReliableEventType, reliableSectionBits } from "../src/messages/events";
-import { encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
+import { encodeSnapshot, MAX_ENTITY_SLOTS, SNAPSHOT_MAX_BYTES, type Snapshot } from "../src/messages/snapshot";
 import { CombatWorld, randomReliable, SnapshotWorld } from "./fixtures";
 import { createTestRng, randInt } from "./rng";
 
@@ -77,10 +77,10 @@ describe("wire sizes", () => {
   it("events against netcode.md §6.5 (Shot 8 B, PlayerHit 2 B, HitConfirm/DamageTaken/Kill 6 B, KillFeed 12 B)", () => {
     const rng = createTestRng(2);
     // Shot carries the full 20/18-bit input aim, 1/64° spread and a 1 cm origin offset (exact pellet seed + aim for
-    // remote tracers) where the doc's tracer-only layout had 16/16-bit aim and no origin: 99 bits.
-    expect(SHOT_EVENT_BITS).toBe(99);
+    // remote tracers) where the doc's tracer-only layout had 16/16-bit aim and no origin. v3 slots are 5 bits: 100 bits.
+    expect(SHOT_EVENT_BITS).toBe(100);
     expect(Math.ceil(SHOT_EVENT_BITS / 8)).toBeLessThanOrEqual(13);
-    expect(PLAYER_HIT_EVENT_BITS).toBe(12);
+    expect(PLAYER_HIT_EVENT_BITS).toBe(13);
     const single: Record<number, number> = {};
     for (const type of [ReliableEventType.HitConfirm, ReliableEventType.DamageTaken, ReliableEventType.Kill]) {
       let e = randomReliable(rng, 5);
@@ -99,30 +99,8 @@ describe("wire sizes", () => {
   });
 
   it("10-player combat snapshot (weapon/vitals groups, shots, reliable events) against netcode.md §2.4", () => {
-    const combat = new CombatWorld(createTestRng(19));
-    const w = createBitWriter(1500);
-    const history: Snapshot[] = [];
-    const full: number[] = [];
-    const delta: number[] = [];
-    const owner: number[] = [];
-    const events: number[] = [];
-    for (let t = 0; t < 3600; t++) {
-      const snap = combat.snapshot(0);
-      history.push(snap);
-      w.reset();
-      encodeSnapshot(w, snap, null);
-      full.push(w.byteLength);
-      if (history.length > 4) {
-        w.reset();
-        const stats = { shotsBits: 0, hitsBits: 0, reliableBits: 0, ownerBits: 0, entityBits: new Int32Array(16) };
-        encodeSnapshot(w, snap, history[history.length - 5]!, stats);
-        delta.push(w.byteLength);
-        owner.push(stats.ownerBits / 8);
-        events.push((stats.shotsBits + stats.reliableBits + stats.hitsBits) / 8);
-      }
-    }
-    const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-    const p95 = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length * 0.95)]!;
+    const { full, delta, owner, events } = combatSizes(10);
+    const p95 = (a: number[]) => pct(a, 0.95);
     log(`combat full mean ${mean(full).toFixed(1)} B; delta mean ${mean(delta).toFixed(1)} B, p95 ${p95(delta)} B, max ${Math.max(...delta)} B; owner ${mean(owner).toFixed(1)} B, events ${mean(events).toFixed(1)} B`);
     // netcode.md: full 226 B, delta mean 108 B / p95 135 B, owner block 11.6 B, events 6.5 B.
     expect(mean(full)).toBeLessThanOrEqual(250);
@@ -130,4 +108,68 @@ describe("wire sizes", () => {
     expect(p95(delta)).toBeLessThanOrEqual(160);
     expect(mean(owner)).toBeLessThanOrEqual(16);
   });
+
+  it("20-player combat snapshot: under the datagram cap and the 160 kbps p99 downstream budget", () => {
+    const { full, delta, owner, events } = combatSizes(20);
+    const p99 = pct(delta, 0.99);
+    // netcode.md §2.4: WebTransport datagram over IPv4 ≈ 58 B overhead, WSS ≈ 77 B, 60 Hz.
+    const kbps = (bytes: number, overhead: number) => ((bytes + overhead) * 8 * 60) / 1000;
+    log(
+      `20p combat full mean ${mean(full).toFixed(1)} B (max ${Math.max(...full)}); delta mean ${mean(delta).toFixed(1)} B, p95 ${pct(delta, 0.95)} B, p99 ${p99} B, max ${Math.max(...delta)} B; ` +
+        `owner ${mean(owner).toFixed(1)} B, events ${mean(events).toFixed(1)} B; down ${kbps(mean(delta), 58).toFixed(0)} kbps WT (p99 ${kbps(p99, 58).toFixed(0)}), ${kbps(mean(delta), 77).toFixed(0)} kbps WSS`,
+    );
+    expect(Math.max(...full)).toBeLessThanOrEqual(SNAPSHOT_MAX_BYTES);
+    expect(mean(delta)).toBeLessThanOrEqual(230);
+    expect(kbps(p99, 58)).toBeLessThanOrEqual(160);
+  });
+
+  it("20-player movement snapshot with the last slot 19 present", () => {
+    const world = new SnapshotWorld(createTestRng(21), 20);
+    const w = createBitWriter(1500);
+    const history: Snapshot[] = [];
+    const delta: number[] = [];
+    for (let t = 0; t < 1200; t++) {
+      world.step();
+      const snap = world.snapshot(0);
+      expect(snap.entities.at(-1)!.slot).toBe(19);
+      history.push(snap);
+      if (history.length > 4) {
+        w.reset();
+        encodeSnapshot(w, snap, history[history.length - 5]!);
+        delta.push(w.byteLength);
+      }
+    }
+    log(`20p movement delta mean ${mean(delta).toFixed(1)} B, p95 ${pct(delta, 0.95)} B`);
+    expect(mean(delta)).toBeLessThanOrEqual(220);
+  });
 });
+
+const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+const pct = (a: number[], p: number) => [...a].sort((x, y) => x - y)[Math.floor(a.length * p)]!;
+
+/** Per-recipient combat snapshots for `players` over 60 s: full, delta vs a 4-tick-old ack, owner and event bytes. */
+function combatSizes(players: number): { full: number[]; delta: number[]; owner: number[]; events: number[] } {
+  const combat = new CombatWorld(createTestRng(19), players);
+  const w = createBitWriter(1500);
+  const history: Snapshot[] = [];
+  const full: number[] = [];
+  const delta: number[] = [];
+  const owner: number[] = [];
+  const events: number[] = [];
+  for (let t = 0; t < 3600; t++) {
+    const snap = combat.snapshot(0);
+    history.push(snap);
+    w.reset();
+    encodeSnapshot(w, snap, null);
+    full.push(w.byteLength);
+    if (history.length > 4) {
+      w.reset();
+      const stats = { shotsBits: 0, hitsBits: 0, reliableBits: 0, ownerBits: 0, entityBits: new Int32Array(MAX_ENTITY_SLOTS) };
+      encodeSnapshot(w, snap, history[history.length - 5]!, stats);
+      delta.push(w.byteLength);
+      owner.push(stats.ownerBits / 8);
+      events.push((stats.shotsBits + stats.reliableBits + stats.hitsBits) / 8);
+    }
+  }
+  return { full, delta, owner, events };
+}

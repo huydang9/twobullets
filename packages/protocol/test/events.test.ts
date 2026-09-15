@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBitReader, createBitWriter } from "../src/bits";
-import { KILL_CAUSES_BY_CODE, killCauseCode, killCauseOfCode, weaponCode, weaponIdOfCode, WORLD_SLOT_CODE } from "../src/codes";
+import { KILL_CAUSES_BY_CODE, MAX_PLAYER_SLOTS, killCauseCode, killCauseOfCode, weaponCode, weaponIdOfCode, WORLD_SLOT_CODE } from "../src/codes";
 import { decodeKillFeed, encodeKillFeed, type KillFeed } from "../src/messages/control";
 import { reliableSectionBits, type ReliableEvent } from "../src/messages/events";
 import { createInputPacketBuffer, decodeInputPacketInto, encodeInputPacket } from "../src/messages/input";
@@ -193,10 +193,10 @@ describe("KillFeed", () => {
     for (let i = 0; i < 2000; i++) {
       const m: KillFeed = {
         serverTick: randInt(rng, 0, 2 ** 32 - 1),
-        killer: rng() < 0.1 ? WORLD_SLOT_CODE : randInt(rng, 0, 15),
-        victim: randInt(rng, 0, 15),
+        killer: rng() < 0.1 ? WORLD_SLOT_CODE : randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
+        victim: randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
         cause: randInt(rng, 0, KILL_CAUSES_BY_CODE.length - 1),
-        knockedBy: rng() < 0.5 ? WORLD_SLOT_CODE : randInt(rng, 0, 15),
+        knockedBy: rng() < 0.5 ? WORLD_SLOT_CODE : randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
         headshot: rng() < 0.5,
         friendlyFire: rng() < 0.5,
         knock: rng() < 0.5,

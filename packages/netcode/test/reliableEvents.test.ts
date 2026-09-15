@@ -89,9 +89,9 @@ describe("ReliableEventSender", () => {
     for (let i = 0; i < 8; i++) expect(sender.push(eventFor(i, store))).toBe(i);
     expect(sender.push(eventFor(8, store))).toBe(-1);
     expect(sender.stats.overflows).toBe(1);
-    // 6-bit count + first event (12 + 5 + 26) + second (1 + 5 + 29) = 84 bits.
-    expect(sender.select(84).map((e) => e.seq)).toEqual([0, 1]);
-    expect(sender.select(83).map((e) => e.seq)).toEqual([0]);
+    // 6-bit count + first event (12 + 5 + 27, v3 5-bit victim) + second (1 + 5 + 29) = 85 bits.
+    expect(sender.select(85).map((e) => e.seq)).toEqual([0, 1]);
+    expect(sender.select(84).map((e) => e.seq)).toEqual([0]);
     const all = sender.select(10_000).map((e) => e.seq);
     expect(all).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     sender.markSent(40);

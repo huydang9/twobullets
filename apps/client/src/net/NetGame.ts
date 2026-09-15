@@ -1,5 +1,6 @@
 import type { EventState, Scene } from "@babylonjs/core";
 import { LifeCode } from "@twobullets/protocol/codes";
+import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { ShotEvent } from "../combat/types";
@@ -31,7 +32,7 @@ export interface NetGameConfig {
   readonly endpoint: NetEndpoint;
   /** Dev account id (`?netId=`, else one per tab). */
   readonly sub: string;
-  /** `?team=0..4` (default 0; two players fit one team). */
+  /** `?team=0..19` (default 0); the server puts you on the first team with room when it is full or out of range. */
   readonly team: number;
   readonly avatar: "soldier" | "capsule";
   /** DEV `?debug=hitboxes`: shared rig vs bone-driven hitboxes on remote players. */
@@ -46,7 +47,7 @@ export function readNetConfig(params: URLSearchParams): NetGameConfig | null {
   return {
     endpoint: parseNetParam(net),
     sub: devPlayerId(params.get("netId")),
-    team: Number.isInteger(team) && team >= 0 && team <= 4 ? team : 0,
+    team: Number.isInteger(team) && team >= 0 && team < MAX_MATCH_PLAYERS ? team : 0,
     avatar: params.get("netAvatar") === "capsule" ? "capsule" : "soldier",
     debugHitboxes: (params.get("debug") ?? "").split(",").includes("hitboxes"),
   };

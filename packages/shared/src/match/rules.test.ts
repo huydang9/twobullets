@@ -15,6 +15,7 @@ import {
   type RulesActor,
 } from "./rules";
 import { planTeamSpawns, spawnsByPoi } from "./spawns";
+import { MAX_MATCH_PLAYERS, memberOfSlot, teamCount, teamMembers, teamOfSlot } from "./teams";
 import type { MatchEvent } from "./types";
 
 function actors(lives: readonly RulesActor["life"][], health: readonly number[] = []): RulesActor[] {
@@ -162,7 +163,85 @@ describe("spawn plan", () => {
     expect(planTeamSpawns(11, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)).toEqual(planTeamSpawns(11, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0));
     const firsts = new Set(Array.from({ length: 30 }, (_, seed) => planTeamSpawns(seed, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)[0]!.poiId));
     expect(firsts.size).toBeGreaterThan(3);
-    expect(() => planTeamSpawns(1, 11, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)).toThrow();
+    expect(() => planTeamSpawns(1, 2, 2, [], [], () => 0)).toThrow();
+  });
+
+  const flat = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.sqrt((a.x - b.x) ** 2 + (a.z - b.z) ** 2);
+  const pois = spawnsByPoi(MAP_V1.pois, MAP_V1.spawns).length;
+
+  it("20 solo teams: every POI used twice, never the same spawn twice", () => {
+    for (const seed of [1, 2, 3, 99]) {
+      const plan = planTeamSpawns(seed, 20, 1, MAP_V1.pois, MAP_V1.spawns, () => 0);
+      expect(plan).toHaveLength(20);
+      const perPoi = new Map<string, number>();
+      for (const p of plan) perPoi.set(p.poiId, (perPoi.get(p.poiId) ?? 0) + 1);
+      expect(perPoi.size).toBe(pois);
+      expect([...perPoi.values()].every((n) => n === 2)).toBe(true);
+      const keys = new Set(plan.map((p) => `${p.feet[0]!.x.toFixed(3)},${p.feet[0]!.z.toFixed(3)}`));
+      expect(keys.size).toBe(20);
+      for (let i = 0; i < plan.length; i++) for (let j = i + 1; j < plan.length; j++) expect(flat(plan[i]!.feet[0]!, plan[j]!.feet[0]!)).toBeGreaterThan(20);
+    }
+  });
+
+  it("10 duo teams: one POI each, teammates side by side; the first 5 match the 5-team plan", () => {
+    const plan = planTeamSpawns(11, 10, 2, MAP_V1.pois, MAP_V1.spawns, () => 0);
+    expect(new Set(plan.map((p) => p.poiId)).size).toBe(Math.min(10, pois));
+    for (const team of plan) expect(flat(team.feet[0]!, team.feet[1]!)).toBeCloseTo(2, 9);
+    expect(plan.slice(0, 5)).toEqual(planTeamSpawns(11, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0));
+  });
+
+  it("5 squads: distinct POIs, four members in two rows within 3 m of each other, far from other squads", () => {
+    const plan = planTeamSpawns(5, 5, 4, MAP_V1.pois, MAP_V1.spawns, () => 0);
+    expect(new Set(plan.map((p) => p.poiId)).size).toBe(5);
+    for (const team of plan) {
+      expect(team.feet).toHaveLength(4);
+      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+        const d = flat(team.feet[i]!, team.feet[j]!);
+        expect(d).toBeGreaterThan(1.9);
+        expect(d).toBeLessThan(3);
+      }
+    }
+    for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) expect(flat(plan[i]!.feet[0]!, plan[j]!.feet[0]!)).toBeGreaterThan(40);
+  });
+
+  it("more teams than spawns stack later teams behind a reused spawn", () => {
+    const plan = planTeamSpawns(3, 2 * pois + 1, 1, MAP_V1.pois, MAP_V1.spawns, () => 0);
+    const last = plan[plan.length - 1]!.feet[0]!;
+    const firstSame = plan.find((p) => p.poiId === plan[plan.length - 1]!.poiId)!.feet[0]!;
+    expect(flat(last, firstSame)).toBeGreaterThan(10);
+  });
+});
+
+describe("team modes and match size", () => {
+  it("slot → team mapping for solo, duo and squad", () => {
+    expect([0, 1, 19].map((s) => teamOfSlot(s, 1))).toEqual([0, 1, 19]);
+    expect([0, 1, 2, 19].map((s) => teamOfSlot(s, 2))).toEqual([0, 0, 1, 9]);
+    expect([0, 3, 4, 19].map((s) => teamOfSlot(s, 4))).toEqual([0, 0, 1, 4]);
+    expect([0, 3, 4, 19].map((s) => memberOfSlot(s, 4))).toEqual([0, 3, 0, 3]);
+    expect(teamCount(20, "solo")).toBe(20);
+    expect(teamCount(20, "duo")).toBe(10);
+    expect(teamCount(20, "squad")).toBe(5);
+    expect(teamCount(10, "squad")).toBe(3);
+    expect(teamCount(99, "solo")).toBe(MAX_MATCH_PLAYERS);
+    expect(teamCount(1, "solo")).toBe(2);
+    expect([0, 1, 2, 3].map((t) => teamMembers(t, 4, 10))).toEqual([4, 4, 2, 0]);
+  });
+
+  it("maxPlayers and teamMode build dense actors with a short last team", () => {
+    const squads = createBrMatchConfig({ seed: 1, maxPlayers: 10, teamMode: "squad", humanSlot: 0 });
+    expect(squads).toMatchObject({ teamCount: 3, teamSize: 4, maxPlayers: 10, teamMode: "squad" });
+    expect(squads.actors.map((a) => a.team)).toEqual([0, 0, 0, 0, 1, 1, 1, 1, 2, 2]);
+    expect(createTeamStates(squads).map((t) => t.slots.length)).toEqual([4, 4, 2]);
+    const solo = createBrMatchConfig({ seed: 1, maxPlayers: 20, teamMode: "solo" });
+    expect(solo.actors).toHaveLength(20);
+    expect(solo.actors.map((a) => a.team)).toEqual(Array.from({ length: 20 }, (_, i) => i));
+    expect(new Set(solo.actors.map((a) => a.name)).size).toBe(20);
+    expect(createBrMatchConfig({ seed: 1 })).toMatchObject({ teamCount: 5, teamSize: 2, maxPlayers: 10, teamMode: "duo" });
+  });
+
+  it("solo has nobody to knock for: 0 HP kills", () => {
+    const solo = [0, 1, 2].map((slot) => ({ slot, team: slot, life: "alive" as const, health: 100 }));
+    expect(canActorBeKnocked({ reviveSeconds: 5 }, 1, 1, solo)).toBe(false);
   });
 });
 

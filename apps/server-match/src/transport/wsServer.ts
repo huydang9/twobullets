@@ -1,4 +1,4 @@
-import type { DevJoinTokenResponse } from "@twobullets/contracts";
+import { MAX_MATCH_PLAYERS, type DevJoinTokenResponse } from "@twobullets/contracts";
 import type { Clock, Session } from "@twobullets/netcode";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,7 +8,7 @@ import { WsSession } from "./WsSession";
 
 // Plain WS listener (behind HAProxy TLS in production, ADR 0002) plus a tiny HTTP surface:
 //   GET /healthz          → {"ok":true,...}
-//   GET /dev/token?sub=&team=  → DevJoinTokenResponse (local mode only, CORS *)
+//   GET /dev/token?sub=&team=  → DevJoinTokenResponse (local mode only, CORS *); team 0..devTeamCount-1
 //   Upgrade /m/{matchId}  → WebSocket session handed to the SessionManager
 
 export interface WsServerOptions {
@@ -18,6 +18,8 @@ export interface WsServerOptions {
   readonly sessions: SessionManager;
   /** Mints dev join tokens; omit to disable `/dev/token`. */
   readonly devTokens?: (sub: string, team: number, publicUrl: string) => DevJoinTokenResponse;
+  /** Teams in the dev match; `/dev/token` rejects `team` ≥ this (default MAX_MATCH_PLAYERS). */
+  readonly devTeamCount?: number;
   /** Wraps each accepted session (e.g. a server-side LinkConditioner for `--fake-net`). */
   readonly wrapSession?: (session: Session) => Session;
   readonly onSessionClosed?: (session: Session) => void;
@@ -96,7 +98,7 @@ function handleHttp(req: IncomingMessage, res: ServerResponse, options: WsServer
   if (req.method === "GET" && url.pathname === "/dev/token" && options.devTokens) {
     const sub = url.searchParams.get("sub") ?? `dev-${Math.floor(performance.now())}`;
     const team = Number(url.searchParams.get("team") ?? "0");
-    if (!/^[A-Za-z0-9_.:-]{1,64}$/.test(sub) || !Number.isInteger(team) || team < 0 || team > 15) {
+    if (!/^[A-Za-z0-9_.:-]{1,64}$/.test(sub) || !Number.isInteger(team) || team < 0 || team >= (options.devTeamCount ?? MAX_MATCH_PLAYERS)) {
       json(400, { error: "bad sub or team" });
       return;
     }

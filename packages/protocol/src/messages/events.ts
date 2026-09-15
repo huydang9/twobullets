@@ -1,5 +1,5 @@
 import type { BitReader, BitWriter } from "../bits";
-import { ACTOR_BITS, DAMAGE_KINDS_BY_CODE, KILL_CAUSES_BY_CODE, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
+import { ACTOR_BITS, DAMAGE_KINDS_BY_CODE, KILL_CAUSES_BY_CODE, MAX_PLAYER_SLOTS, SLOT_BITS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
 import { AIM_PITCH_BITS, AIM_YAW_BITS } from "../quantize";
 import type { Mutable } from "./snapshot";
 
@@ -21,7 +21,7 @@ export const MAX_HITS_PER_SNAPSHOT = 31;
  * the step fired from) is an offset from the shooter's feet in the snapshot carrying the event, in 1 cm steps.
  */
 export interface ShotEvent {
-  /** Slot 0..15. */
+  /** Slot 0..MAX_PLAYER_SLOTS-1. */
   readonly shooter: number;
   /** `weaponCode` 1..4. */
   readonly weapon: number;
@@ -44,9 +44,9 @@ export interface ShotEvent {
 export const SHOT_SPREAD_BITS = 11;
 export const SHOT_ORIGIN_XZ_BITS = 8;
 export const SHOT_ORIGIN_Y_BITS = 9;
-/** 99 bits. */
+/** 100 bits. */
 export const SHOT_EVENT_BITS =
-  4 + WEAPON_CODE_BITS + 2 + 16 + AIM_YAW_BITS + AIM_PITCH_BITS + SHOT_SPREAD_BITS + 2 * SHOT_ORIGIN_XZ_BITS + SHOT_ORIGIN_Y_BITS;
+  SLOT_BITS + WEAPON_CODE_BITS + 2 + 16 + AIM_YAW_BITS + AIM_PITCH_BITS + SHOT_SPREAD_BITS + 2 * SHOT_ORIGIN_XZ_BITS + SHOT_ORIGIN_Y_BITS;
 
 /** Bystander hit FX within 50 m. */
 export interface PlayerHitEvent {
@@ -59,11 +59,11 @@ export interface PlayerHitEvent {
 }
 
 export const PLAYER_HIT_DIR_BITS = 5;
-/** 12 bits. */
-export const PLAYER_HIT_EVENT_BITS = 4 + 2 + 1 + PLAYER_HIT_DIR_BITS;
+/** 13 bits. */
+export const PLAYER_HIT_EVENT_BITS = SLOT_BITS + 2 + 1 + PLAYER_HIT_DIR_BITS;
 
 export function writeShotEvent(w: BitWriter, e: ShotEvent): void {
-  w.write(e.shooter, 4);
+  w.write(e.shooter, SLOT_BITS);
   w.write(e.weapon, WEAPON_CODE_BITS);
   w.write(e.tickOffset, 2);
   w.write(e.shotId, 16);
@@ -76,7 +76,7 @@ export function writeShotEvent(w: BitWriter, e: ShotEvent): void {
 }
 
 export function readShotEvent(r: BitReader, e: Mutable<ShotEvent>): boolean {
-  e.shooter = r.read(4);
+  e.shooter = r.read(SLOT_BITS);
   e.weapon = r.read(WEAPON_CODE_BITS);
   e.tickOffset = r.read(2);
   e.shotId = r.read(16);
@@ -86,21 +86,23 @@ export function readShotEvent(r: BitReader, e: Mutable<ShotEvent>): boolean {
   e.originDxCm = r.readSigned(SHOT_ORIGIN_XZ_BITS);
   e.originDyCm = r.readSigned(SHOT_ORIGIN_Y_BITS);
   e.originDzCm = r.readSigned(SHOT_ORIGIN_XZ_BITS);
-  return e.weapon !== 0 && e.weapon < WEAPON_IDS_BY_CODE.length;
+  return e.shooter < MAX_PLAYER_SLOTS && e.weapon !== 0 && e.weapon < WEAPON_IDS_BY_CODE.length;
 }
 
 export function writePlayerHitEvent(w: BitWriter, e: PlayerHitEvent): void {
-  w.write(e.victim, 4);
+  w.write(e.victim, SLOT_BITS);
   w.write(e.zone, 2);
   w.writeBool(e.armor);
   w.write(e.dirYawQ, PLAYER_HIT_DIR_BITS);
 }
 
-export function readPlayerHitEvent(r: BitReader, e: Mutable<PlayerHitEvent>): void {
-  e.victim = r.read(4);
+/** False when the victim is not a player slot. */
+export function readPlayerHitEvent(r: BitReader, e: Mutable<PlayerHitEvent>): boolean {
+  e.victim = r.read(SLOT_BITS);
   e.zone = r.read(2);
   e.armor = r.readBool();
   e.dirYawQ = r.read(PLAYER_HIT_DIR_BITS);
+  return e.victim < MAX_PLAYER_SLOTS;
 }
 
 // ---- Tier R -----------------------------------------------------------------------------------------------------
@@ -264,11 +266,11 @@ export function copyReliableEvent(src: ReliableEvent, dst: ReliableEventStore): 
 export function reliablePayloadBits(type: ReliableEventType): number {
   switch (type) {
     case ReliableEventType.HitConfirm:
-      return 4 + 4 + 3 + DAMAGE_BITS + 4;
+      return SLOT_BITS + 4 + 3 + DAMAGE_BITS + 4;
     case ReliableEventType.DamageTaken:
       return ACTOR_BITS + DAMAGE_DIR_BITS + DAMAGE_BITS + 2 + 3;
     case ReliableEventType.Kill:
-      return ACTOR_BITS + 4 + 5 + 3 + KILL_DISTANCE_BITS;
+      return ACTOR_BITS + SLOT_BITS + 5 + 3 + KILL_DISTANCE_BITS;
   }
 }
 
@@ -280,7 +282,7 @@ export function reliableEventMaxBits(type: ReliableEventType): number {
 function writeReliablePayload(w: BitWriter, e: ReliableEvent): void {
   switch (e.type) {
     case ReliableEventType.HitConfirm:
-      w.write(e.victim, 4);
+      w.write(e.victim, SLOT_BITS);
       w.write(e.pellets, 4);
       w.write(e.zones, 3);
       w.write(e.damageQ, DAMAGE_BITS);
@@ -298,7 +300,7 @@ function writeReliablePayload(w: BitWriter, e: ReliableEvent): void {
       return;
     case ReliableEventType.Kill:
       w.write(e.killer, ACTOR_BITS);
-      w.write(e.victim, 4);
+      w.write(e.victim, SLOT_BITS);
       w.write(e.cause, 5);
       w.writeBool(e.headshot);
       w.writeBool(e.friendlyFire);
@@ -313,7 +315,7 @@ function writeReliablePayload(w: BitWriter, e: ReliableEvent): void {
 function readReliablePayload(r: BitReader, type: number, e: ReliableEventStore): boolean {
   switch (type) {
     case ReliableEventType.HitConfirm:
-      e.victim = r.read(4);
+      e.victim = r.read(SLOT_BITS);
       e.pellets = r.read(4);
       e.zones = r.read(3);
       e.damageQ = r.read(DAMAGE_BITS);
@@ -321,6 +323,7 @@ function readReliablePayload(r: BitReader, type: number, e: ReliableEventStore):
       e.downed = r.readBool();
       e.armorHit = r.readBool();
       e.armorBroken = r.readBool();
+      if (e.victim >= MAX_PLAYER_SLOTS) return false;
       break;
     case ReliableEventType.DamageTaken:
       e.attacker = r.read(ACTOR_BITS);
@@ -332,13 +335,13 @@ function readReliablePayload(r: BitReader, type: number, e: ReliableEventStore):
       break;
     case ReliableEventType.Kill:
       e.killer = r.read(ACTOR_BITS);
-      e.victim = r.read(4);
+      e.victim = r.read(SLOT_BITS);
       e.cause = r.read(5);
       e.headshot = r.readBool();
       e.friendlyFire = r.readBool();
       e.knock = r.readBool();
       e.distanceM = r.read(KILL_DISTANCE_BITS);
-      if (e.cause >= KILL_CAUSES_BY_CODE.length) return false;
+      if (e.cause >= KILL_CAUSES_BY_CODE.length || e.victim >= MAX_PLAYER_SLOTS) return false;
       break;
     default:
       return false;

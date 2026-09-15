@@ -172,6 +172,8 @@ Per-packet overhead:
 
 Byte breakdown at 60 Hz combat: header 11 B, owner block 11.6 B, 9 remote players 79 B (8.8 B each), events 6.5 B.
 
+**20 players (protocol v3, all relevant):** `packages/protocol/test/sizes.test.ts` (`PROTOCOL_SIZES=1`) measures combat delta mean 197 B, p95 227 B, p99 239 B, full 378 B (max 431 B, under the 1000 B cap) → **123 kbps** down over WT IPv4 (p99 143), 132 kbps over WSS, inside the 160 kbps budget before M5 relevance culling. Slots and team ids are 5-bit fields (20 entity slots, 20 teams in solo); Welcome carries `teamSize` and `maxPlayers`.
+
 Budgets to design against (per client):
 
 | Direction | Typical | p99 budget | Notes |

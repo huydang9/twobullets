@@ -113,9 +113,11 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
 
   // --- CombatFeedback ---------------------------------------------------------------------------------------------
 
-  welcome(slot: number, team: number): void {
+  welcome(slot: number, team: number, teamSize?: number): void {
     this.ownSlot = slot;
     this.ownTeam = team;
+    // Slot → team is fixed for the match (slot = team · teamSize + member), so the feed can colour every player.
+    if (teamSize !== undefined && teamSize > 0) for (let i = 0; i < MAX_ENTITY_SLOTS; i++) this.teams[i] = Math.floor(i / teamSize);
   }
 
   remoteShot(shooter: number, shot: FiredShot): void {

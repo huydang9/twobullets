@@ -34,7 +34,7 @@ import { disconnectSession } from "../session/control";
 import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
 import { freshPlayerState, Player } from "./Player";
 import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
-import { chooseSlot, SpawnPlanner, TEAM_COUNT } from "./slots";
+import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize, SpawnPlanner } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
 // registration and vitals (ServerCombat), and snapshots. Lifecycle (contracts MatchPhase): Booting (sim world loading) →
@@ -127,14 +127,15 @@ export class ServerMatch implements Match, CombatHost {
     this.rateLimit = options.datagramRateLimit ?? 72;
     this.kickRate = options.datagramKickRate ?? 180;
     this.tickMs = 1000 / (options.tickRate ?? 60);
-    const maxSlots = Math.min(16, options.config.maxPlayers);
+    const maxSlots = matchSlotCount(options.config);
+    const teamSize = matchTeamSize(options.config);
     this.slots = new Array<Player | null>(maxSlots).fill(null);
-    this.snapshots = new SnapshotBuilder(16);
-    this.spawns = new SpawnPlanner(options.level.spawnPoints, options.config.matchSeed, options.config.maxTeamSize);
+    this.snapshots = new SnapshotBuilder(maxSlots);
+    this.spawns = new SpawnPlanner(options.level.spawnPoints, options.config.matchSeed, teamSize);
     this.ready = createSimWorld(options.havok, options.level).then((world) => {
       this.world = world;
-      const combat = new ServerCombat({ ...options.combat, rules: options.config.rules, maxSlots: 16, raycastWorld: world.raycastWorld, tickRate: options.tickRate });
-      combat.attach(this, TEAM_COUNT, options.config.maxTeamSize);
+      const combat = new ServerCombat({ ...options.combat, rules: options.config.rules, maxSlots, raycastWorld: world.raycastWorld, tickRate: options.tickRate });
+      combat.attach(this, matchTeamCount(options.config), teamSize);
       this.combat = combat;
       if (this.phaseValue === "Booting") this.phaseValue = "Allocated";
     });
@@ -355,6 +356,8 @@ export class ServerMatch implements Match, CombatHost {
     encodeWelcome(w, {
       playerSlot: player.slot,
       teamId: player.teamId,
+      teamSize: matchTeamSize(this.config),
+      maxPlayers: this.slots.length,
       serverTick: this.next,
       tickRate: this.options.tickRate ?? 60,
       snapshotRate: this.options.tickRate ?? 60,

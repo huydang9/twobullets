@@ -1,4 +1,5 @@
 import type { PlayerInput } from "@twobullets/shared/input";
+import { MAX_PLAYER_SLOTS } from "../src/codes";
 import * as Q from "../src/quantize";
 import { ReliableEventType, type PlayerHitEvent, type ReliableEvent, type ShotEvent } from "../src/messages/events";
 import { EntityPresence, type EntityState, type OwnerMoveBlock, type OwnerVitalsBlock, type OwnerWeaponBlock, type Snapshot } from "../src/messages/snapshot";
@@ -184,7 +185,7 @@ export function randomVitalsBlock(rng: Rng): OwnerVitalsBlock {
 
 export function randomShot(rng: Rng): ShotEvent {
   return {
-    shooter: randInt(rng, 0, 15),
+    shooter: randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
     weapon: randInt(rng, 1, 4),
     tickOffset: randInt(rng, 0, 3),
     shotId: randInt(rng, 0, 65535),
@@ -198,7 +199,7 @@ export function randomShot(rng: Rng): ShotEvent {
 }
 
 export function randomPlayerHit(rng: Rng): PlayerHitEvent {
-  return { victim: randInt(rng, 0, 15), zone: randInt(rng, 0, 3), armor: rng() < 0.5, dirYawQ: randInt(rng, 0, 31) };
+  return { victim: randInt(rng, 0, MAX_PLAYER_SLOTS - 1), zone: randInt(rng, 0, 3), armor: rng() < 0.5, dirYawQ: randInt(rng, 0, 31) };
 }
 
 export function randomReliable(rng: Rng, seq: number): ReliableEvent {
@@ -207,7 +208,7 @@ export function randomReliable(rng: Rng, seq: number): ReliableEvent {
     return {
       type: ReliableEventType.HitConfirm,
       seq,
-      victim: randInt(rng, 0, 15),
+      victim: randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
       pellets: randInt(rng, 1, 8),
       zones: randInt(rng, 1, 7),
       damageQ: randInt(rng, 0, 2047),
@@ -221,7 +222,7 @@ export function randomReliable(rng: Rng, seq: number): ReliableEvent {
     return {
       type: ReliableEventType.DamageTaken,
       seq,
-      attacker: rng() < 0.1 ? 31 : randInt(rng, 0, 15),
+      attacker: rng() < 0.1 ? 31 : randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
       dirYawQ: randInt(rng, 0, 255),
       amountQ: randInt(rng, 0, 2047),
       zone: randInt(rng, 0, 3),
@@ -231,8 +232,8 @@ export function randomReliable(rng: Rng, seq: number): ReliableEvent {
   return {
     type: ReliableEventType.Kill,
     seq,
-    killer: rng() < 0.1 ? 31 : randInt(rng, 0, 15),
-    victim: randInt(rng, 0, 15),
+    killer: rng() < 0.1 ? 31 : randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
+    victim: randInt(rng, 0, MAX_PLAYER_SLOTS - 1),
     cause: randInt(rng, 0, 11),
     headshot: rng() < 0.3,
     friendlyFire: rng() < 0.1,

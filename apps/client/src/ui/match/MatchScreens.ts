@@ -1,6 +1,7 @@
 import { prepareAnimation, replay } from "../anim";
 import { el } from "../dom";
 import { formatClock } from "./MatchHud";
+import { MATCH_STRINGS } from "./strings";
 
 const SHOW_KEYFRAMES: Keyframe[] = [
   { opacity: 0, transform: "translate3d(-50%,10px,0)", easing: "ease-out" },
@@ -88,7 +89,7 @@ export class DeathScreen extends MatchScreen {
   }
 
   show(info: DeathInfo, actions: readonly ScreenAction[]): void {
-    const subtitle = info.placement !== null ? `#${info.placement} of ${info.teamCount}` : "Your teammate is still in the fight";
+    const subtitle = info.placement !== null ? `#${info.placement} of ${info.teamCount}` : MATCH_STRINGS.screens.teamStillFighting;
     this.render("YOU WERE KILLED", info.cause, statRows(info, subtitle), actions);
   }
 }

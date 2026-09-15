@@ -1,19 +1,26 @@
 import type { DamageKind } from "@twobullets/shared/equipment/armor";
 import type { LifeState } from "@twobullets/shared/equipment/vitals";
 import type { HitZone, WeaponId, WeaponPhase } from "@twobullets/shared/weapons/types";
+import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
 
 // Stable wire codes for shared string unions (netcode.md §6.5). Codes are never reused or reordered; only append.
 
+/** Player slots 0..MAX_PLAYER_SLOTS-1 (v3: 20, up from 16). */
+export const MAX_PLAYER_SLOTS = MAX_MATCH_PLAYERS;
+/** Slot fields (v3: 5 bits, up from 4). */
+export const SLOT_BITS = 5;
+/** Team id fields: solo matches have up to 20 teams (v3: 5 bits, up from 4). */
+export const TEAM_BITS = 5;
 /** Slot field value meaning "the world" (zone, fall, bleed-out) in 5-bit actor fields. */
 export const WORLD_SLOT_CODE = 31;
-/** 5-bit actor field: slot 0..15, or WORLD_SLOT_CODE for -1. */
+/** 5-bit actor field: slot 0..MAX_PLAYER_SLOTS-1, or WORLD_SLOT_CODE for -1. */
 export const ACTOR_BITS = 5;
 
 export function actorCode(slot: number): number {
-  return slot < 0 || slot > 15 ? WORLD_SLOT_CODE : slot;
+  return slot < 0 || slot >= MAX_PLAYER_SLOTS ? WORLD_SLOT_CODE : slot;
 }
 export function actorFromCode(code: number): number {
-  return code === WORLD_SLOT_CODE || code > 15 ? -1 : code;
+  return code === WORLD_SLOT_CODE || code >= MAX_PLAYER_SLOTS ? -1 : code;
 }
 
 /** 3 bits; 0 = no weapon. */

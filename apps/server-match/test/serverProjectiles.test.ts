@@ -81,7 +81,7 @@ function record(h: LagCompHistory, slot: number, from: number, to: number, at: (
 describe("ServerProjectiles", () => {
   const eye = { x: 0, y: 1.1, z: 0 };
   const open = { x: 0, y: 1.1, z: 8 };
-  const hittable = new Uint8Array(16);
+  const hittable = new Uint8Array(20);
 
   function setup(wallX: number | null = null) {
     const history = new LagCompHistory();

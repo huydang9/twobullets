@@ -3,8 +3,12 @@
 //   node --experimental-transform-types packages/protocol/scripts/content-hash.ts
 // test/contentHash.test.ts fails when it is stale. Inputs include the shared hitbox rig fit (ADR 0003).
 
-/** v2 (M4): owner weapon/vitals groups, remote weapon id, Shot/PlayerHit/reliable sections, Input event ack, KillFeed. */
-export const PROTOCOL_VERSION = 2;
+/**
+ * v2 (M4): owner weapon/vitals groups, remote weapon id, Shot/PlayerHit/reliable sections, Input event ack, KillFeed.
+ * v3: up to 20 players: 5-bit slots in Shot/PlayerHit/HitConfirm/Kill, 20 entity slots, Welcome slot/team 5 bits plus
+ * teamSize and maxPlayers.
+ */
+export const PROTOCOL_VERSION = 3;
 export const CONTENT_HASH = 0xb1eab561;
 
 export interface CompatKey {

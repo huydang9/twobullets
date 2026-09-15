@@ -3,6 +3,7 @@ import type { LifeState } from "../../equipment/vitals";
 import type { Stance, Vec3 } from "../../movement/types";
 import type { WeaponId } from "../../weapons/types";
 import { WEAPONS } from "../../weapons/weapons";
+import { MAX_MATCH_PLAYERS } from "../../match/teams";
 import type { BotMemoryState } from "../memory/memory";
 import { BOT_SCHEDULE, NavFlag, type ActorSnapshot, type BotPerception, type BotPerceptionProfile, type BotWorldView, type PerceivedActor, type ThrowableView } from "../types";
 import { DEG, copyVec, ticksFor, vec3, wrapAngle, yawTo, type BotRandom, type MutVec3 } from "../brain/util";
@@ -11,8 +12,8 @@ import { DEG, copyVec, ticksFor, vec3, wrapAngle, yawTo, type BotRandom, type Mu
 // motor) reads the tracks and memory produced here, so a brain can never react to what it hasn't seen or heard.
 // LOS and awareness run at 10 Hz; damage, noises and the pose refresh of already-visible tracks run every tick.
 
-/** Highest slot + 1 a match can have (5 teams × 2 now, 16 leaves room for larger lobbies). */
-export const MAX_SLOTS = 16;
+/** Highest slot + 1 a match can have (MAX_MATCH_PLAYERS). */
+export const MAX_SLOTS = MAX_MATCH_PLAYERS;
 
 const CHEST_HEIGHT: Readonly<Record<Stance, number>> = { stand: 1.2, crouch: 0.8, prone: 0.35 };
 const STANCE_GAIN: Readonly<Record<Stance, number>> = { stand: 1, crouch: 0.6, prone: 0.5 };

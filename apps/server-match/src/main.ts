@@ -1,9 +1,10 @@
 // Match server entry point (T3.4).
 //   pnpm --filter @twobullets/server-match dev -- [--mode=local|single-match|packed] [--port=7350] [--host=127.0.0.1]
 //     [--fake-net=lan|good|typical|bad|awful|tcp-fallback] [--matches=2] [--metrics=text|json|off] [--exit-after=<s>]
+//     [--max-players=2..20] [--team-mode=solo|duo|squad]
 // Env: TB_DEV_JOIN_SECRET (dev HS256 join-token secret), TB_RESUME_SECRET.
 
-import type { AgentToMatch } from "@twobullets/contracts";
+import { clampMaxPlayers, DEFAULT_MATCH_PLAYERS, DEFAULT_TEAM_MODE, TEAM_MODES, teamCount, type AgentToMatch, type TeamMode } from "@twobullets/contracts";
 import { NETWORK_PROFILES, type NetworkProfileName } from "@twobullets/netcode";
 import { PerformanceObserver } from "node:perf_hooks";
 import { sendToAgent, startServer, type ServerMode } from "./app";
@@ -31,6 +32,10 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) fail(`bad --port=${args
 const fakeNet = (args["fake-net"] ?? null) as NetworkProfileName | null;
 if (fakeNet !== null && !(fakeNet in NETWORK_PROFILES)) fail(`unknown --fake-net=${fakeNet} (${Object.keys(NETWORK_PROFILES).join(", ")})`);
 const metricsMode = args.metrics ?? "text";
+const maxPlayers = args["max-players"] ? Number(args["max-players"]) : DEFAULT_MATCH_PLAYERS;
+if (!Number.isInteger(maxPlayers) || clampMaxPlayers(maxPlayers) !== maxPlayers) fail(`bad --max-players=${args["max-players"]} (2..20)`);
+const teamMode = (args["team-mode"] ?? DEFAULT_TEAM_MODE) as TeamMode;
+if (!TEAM_MODES.includes(teamMode)) fail(`unknown --team-mode=${teamMode} (${TEAM_MODES.join(", ")})`);
 const exitAfterSec = args["exit-after"] ? Number(args["exit-after"]) : 0;
 
 let gcMaxMs = 0;
@@ -46,13 +51,16 @@ const server = await startServer({
   port,
   matches: args.matches ? Number(args.matches) : undefined,
   fakeNet,
+  maxPlayers,
+  teamMode,
   devJoinSecret: process.env.TB_DEV_JOIN_SECRET,
   resumeSecret: process.env.TB_RESUME_SECRET,
 });
 const addr = `ws://${args.host ?? "127.0.0.1"}:${server.port}`;
 console.log(
   `[server-match] ${mode} ready in ${(performance.now() - startedAt).toFixed(0)} ms: ${server.matches.map((m) => `${addr}/m/${m.id}`).join(" ")}` +
-    (mode === "single-match" ? "" : ` | dev token: http://localhost:${server.port}/dev/token?sub=<id>&team=<0..4>`) +
+    (mode === "single-match" ? "" : ` | dev token: http://localhost:${server.port}/dev/token?sub=<id>&team=<0..${teamCount(maxPlayers, teamMode) - 1}>`) +
+    ` | ${maxPlayers} players, ${teamMode}` +
     (fakeNet ? ` | fake-net=${fakeNet}` : ""),
 );
 

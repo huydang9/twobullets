@@ -4,7 +4,7 @@ import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol/version";
 // Everything about joining a local server-match (M3) in one place: URL shape, the dev token endpoint, Hello fields,
 // timeouts and close codes. Spec relayed from T3.4:
 //   WS  ws://localhost:7350/m/local — one protocol message per binary WS message, first byte MsgId, no length prefix
-//   GET http://localhost:7350/dev/token?sub=<id>&team=<0..4> → { token, matchId, url, expiresAt } (HS256, 120 s, single-use jti)
+//   GET http://localhost:7350/dev/token?sub=<id>&team=<0..teamCount-1> → { token, matchId, url, expiresAt } (HS256, 120 s, single-use jti)
 //   C→S Hello within 5 s → S→C Welcome | Disconnect{reason} + close 4000 + reason
 
 export const DEFAULT_MATCH_PATH = "/m/local";

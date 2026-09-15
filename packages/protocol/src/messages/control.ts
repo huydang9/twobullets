@@ -1,5 +1,5 @@
 import type { BitReader, BitWriter } from "../bits";
-import { ACTOR_BITS, KILL_CAUSES_BY_CODE } from "../codes";
+import { ACTOR_BITS, KILL_CAUSES_BY_CODE, MAX_PLAYER_SLOTS, SLOT_BITS, TEAM_BITS } from "../codes";
 import { MsgId } from "./ids";
 
 // Control-stream messages (netcode.md §6.4–6.5, §7.3): M3 session messages and the M4 kill feed. Codecs write/read
@@ -20,10 +20,16 @@ export interface Hello {
   readonly transport: TransportKind;
 }
 
-/** 0x41, S→C, once (40 B). */
+/** 0x41, S→C, once (42 B). */
 export interface Welcome {
+  /** 0..MAX_PLAYER_SLOTS-1. */
   readonly playerSlot: number;
+  /** 0..teamCount-1; slot = teamId · teamSize + member. */
   readonly teamId: number;
+  /** 1..4 (v3). Teammates are the slots with the same floor(slot / teamSize). */
+  readonly teamSize: number;
+  /** 1..20 (v3); slots are 0..maxPlayers-1. */
+  readonly maxPlayers: number;
   /** u32 */
   readonly serverTick: number;
   readonly tickRate: number;
@@ -129,13 +135,17 @@ export function decodeHello(r: BitReader): Hello | null {
   };
 }
 
-// Welcome (40 B): type 8, playerSlot 4 + teamId 4, serverTick 32, tickRate 8, snapshotRate 8, matchSeed 32, phase 8,
-// phaseEndTick 32, maxRewindMs/4 8, interpFloorMs 8, resumeToken 16 B, contentHash 32, flags 8.
+// Welcome (42 B): type 8, playerSlot 5, teamId 5, teamSize 3, maxPlayers 5, reserved 6, serverTick 32, tickRate 8,
+// snapshotRate 8, matchSeed 32, phase 8, phaseEndTick 32, maxRewindMs/4 8, interpFloorMs 8, resumeToken 16 B,
+// contentHash 32, flags 8.
 export function encodeWelcome(w: BitWriter, m: Welcome): void {
   if (m.resumeToken.length !== RESUME_TOKEN_BYTES) throw new RangeError("resumeToken must be 16 bytes");
   w.write(MsgId.Welcome, 8);
-  w.write(m.playerSlot, 4);
-  w.write(m.teamId, 4);
+  w.write(m.playerSlot, SLOT_BITS);
+  w.write(m.teamId, TEAM_BITS);
+  w.write(m.teamSize, 3);
+  w.write(m.maxPlayers, 5);
+  w.write(0, 6);
   w.write(m.serverTick, 32);
   w.write(m.tickRate, 8);
   w.write(m.snapshotRate, 8);
@@ -150,8 +160,11 @@ export function encodeWelcome(w: BitWriter, m: Welcome): void {
 }
 export function decodeWelcome(r: BitReader): Welcome | null {
   if (r.read(8) !== MsgId.Welcome) return null;
-  const playerSlot = r.read(4);
-  const teamId = r.read(4);
+  const playerSlot = r.read(SLOT_BITS);
+  const teamId = r.read(TEAM_BITS);
+  const teamSize = r.read(3);
+  const maxPlayers = r.read(5);
+  r.read(6);
   const serverTick = r.read(32);
   const tickRate = r.read(8);
   const snapshotRate = r.read(8);
@@ -163,10 +176,12 @@ export function decodeWelcome(r: BitReader): Welcome | null {
   const resumeToken = r.readBytes(RESUME_TOKEN_BYTES).slice();
   const contentHash = r.read(32);
   const flags = r.read(8);
-  if (!finished(r) || phase > PhaseCode.End) return null;
+  if (!finished(r) || phase > PhaseCode.End || playerSlot >= MAX_PLAYER_SLOTS || teamSize === 0 || maxPlayers === 0 || maxPlayers > MAX_PLAYER_SLOTS) return null;
   return {
     playerSlot,
     teamId,
+    teamSize,
+    maxPlayers,
     serverTick,
     tickRate,
     snapshotRate,
@@ -261,7 +276,7 @@ export function decodeKillFeed(r: BitReader): KillFeed | null {
   const knockedBy = r.read(ACTOR_BITS);
   const flags = r.read(4);
   const distanceDm = r.read(16);
-  if (!finished(r) || cause >= KILL_CAUSES_BY_CODE.length || victim > 15 || flags > 7) return null;
+  if (!finished(r) || cause >= KILL_CAUSES_BY_CODE.length || victim >= MAX_PLAYER_SLOTS || flags > 7) return null;
   return {
     serverTick,
     killer,

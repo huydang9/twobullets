@@ -6,6 +6,7 @@ import {
   type HitPose,
   type MutableRigHit,
 } from "@twobullets/shared/hitreg/rig";
+import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
 
 // Hitbox pose history for shooter-time rewind (netcode.md §5.2–5.3, ADR 0205). The server records every player's
 // replicated pose each tick; a bullet fired with view delay D is tested at server tick T + k against poses sampled at
@@ -27,7 +28,7 @@ const FLAG_DISCONTINUOUS = 2;
 const TAU = Math.PI * 2;
 
 export interface LagCompHistoryOptions {
-  /** Player slots. Default 16. */
+  /** Player slots. Default MAX_MATCH_PLAYERS (20). */
   readonly maxSlots?: number;
   /** Ring depth in ticks, a power of two ≥ maxRewindTicks + 2. Default 32. */
   readonly historyTicks?: number;
@@ -60,7 +61,7 @@ export class LagCompHistory {
   private readonly scratchA: HitPose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, stanceBlend: 0 };
 
   constructor(options: LagCompHistoryOptions = {}) {
-    const slots = options.maxSlots ?? 16;
+    const slots = options.maxSlots ?? MAX_MATCH_PLAYERS;
     const ticks = options.historyTicks ?? LAG_COMP_HISTORY_TICKS;
     const maxRewind = options.maxRewindTicks ?? MAX_REWIND_TICKS;
     if ((ticks & (ticks - 1)) !== 0 || ticks < maxRewind + 2) throw new RangeError("historyTicks must be a power of two ≥ maxRewindTicks + 2");

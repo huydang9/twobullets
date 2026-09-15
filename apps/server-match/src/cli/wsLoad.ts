@@ -1,13 +1,14 @@
 // Local load driver: N headless WebSocket clients against a match server, random movement at 60 Hz.
 //   pnpm --filter @twobullets/server-match load -- [--url=http://localhost:7350] [--clients=10] [--seconds=20] [--lead=3]
-//     [--fire] [--inproc]
+//     [--fire] [--inproc] [--max-players=20] [--team-mode=solo|duo|squad]
+// --max-players/--team-mode: size of the in-process match (--inproc), and how clients spread over teams.
 // --fire: every client holds fire at the nearest remote player (rifle, then pistol taps when dry); kills and respawns run.
 // --inproc: starts the match server in this process on a random port and prints its per-second tick work and combat
 // counters (one heavy process instead of two).
 // The driver has no clock sync: with --fake-net on the server, raise --lead above RTT/16.7 ms or inputs arrive late.
 // Exits on its own; prints per-client downstream bytes/s and snapshot counts.
 
-import type { DevJoinTokenResponse } from "@twobullets/contracts";
+import { DEFAULT_TEAM_MODE, TEAM_MODE_SIZE, teamCount, type DevJoinTokenResponse, type TeamMode } from "@twobullets/contracts";
 import WebSocket from "ws";
 import { startServer, type RunningServer } from "../app";
 import { HeadlessClient } from "../dev/HeadlessClient";
@@ -23,6 +24,10 @@ const clientCount = Number(args.clients ?? 10);
 const seconds = Number(args.seconds ?? 20);
 const leadTicks = Number(args.lead ?? 3);
 const fire = args.fire === "true";
+const maxPlayers = Number(args["max-players"] ?? Math.max(10, clientCount));
+const teamMode = (args["team-mode"] ?? DEFAULT_TEAM_MODE) as TeamMode;
+const teamSize = TEAM_MODE_SIZE[teamMode] ?? 2;
+const teams = teamCount(maxPlayers, teamMode);
 const clock = { now: () => performance.now() };
 
 const hardStop = setTimeout(() => {
@@ -33,13 +38,13 @@ const hardStop = setTimeout(() => {
 let server: RunningServer | null = null;
 let base = args.url ?? "http://localhost:7350";
 if (args.inproc === "true") {
-  server = await startServer({ mode: "local", host: "127.0.0.1", port: 0, log: () => {} });
+  server = await startServer({ mode: "local", host: "127.0.0.1", port: 0, maxPlayers, teamMode, log: () => {} });
   base = `http://127.0.0.1:${server.port}`;
 }
 
 const clients: { client: HeadlessClient; ws: WebSocket; session: WsSession }[] = [];
 for (let i = 0; i < clientCount; i++) {
-  const res = await fetch(`${base}/dev/token?sub=load-${i}&team=${Math.floor(i / 2) % 5}`);
+  const res = await fetch(`${base}/dev/token?sub=load-${i}&team=${Math.floor(i / teamSize) % teams}`);
   const dev = (await res.json()) as DevJoinTokenResponse;
   const ws = new WebSocket(dev.url);
   await new Promise<void>((resolve, reject) => {

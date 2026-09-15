@@ -1,4 +1,4 @@
-import type { JoinClaims } from "@twobullets/contracts";
+import { TEAM_MODE_SIZE, teamCount, type JoinClaims, type TeamMode } from "@twobullets/contracts";
 import { createMemorySessionPair, LinkConditioner, ManualClock, NETWORK_PROFILES, type MemorySession, type NetworkProfile, type Session } from "@twobullets/netcode";
 import { CONTENT_HASH, PROTOCOL_VERSION, type Mutable, type OwnerMoveBlock } from "@twobullets/protocol";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
@@ -25,7 +25,7 @@ export interface Harness {
   readonly clients: HeadlessClient[];
   readonly links: LinkConditioner[];
   readonly serverEnds: DeferredCloseSession[];
-  /** Server owner blocks recorded at the end of every tick, keyed `tick * 16 + slot`. */
+  /** Server owner blocks recorded at the end of every tick, keyed `tick * 32 + slot`. */
   readonly ownerHistory: Map<number, OwnerMoveBlock>;
   token(overrides?: Partial<JoinClaims> & { secret?: string }): string;
   connect(options?: { token?: string; profile?: NetworkProfile; seed?: number; protocolVersion?: number; leadTicks?: number; team?: number; interpDelayMs?: number }): HeadlessClient;
@@ -82,6 +82,9 @@ export interface HarnessOptions {
   /** Runs after the owner recording at the end of every tick. */
   readonly onTickEnd?: (tick: number, match: ServerMatch) => void;
   readonly combat?: ServerMatchOptions["combat"];
+  /** Match size and mode (default 10 duo). With a mode, default tokens fill teams in order (team = floor(i / size)). */
+  readonly maxPlayers?: number;
+  readonly teamMode?: TeamMode;
 }
 
 export async function createHarness(havok: HavokModule, options: HarnessOptions = {}): Promise<Harness> {
@@ -102,7 +105,7 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
           ? (tick, m) => {
               if (options.recordOwners) {
                 for (const p of m.players) {
-                  if (m.ownerBlockOf(p.slot, scratch)) ownerHistory.set(tick * 16 + p.slot, { ...scratch });
+                  if (m.ownerBlockOf(p.slot, scratch)) ownerHistory.set(tick * 32 + p.slot, { ...scratch });
                 }
               }
               options.onTickEnd?.(tick, m);
@@ -110,7 +113,7 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
           : undefined,
     },
   });
-  const match = host.createMatch(localMatchConfig("local", 1234));
+  const match = host.createMatch(localMatchConfig("local", 1234, options.maxPlayers, options.teamMode));
   await match.ready;
   const verifier = new JoinTokenVerifier({ keys: [devHmacKey(SECRET)], nowSec: () => EPOCH_SEC + clock.now() / 1000 });
   const sessions = new SessionManager({ directory: host, verifier, clock });
@@ -134,7 +137,7 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
       const { secret, ...claimOverrides } = overrides;
       const base = createDevClaims({
         sub: `player-${++subCounter}`,
-        team: clients.length % 5,
+        team: options.teamMode ? Math.floor(clients.length / TEAM_MODE_SIZE[options.teamMode]) % teamCount(options.maxPlayers ?? 10, options.teamMode) : clients.length % 5,
         matchId: "local",
         hostId: LOCAL_HOST_ID,
         protocolVersion: PROTOCOL_VERSION,

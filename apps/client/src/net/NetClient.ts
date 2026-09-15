@@ -363,7 +363,7 @@ export class NetClient {
         this.stats.slot = welcome.playerSlot;
         this.stats.team = welcome.teamId;
         this.roster.setOwnSlot(welcome.playerSlot);
-        this.events?.onWelcome(welcome.playerSlot, welcome.teamId);
+        this.events?.onWelcome(welcome.playerSlot, welcome.teamId, welcome.teamSize);
         if (welcome.interpFloorMs > 0) this.interpDelay.setFloor(Math.max(welcome.interpFloorMs, this.session.kind === "websocket" ? 50 : 25));
         this.setState("syncing", "");
         break;

@@ -27,11 +27,24 @@ const SYSTEM_CONTROLS: readonly ControlRow[] = [
 
 const CREDITS_PLACEHOLDER = "No third-party asset credits yet.";
 
+/** One labelled radio row of the match setup; `labels[i]` is shown for `options[i]` (default: the value). */
+export interface MatchSetupChoice {
+  readonly label: string;
+  readonly options: readonly string[];
+  readonly labels?: readonly string[];
+  readonly value: string;
+  onChange(value: string): void;
+}
+
 /** Offline bot match setup shown above "click to play" (`?bots=1`). */
 export interface MatchSetup {
   readonly difficulties: readonly string[];
   readonly difficulty: string;
   onDifficulty(difficulty: string): void;
+  /** Heading of the difficulty row (default "Bot difficulty"). */
+  readonly difficultyLabel?: string;
+  /** More rows under the difficulty (match size, team mode). */
+  readonly choices?: readonly MatchSetupChoice[];
   /** Replaces "CLICK TO PLAY". */
   readonly playLabel?: string;
   /** Small line under the picker ("Map v1 · 5 teams × 2 · seed 1234"). */
@@ -116,22 +129,8 @@ export class PlayOverlay {
     if (!setup) return;
     const root = el("div", "tb-matchsetup", undefined);
     root.addEventListener("click", (event) => event.stopPropagation());
-    el("div", "tb-matchsetup__label", "Bot difficulty", root);
-    const group = el("div", "tb-matchsetup__group", undefined, root);
-    group.setAttribute("role", "radiogroup");
-    const buttons: HTMLButtonElement[] = [];
-    for (const difficulty of setup.difficulties) {
-      const button = el("button", "tb-matchsetup__option", difficulty, group);
-      button.type = "button";
-      button.setAttribute("role", "radio");
-      button.setAttribute("aria-checked", String(difficulty === setup.difficulty));
-      button.addEventListener("click", () => {
-        for (const other of buttons) other.setAttribute("aria-checked", String(other === button));
-        button.blur();
-        setup.onDifficulty(difficulty);
-      });
-      buttons.push(button);
-    }
+    radioRow(root, { label: setup.difficultyLabel ?? "Bot difficulty", options: setup.difficulties, value: setup.difficulty, onChange: (value) => setup.onDifficulty(value) });
+    for (const choice of setup.choices ?? []) radioRow(root, choice);
     if (setup.details) el("div", "tb-matchsetup__details", setup.details, root);
     this.play.before(root);
     this.matchSetup = root;
@@ -150,6 +149,25 @@ export class PlayOverlay {
     this.hintTimer = undefined;
     this.hint.hidden = true;
   }
+}
+
+function radioRow(parent: HTMLElement, choice: MatchSetupChoice): void {
+  el("div", "tb-matchsetup__label", choice.label, parent);
+  const group = el("div", "tb-matchsetup__group", undefined, parent);
+  group.setAttribute("role", "radiogroup");
+  const buttons: HTMLButtonElement[] = [];
+  choice.options.forEach((value, i) => {
+    const button = el("button", "tb-matchsetup__option", choice.labels?.[i] ?? value, group);
+    button.type = "button";
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(value === choice.value));
+    button.addEventListener("click", () => {
+      for (const other of buttons) other.setAttribute("aria-checked", String(other === button));
+      button.blur();
+      choice.onChange(value);
+    });
+    buttons.push(button);
+  });
 }
 
 function controlList(list: HTMLUListElement, rows: readonly ControlRow[]): void {

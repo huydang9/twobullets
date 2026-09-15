@@ -1239,22 +1239,38 @@ class UtilityBrain implements BotBrain {
   // Teammates (squad knowledge: allowed)
   // -------------------------------------------------------------------------------------------------------------
 
+  /** The teammate to stay with: a living human, else the nearest living teammate (squads have up to three). */
   private aliveTeammate(view: BotWorldView): TeammateView | null {
     const mates = view.teammates;
+    let best: TeammateView | null = null;
+    let bestD = Infinity;
     for (let i = 0; i < mates.length; i++) {
       const m = mates[i]!;
-      if (m.slot !== this.slot && m.life === "alive") return m;
+      if (m.slot === this.slot || m.life !== "alive") continue;
+      const d = m.kind === "human" ? -1 : flatDistance(view.self.feet, m.feet);
+      if (d < bestD) {
+        bestD = d;
+        best = m;
+      }
     }
-    return null;
+    return best;
   }
 
+  /** Nearest downed teammate nobody else is reviving (the one this bot already revives wins). */
   private downedTeammate(view: BotWorldView): TeammateView | null {
     const mates = view.teammates;
+    let best: TeammateView | null = null;
+    let bestD = Infinity;
     for (let i = 0; i < mates.length; i++) {
       const m = mates[i]!;
-      if (m.slot !== this.slot && m.life === "downed" && (m.reviverSlot < 0 || m.reviverSlot === this.slot)) return m;
+      if (m.slot === this.slot || m.life !== "downed" || (m.reviverSlot >= 0 && m.reviverSlot !== this.slot)) continue;
+      const d = m.reviverSlot === this.slot ? -1 : flatDistance(view.self.feet, m.feet);
+      if (d < bestD) {
+        bestD = d;
+        best = m;
+      }
     }
-    return null;
+    return best;
   }
 
   private teammateBySlot(view: BotWorldView, slot: number): TeammateView | null {

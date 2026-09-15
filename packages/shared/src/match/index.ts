@@ -2,4 +2,5 @@
 export * from "./zone";
 export * from "./rules";
 export * from "./spawns";
+export * from "./teams";
 export * from "./noise";

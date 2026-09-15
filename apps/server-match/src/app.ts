@@ -1,4 +1,4 @@
-import type { DevJoinTokenResponse, MatchConfig, MatchToAgent } from "@twobullets/contracts";
+import { clampMaxPlayers, DEFAULT_MATCH_PLAYERS, DEFAULT_TEAM_MODE, TEAM_MODE_SIZE, teamCount, type DevJoinTokenResponse, type MatchConfig, type MatchToAgent, type TeamMode } from "@twobullets/contracts";
 import { LinkConditioner, NETWORK_PROFILES, type Clock, type NetworkProfileName, type Session } from "@twobullets/netcode";
 import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
@@ -24,6 +24,10 @@ export interface ServerOptions {
   readonly devJoinSecret?: string;
   readonly resumeSecret?: string;
   readonly matchSeed?: number;
+  /** 2..20 player slots (`--max-players`, default 10). */
+  readonly maxPlayers?: number;
+  /** `--team-mode` (default duo). */
+  readonly teamMode?: TeamMode;
   readonly clock?: Clock;
   readonly log?: (line: string) => void;
 }
@@ -41,7 +45,7 @@ export interface RunningServer {
 
 export const LOCAL_HOST_ID = "local-host";
 
-export function localMatchConfig(matchId: string, matchSeed: number): MatchConfig {
+export function localMatchConfig(matchId: string, matchSeed: number, maxPlayers: number = DEFAULT_MATCH_PLAYERS, teamMode: TeamMode = DEFAULT_TEAM_MODE): MatchConfig {
   return {
     matchId,
     hostId: LOCAL_HOST_ID,
@@ -50,8 +54,9 @@ export function localMatchConfig(matchId: string, matchSeed: number): MatchConfi
     contentHash: CONTENT_HASH,
     mapId: "arena",
     matchSeed: matchSeed >>> 0,
-    maxPlayers: 10,
-    maxTeamSize: 2,
+    maxPlayers: clampMaxPlayers(maxPlayers),
+    maxTeamSize: TEAM_MODE_SIZE[teamMode],
+    teamMode,
     teams: [],
     rules: { friendlyFire: true, reviveSeconds: 5, bodyBlocking: true, fillWithBots: true },
   };
@@ -78,7 +83,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const count = options.mode === "packed" ? Math.max(1, options.matches ?? 2) : 1;
   const seed = options.matchSeed ?? 0x7b2b;
   const matches: ServerMatch[] = [];
-  for (let i = 0; i < count; i++) matches.push(host.createMatch(localMatchConfig(count === 1 ? "local" : `local-${i}`, seed + i)));
+  for (let i = 0; i < count; i++) matches.push(host.createMatch(localMatchConfig(count === 1 ? "local" : `local-${i}`, seed + i, options.maxPlayers, options.teamMode)));
   await Promise.all(matches.map((m) => m.ready));
 
   // M3: dev HS256 tokens through the production verifier. Production adds the agent's JWKS (EdDSA keys) via setKeys.
@@ -103,6 +108,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     clock,
     sessions,
     devTokens,
+    devTeamCount: teamCount(options.maxPlayers ?? DEFAULT_MATCH_PLAYERS, options.teamMode ?? DEFAULT_TEAM_MODE),
     log,
     wrapSession:
       profile === null

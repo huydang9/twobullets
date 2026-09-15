@@ -3,7 +3,8 @@
  * with match length, kills, zone deaths, stuck incidents and per-tick CPU.
  *
  *   node tools/bench/bots/match.ts [--seed 1] [--matches 1] [--scale 1] [--brain fighter|wander|idle|real]
- *        [--difficulty normal] [--loadout armed|empty] [--nav grid|straight] [--out file.json]
+ *        [--difficulty normal] [--loadout armed|empty] [--nav grid|straight] [--players 10] [--teams solo|duo|squad]
+ *        [--out file.json]
  *   node tools/bench/bots/match.ts --mode duel [--brain real] [--ranges 30,80] [--seconds 40]
  *
  * `--brain real` uses shared/bots createBotBrain; nav is the real Map v1 grid unless `--nav straight`. The scripted
@@ -51,6 +52,8 @@ const loadout = arg("loadout", brainName === "real" ? "empty" : "armed") as "arm
 const navName = arg("nav", "grid");
 const mode = arg("mode", "match");
 const out = arg("out", "");
+const players = Number(arg("players", "10"));
+const teamMode = arg("teams", "duo") as "solo" | "duo" | "squad";
 
 const { loadHavok } = await import("../../../packages/sim/src/node/loadHavok.ts");
 const { createHeadlessMatch, runHeadlessMatch } = await import("../../../packages/sim/test/match/harness.ts");
@@ -93,7 +96,7 @@ if (mode === "duel") {
 const results = [];
 for (let m = 0; m < matches; m++) {
   const matchSeed = seed + m;
-  const match = await createHeadlessMatch(havok, { seed: matchSeed, brains, timeScale: scale, difficulty, loadout, profile: true, nav });
+  const match = await createHeadlessMatch(havok, { seed: matchSeed, brains, timeScale: scale, difficulty, loadout, profile: true, nav, config: { maxPlayers: players, teamMode } });
   const capTicks = match.sim.schedule.timeCapTick + 60 * 20;
   const summary = runHeadlessMatch(match, capTicks);
   const alive = match.sim.state.actors.filter((a) => a && a.life !== "dead").map((a) => a.slot);
@@ -101,6 +104,8 @@ for (let m = 0; m < matches; m++) {
   const line = {
     seed: matchSeed,
     brain: brainName,
+    players,
+    teamMode,
     scale,
     combatMinutes: Math.round((summary.combatSeconds / 60) * 100) / 100,
     ticks: summary.ticks,

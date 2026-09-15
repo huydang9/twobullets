@@ -6,7 +6,7 @@
 
 ## Run it
 
-1. Terminal 1: `pnpm --filter @twobullets/server-match dev` (add `-- --fake-net=typical` for a realistic link).
+1. Terminal 1: `pnpm --filter @twobullets/server-match dev` (add `-- --fake-net=typical` for a realistic link; `-- --max-players=20 --team-mode=squad` for a bigger match, then `&team=0..teamCount-1`).
 2. Terminal 2: `pnpm dev`.
 3. Open the tabs, ideally as separate windows side by side (hidden tabs are throttled):
 

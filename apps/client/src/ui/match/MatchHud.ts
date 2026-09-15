@@ -3,6 +3,7 @@ import { clamp01, prepareAnimation, replay, setText } from "../anim";
 import { compassMarkerOffset } from "../Compass";
 import { el, textNode } from "../dom";
 import { MatchFeed } from "./MatchFeed";
+import { MATCH_STRINGS } from "./strings";
 
 const RAD_TO_DEG = 180 / Math.PI;
 /** Teammates farther than this show distance and direction on their card, m. */
@@ -77,15 +78,17 @@ export class MatchHud {
     this.root = el("div", "tb-mhud", undefined, parent);
 
     const stats = el("div", "tb-mhud__stats", undefined, this.root);
-    const stat = (label: string): Text => {
+    const stat = (label: string, hidden = false): Text => {
       const node = el("div", "tb-mhud__stat", undefined, stats);
       const value = textNode(el("span", "tb-mhud__stat-value", undefined, node));
       el("span", "tb-mhud__stat-label", label, node);
+      node.hidden = hidden;
       return value;
     };
-    this.alive = stat("Alive");
-    this.teams = stat("Teams");
-    this.kills = stat("Kills");
+    this.alive = stat(MATCH_STRINGS.hud.alive);
+    // Solo: every player is a team, so the teams count would repeat "alive".
+    this.teams = stat(MATCH_STRINGS.hud.teams, view.config.teamSize <= 1);
+    this.kills = stat(MATCH_STRINGS.hud.kills);
     this.feed = new MatchFeed(this.root);
 
     this.zone = el("div", "tb-mhud__zone", undefined, this.root);
@@ -110,6 +113,7 @@ export class MatchHud {
     this.countdownAnim = prepareAnimation(this.countdown, [{ opacity: 0, transform: "translate3d(-50%,-50%,0) scale(1.25)" }, { opacity: 1, transform: "translate3d(-50%,-50%,0) scale(1)", offset: 0.25 }, { opacity: 0.85 }], { duration: 900 });
 
     const team = el("div", "tb-mhud__team", undefined, this.root);
+    // Up to three teammates (squads of 4).
     for (let i = 0; i < 3; i++) this.cards.push(createCard(team));
 
     this.spectating = el("div", "tb-mhud__spectating", undefined, this.root);

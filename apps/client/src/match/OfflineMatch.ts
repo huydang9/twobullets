@@ -9,12 +9,14 @@ import {
   killCauseName,
   navStats,
   planTeamSpawns,
+  resolveMatchSize,
   type BotBrain,
   type BotDifficulty,
   type MatchEvent,
   type MoveGates,
   type NavGrid,
   type NavQuery,
+  type TeamMode,
   type TeamSpawnPlan,
   type ThrowableView,
   type ThrowableSnapshot,
@@ -32,15 +34,16 @@ import type { Hud } from "../ui/Hud";
 import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
+import { MATCH_STRINGS } from "../ui/match/strings";
 import type { Environment } from "../world/environment";
 import type { MapRuntime } from "../world/mapRuntime";
 import { ZoneWall } from "../world/zone/ZoneWall";
 import { BotBodies } from "./BotBodies";
 import { BotDebugOverlay } from "./BotDebugOverlay";
-import { createOfflineMatchSim, OFFLINE_HUMAN_SLOT as HUMAN_SLOT, OFFLINE_TEAM_SIZE as TEAM_SIZE } from "./createOfflineMatchSim";
+import { createOfflineMatchSim, OFFLINE_HUMAN_SLOT as HUMAN_SLOT } from "./createOfflineMatchSim";
 import { HumanActor } from "./HumanActor";
 import { MatchPresentation } from "./MatchPresentation";
-import { BOT_DIFFICULTIES, readOfflineMatchOptions, reloadNewMatch, type OfflineMatchOptions } from "./options";
+import { BOT_DIFFICULTIES, MATCH_SIZE_PRESETS, readOfflineMatchOptions, reloadNewMatch, TEAM_MODES, writeMatchSize, type OfflineMatchOptions } from "./options";
 import { Spectator } from "./Spectator";
 import { MatchTrace } from "./trace";
 
@@ -78,8 +81,12 @@ export class OfflineMatch {
   readonly seed: number;
   difficulty: BotDifficulty;
   readonly nav: NavQuery;
-  readonly bodies: BotBodies;
-  private readonly spawns: TeamSpawnPlan[];
+  bodies: BotBodies;
+  /** Players and team mode; the play overlay can change them until the match starts. */
+  maxPlayers: number;
+  teamMode: TeamMode;
+  private spawns: TeamSpawnPlan[] = [];
+  private readonly resources: SoldierResources;
   private readonly humanSlot: number | null;
   private readonly zoneWall: ZoneWall;
   private readonly layer: HTMLDivElement;
@@ -119,21 +126,15 @@ export class OfflineMatch {
     this.humanSlot = options.spectate ? null : HUMAN_SLOT;
     console.info(`[match] seed ${this.seed} (reload with &seed=${this.seed} to replay the same spawns and zone)`);
 
-    const map = world.map;
-    const terrain = world.terrain;
-    this.spawns = planTeamSpawns(this.seed, options.teams, TEAM_SIZE, map.pois, map.spawns, (x, z) => terrain.sampleHeight(x, z));
-    const home = this.spawns.find((plan) => plan.team === 0);
-    const feet = home?.feet[0];
-    if (home && feet) player.respawnAt({ position: [feet.x, feet.y, feet.z], yaw: home.yaw });
+    this.maxPlayers = options.maxPlayers;
+    this.teamMode = options.teamMode;
     if (this.humanSlot !== null) {
       // Everyone starts empty-handed and loots (bots too).
       equipment.resetLoadout(createInventory());
       life.respawnEnabled = false;
     }
-
-    const actors = createActorConfigs({ seed: this.seed, teamCount: options.teams, teamSize: TEAM_SIZE, humanSlot: this.humanSlot, humanTeammate: options.teammate });
-    const resources = new SoldierResources(deps.assets);
-    this.bodies = new BotBodies(scene, resources, deps.environment, deps.combat.hitboxRegistry, actors, this.humanSlot === null ? null : 0, () => (deps.combat.armed ? deps.combat.activeWeapon.id : null));
+    this.resources = new SoldierResources(deps.assets);
+    this.bodies = this.buildRoster();
     this.zoneWall = new ZoneWall(scene);
     this.raycastWorld = new WorldRaycaster(scene);
     this.equipmentPort = {
@@ -148,13 +149,7 @@ export class OfflineMatch {
     this.deathScreen = new DeathScreen(this.layer);
     this.resultScreen = new ResultScreen(this.layer);
     this.frame = { focusSlot: this.humanSlot ?? 1, localSlot: this.humanSlot, viewerX: 0, viewerZ: 0, headingDegrees: 0 };
-    hud.setMatchSetup({
-      difficulties: BOT_DIFFICULTIES,
-      difficulty: this.difficulty,
-      onDifficulty: (difficulty) => this.setDifficulty(difficulty as BotDifficulty),
-      playLabel: "START MATCH",
-      details: `Map v1 · ${options.teams} teams × ${TEAM_SIZE}${options.teammate ? "" : " · no teammate"}${options.zoneScale !== 1 ? ` · zone ×${options.zoneScale}` : ""} · seed ${this.seed}`,
-    });
+    this.showSetup();
 
     // Frozen through the countdown, after the end and once eliminated.
     player.setMoveGates(() => (this.humanFrozen() ? FROZEN_GATES : equipment.modifiers));
@@ -242,9 +237,54 @@ export class OfflineMatch {
     this.layer.remove();
   }
 
-  // ---- Start ---------------------------------------------------------------------------------------------------------
+  // ---- Setup and start -----------------------------------------------------------------------------------------------
 
   private tickObserver: { remove(): void } | null = null;
+
+  /** Spawn plan, the human's start position and pooled bot bodies for the current size and mode. */
+  private buildRoster(): BotBodies {
+    const { scene, world, player, combat, environment } = this.deps;
+    const size = { seed: this.seed, maxPlayers: this.maxPlayers, teamMode: this.teamMode };
+    const { teamCount, teamSize } = resolveMatchSize(size);
+    const terrain = world.terrain;
+    this.spawns = planTeamSpawns(this.seed, teamCount, teamSize, world.map.pois, world.map.spawns, (x, z) => terrain.sampleHeight(x, z));
+    const home = this.spawns.find((plan) => plan.team === 0);
+    const feet = home?.feet[0];
+    if (home && feet) player.respawnAt({ position: [feet.x, feet.y, feet.z], yaw: home.yaw });
+    const actors = createActorConfigs({ ...size, humanSlot: this.humanSlot, humanTeammate: this.options.teammate });
+    return new BotBodies(scene, this.resources, environment, combat.hitboxRegistry, actors, this.humanSlot === null ? null : 0, () => (combat.armed ? combat.activeWeapon.id : null));
+  }
+
+  private showSetup(): void {
+    const text = MATCH_STRINGS.setup;
+    const sizes = MATCH_SIZE_PRESETS.includes(this.maxPlayers) ? MATCH_SIZE_PRESETS : [...MATCH_SIZE_PRESETS, this.maxPlayers].sort((a, b) => a - b);
+    const { teamCount } = resolveMatchSize({ maxPlayers: this.maxPlayers, teamMode: this.teamMode });
+    this.deps.hud.setMatchSetup({
+      difficulties: BOT_DIFFICULTIES,
+      difficulty: this.difficulty,
+      difficultyLabel: text.difficulty,
+      onDifficulty: (difficulty) => this.setDifficulty(difficulty as BotDifficulty),
+      choices: [
+        { label: text.players, options: sizes.map(String), value: String(this.maxPlayers), onChange: (value) => this.setMatchSize(Number(value), this.teamMode) },
+        { label: text.teamMode, options: TEAM_MODES, labels: TEAM_MODES.map((mode) => text.modes[mode]), value: this.teamMode, onChange: (value) => this.setMatchSize(this.maxPlayers, value as TeamMode) },
+      ],
+      playLabel: text.start,
+      details: text.details({ players: this.maxPlayers, teams: teamCount, mode: this.teamMode, teammate: this.options.teammate, zoneScale: this.options.zoneScale, seed: this.seed }),
+    });
+  }
+
+  /** Play overlay: rebuilds spawns and bot bodies before the start and keeps the choice in the URL. */
+  private setMatchSize(maxPlayers: number, teamMode: TeamMode): void {
+    if (this.sim || (maxPlayers === this.maxPlayers && teamMode === this.teamMode)) return;
+    this.maxPlayers = maxPlayers;
+    this.teamMode = teamMode;
+    this.bodies.dispose();
+    this.bodies = this.buildRoster();
+    const url = new URL(window.location.href);
+    writeMatchSize(url, maxPlayers, teamMode);
+    window.history.replaceState(null, "", url);
+    this.showSetup();
+  }
 
   private setDifficulty(difficulty: BotDifficulty): void {
     if (this.sim) return;
@@ -263,7 +303,7 @@ export class OfflineMatch {
     if (this.humanSlot !== null) this.human = new HumanActor(player, combat, equipment, () => this.onHumanEliminated(), DEATH_PILE_ID_BASE + HUMAN_SLOT);
     const sim = trace.time("start MatchSim", () => createOfflineMatchSim({
       seed: this.seed,
-      options,
+      options: { ...options, maxPlayers: this.maxPlayers, teamMode: this.teamMode },
       difficulty: this.difficulty,
       humanSlot: this.humanSlot,
       spawns: this.spawns,
@@ -296,7 +336,7 @@ export class OfflineMatch {
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
     hud.setMatchSetup(null);
     trace.mark("start done");
-    console.info(`[match] started: ${config.actors.length} actors, ${this.difficulty}, zone ×${config.timeScale}`);
+    console.info(`[match] started: ${config.actors.length} actors in ${config.teamCount} teams (${this.teamMode}), ${this.difficulty}, zone ×${config.timeScale}`);
   }
 
   private tick(tick: PlayerTick): void {
@@ -376,12 +416,12 @@ export class OfflineMatch {
     const teammate = this.bodies.list.find((body) => body.team === 0 && body.actor !== null && body.actor.life !== "dead");
     const actions: ScreenAction[] = [
       {
-        label: teammate ? "Spectate teammate" : "Spectate",
+        label: teammate ? MATCH_STRINGS.screens.spectateTeammate : MATCH_STRINGS.screens.spectate,
         primary: true,
         disabled: !teammate && !this.bodies.list.some((body) => body.actor?.life !== "dead"),
         run: () => this.spectate(teammate?.slot ?? null),
       },
-      { label: "New match", run: () => reloadNewMatch(this.difficulty) },
+      { label: MATCH_STRINGS.screens.newMatch, run: () => reloadNewMatch(this.difficulty, this) },
     ];
     this.deathScreen.show(
       {
@@ -417,7 +457,7 @@ export class OfflineMatch {
         reason: state.endReason ? REASON_TEXT[state.endReason] : "",
       },
       [
-        { label: "New match", primary: true, run: () => reloadNewMatch(this.difficulty) },
+        { label: MATCH_STRINGS.screens.newMatch, primary: true, run: () => reloadNewMatch(this.difficulty, this) },
         { label: "Close", run: () => this.closeScreens() },
       ],
     );

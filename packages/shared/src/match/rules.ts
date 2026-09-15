@@ -4,6 +4,7 @@ import { ITEMS } from "../equipment/items";
 import type { LifeState } from "../equipment/vitals";
 import type { WeaponId } from "../weapons/types";
 import { secondsToTicks, DEFAULT_ZONE_SPEC } from "./zone";
+import { clampMaxPlayers, TEAM_MODE_SIZE, teamModeOfSize, type TeamMode } from "./teams";
 import type { ActorConfig, BrEndReason, BrMatchConfig, BrRules, BrTimings, KillCause, MatchEvent, TeamResult, TeamState, ZoneSpec } from "./types";
 
 // Battle royale rules (docs/bots/design.md §8.1, §8.3): configuration defaults, phase schedule, team counts,
@@ -17,9 +18,14 @@ export const DEFAULT_BR_TIMINGS: BrTimings = { countdownSeconds: 5, landingSecon
 export interface BrMatchConfigOptions {
   readonly seed: number;
   readonly mapId?: string;
-  /** 2..5 offline (default 5). */
+  /** Default 5, or ceil(maxPlayers / teamSize) when `maxPlayers` is set. */
   readonly teamCount?: number;
+  /** Default 2, or TEAM_MODE_SIZE[teamMode]. */
   readonly teamSize?: number;
+  /** Host-picked mode; sets `teamSize` when that is absent. */
+  readonly teamMode?: TeamMode;
+  /** 2..20: slots are 0..maxPlayers-1 (the last team may be short). Default teamCount × teamSize. */
+  readonly maxPlayers?: number;
   /** Slot of the local human, or null for a bots-only match (default null). */
   readonly humanSlot?: number | null;
   /** Bots' difficulty, or a per-slot function. */
@@ -33,21 +39,32 @@ export interface BrMatchConfigOptions {
   readonly timeScale?: number;
 }
 
-const BOT_CALLSIGNS = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike", "Nova", "Oscar", "Papa"];
+const BOT_CALLSIGNS = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike", "Nova", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango"];
 
 export function slotOf(team: number, member: number, teamSize: number): number {
   return team * teamSize + member;
 }
 
-/** Actors for `teamCount × teamSize` slots; slot = team × teamSize + member, dense. */
-export function createActorConfigs(options: BrMatchConfigOptions): ActorConfig[] {
+/** Team count, size and player count of the options (see `BrMatchConfigOptions`). */
+export function resolveMatchSize(options: Pick<BrMatchConfigOptions, "teamCount" | "teamSize" | "teamMode" | "maxPlayers">): { teamCount: number; teamSize: number; maxPlayers: number } {
+  const teamSize = options.teamSize ?? (options.teamMode ? TEAM_MODE_SIZE[options.teamMode] : 2);
+  if (options.maxPlayers !== undefined) {
+    const maxPlayers = clampMaxPlayers(options.maxPlayers);
+    return { teamCount: options.teamCount ?? Math.ceil(maxPlayers / teamSize), teamSize, maxPlayers };
+  }
   const teamCount = options.teamCount ?? 5;
-  const teamSize = options.teamSize ?? 2;
+  return { teamCount, teamSize, maxPlayers: teamCount * teamSize };
+}
+
+/** Actors for up to `teamCount × teamSize` slots below `maxPlayers`; slot = team × teamSize + member, dense. */
+export function createActorConfigs(options: BrMatchConfigOptions): ActorConfig[] {
+  const { teamCount, teamSize, maxPlayers } = resolveMatchSize(options);
   const human = options.humanSlot ?? null;
   const actors: ActorConfig[] = [];
   for (let team = 0; team < teamCount; team++) {
     for (let member = 0; member < teamSize; member++) {
       const slot = slotOf(team, member, teamSize);
+      if (slot >= maxPlayers) break;
       const kind = slot === human ? "human" : "bot";
       if (kind === "bot" && human !== null && options.humanTeammate === false && Math.floor(human / teamSize) === team) continue;
       const difficulty = kind === "human" ? null : typeof options.difficulty === "function" ? options.difficulty(slot) : (options.difficulty ?? "normal");
@@ -59,11 +76,14 @@ export function createActorConfigs(options: BrMatchConfigOptions): ActorConfig[]
 }
 
 export function createBrMatchConfig(options: BrMatchConfigOptions): BrMatchConfig {
+  const size = resolveMatchSize(options);
   return {
     seed: options.seed >>> 0,
     mapId: options.mapId ?? "v1",
-    teamCount: options.teamCount ?? 5,
-    teamSize: options.teamSize ?? 2,
+    teamCount: size.teamCount,
+    teamSize: size.teamSize,
+    maxPlayers: size.maxPlayers,
+    teamMode: options.teamMode ?? teamModeOfSize(size.teamSize) ?? undefined,
     actors: createActorConfigs(options),
     rules: { ...DEFAULT_BR_RULES, ...options.rules },
     zone: options.zone ?? DEFAULT_ZONE_SPEC,

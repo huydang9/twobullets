@@ -110,6 +110,8 @@ function setup() {
     encodeWelcome(w, {
       playerSlot: OWN,
       teamId: 1,
+      teamSize: 2,
+      maxPlayers: 10,
       serverTick: TICK,
       tickRate: 60,
       snapshotRate: 60,

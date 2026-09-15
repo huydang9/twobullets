@@ -16,13 +16,12 @@ import {
 import { MatchSim, type MatchSimEquipment, type PlayerBody } from "@twobullets/sim";
 import type { OfflineMatchOptions } from "./options";
 
-export const OFFLINE_TEAM_SIZE = 2;
 export const OFFLINE_HUMAN_SLOT = 0;
 
 /** Everything `OfflineMatch.start` feeds MatchSim, without a render scene (headless test: test/match). */
 export interface OfflineMatchSimInput {
   readonly seed: number;
-  readonly options: Pick<OfflineMatchOptions, "teams" | "teammate" | "zoneScale" | "botsPassive">;
+  readonly options: Pick<OfflineMatchOptions, "maxPlayers" | "teamMode" | "teammate" | "zoneScale" | "botsPassive">;
   readonly difficulty: BotDifficulty;
   /** Null: bots-only (`?spectate=1`). */
   readonly humanSlot: number | null;
@@ -41,8 +40,8 @@ export interface OfflineMatchSimInput {
 export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed" | "options" | "difficulty" | "humanSlot">): BrMatchConfig {
   return createBrMatchConfig({
     seed: input.seed,
-    teamCount: input.options.teams,
-    teamSize: OFFLINE_TEAM_SIZE,
+    maxPlayers: input.options.maxPlayers,
+    teamMode: input.options.teamMode,
     humanSlot: input.humanSlot,
     humanTeammate: input.options.teammate,
     difficulty: input.difficulty,

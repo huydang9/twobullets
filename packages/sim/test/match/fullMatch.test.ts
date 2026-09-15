@@ -45,6 +45,25 @@ describe("headless bots-only match", () => {
     expect(summary.wallMs).toBeLessThan(60_000);
   }, 120_000);
 
+  it("20 bots in 5 squads run to a winner with the per-tick CPU gate", async () => {
+    const match = await createHeadlessMatch(havok, { seed: 2, brains: fighterScript, timeScale: 0.25, profile: true, config: { maxPlayers: 20, teamMode: "squad" } });
+    expect(match.sim.state.actors.filter(Boolean)).toHaveLength(20);
+    expect(match.sim.state.teams.map((t) => t.slots.length)).toEqual([4, 4, 4, 4, 4]);
+    const capTicks = match.sim.schedule.timeCapTick;
+    const summary = runHeadlessMatch(match, capTicks + 600);
+    match.dispose();
+    console.info(
+      `[headless match 20 squad] ${summary.reason} winner team ${summary.winnerTeam} after ${summary.combatSeconds.toFixed(0)} s: ${summary.kills} kills, ${summary.knocks} knocks, ` +
+        `${summary.revives} revives; tick ms p50 ${summary.tickMs.p50.toFixed(3)} p99 ${summary.tickMs.p99.toFixed(3)} max ${summary.tickMs.max.toFixed(2)}; brain p99 ${summary.brainMs.p99.toFixed(3)}`,
+    );
+    expect(["lastTeam", "allDead", "timeCap"]).toContain(summary.reason);
+    expect(summary.kills).toBeGreaterThanOrEqual(1);
+    expect(summary.nanPositions).toBe(0);
+    expect(summary.belowKillY).toBe(0);
+    expect(summary.placements.every(([, placement]) => placement >= 1)).toBe(true);
+    expect(summary.tickMs.p99).toBeLessThan(8);
+  }, 180_000);
+
   it("real brains and nav (shared/bots): the match ends, no NaN, brain CPU within budget (kills and stuck reported, not gated yet)", async () => {
     const match = await createHeadlessMatch(havok, { seed: 1, brains: createBotBrain, timeScale: 0.25, loadout: "empty", profile: true });
     const capTicks = match.sim.schedule.timeCapTick;

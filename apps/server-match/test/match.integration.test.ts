@@ -1,3 +1,4 @@
+import { TEAM_MODE_SIZE, teamCount } from "@twobullets/contracts";
 import { createMemorySessionPair, NETWORK_PROFILES } from "@twobullets/netcode";
 import { dequantizePosXZ, DisconnectReason, type Mutable, type OwnerMoveBlock } from "@twobullets/protocol";
 import type { HavokModule } from "@twobullets/sim";
@@ -17,12 +18,13 @@ beforeAll(async () => {
 const SECONDS = 8;
 
 describe("match server in-process", () => {
-  for (const [clientCount, profile] of [
-    [2, "lan"],
-    [10, "typical"],
+  for (const [clientCount, profile, teamMode] of [
+    [2, "lan", undefined],
+    [10, "typical", undefined],
+    [20, "lan", "squad"],
   ] as const) {
-    it(`${clientCount} clients on "${profile}": handshake, authoritative movement, snapshots whose owner blocks match the server`, async () => {
-      const h = await createHarness(havok, { recordOwners: true });
+    it(`${clientCount} clients on "${profile}"${teamMode ? ` in ${teamMode}s` : ""}: handshake, authoritative movement, snapshots whose owner blocks match the server`, async () => {
+      const h = await createHarness(havok, { recordOwners: true, ...(teamMode ? { maxPlayers: clientCount, teamMode } : {}) });
       const lossy = profile !== "lan";
       for (let i = 0; i < clientCount; i++) h.connect({ profile: NETWORK_PROFILES[profile], seed: 7 + i, leadTicks: lossy ? 8 : 3 });
       h.run(250);
@@ -31,6 +33,16 @@ describe("match server in-process", () => {
         expect(c.disconnect).toBeNull();
       }
       expect(new Set(h.clients.map((c) => c.playerSlot)).size).toBe(clientCount);
+      if (teamMode) {
+        const size = TEAM_MODE_SIZE[teamMode];
+        for (const c of h.clients) {
+          expect(c.welcome).toMatchObject({ teamSize: size, maxPlayers: clientCount, teamId: Math.floor(c.playerSlot / size) });
+        }
+        const perTeam = new Map<number, number>();
+        for (const c of h.clients) perTeam.set(c.welcome!.teamId, (perTeam.get(c.welcome!.teamId) ?? 0) + 1);
+        expect([...perTeam.values()]).toEqual(new Array(teamCount(clientCount, teamMode)).fill(size));
+        expect(Math.max(...h.clients.map((c) => c.playerSlot))).toBe(clientCount - 1);
+      }
 
       const scratch: Mutable<OwnerMoveBlock> = createOwnerBlock();
       const spawn = new Map<number, { x: number; z: number }>();
@@ -48,7 +60,7 @@ describe("match server in-process", () => {
           received[i]!++;
           const slot = client.playerSlot;
           entityCounts.add(snap.entities.length);
-          const server = h.ownerHistory.get(snap.header.serverTick * 16 + slot);
+          const server = h.ownerHistory.get(snap.header.serverTick * 32 + slot);
           if (server === undefined || snap.owner === null) {
             mismatches.push(`client ${i} tick ${snap.header.serverTick}: no ${server === undefined ? "server record" : "owner block"}`);
             return;

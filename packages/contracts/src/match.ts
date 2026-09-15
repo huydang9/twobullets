@@ -22,10 +22,49 @@ export type MatchPhase =
 /** The gameplay subset sent to clients (`PhaseChange`); `End` is the lifecycle's `Ended`. */
 export type GameplayPhase = "Warmup" | "LandingSelect" | "Glide" | "Combat" | "End";
 
+/** Host-picked team mode; the team size is `TEAM_MODE_SIZE[mode]`. */
+export type TeamMode = "solo" | "duo" | "squad";
+
+export const TEAM_MODES: readonly TeamMode[] = ["solo", "duo", "squad"];
+export const TEAM_MODE_SIZE: Readonly<Record<TeamMode, number>> = { solo: 1, duo: 2, squad: 4 };
+export const MIN_MATCH_PLAYERS = 2;
+/** Wire limit too: slots and team ids are 5-bit fields (protocol v3). */
+export const MAX_MATCH_PLAYERS = 20;
+export const DEFAULT_MATCH_PLAYERS = 10;
+export const DEFAULT_TEAM_MODE: TeamMode = "duo";
+
+// Slots are dense 0..maxPlayers-1 and slot = teamId · teamSize + member, so the last team may be partial (10 players
+// in squads = 4, 4, 2). Mirrored in @twobullets/shared/match/teams (shared can't import this package).
+
+/** Teams in a match: ceil(maxPlayers / team size). */
+export function teamCount(maxPlayers: number, mode: TeamMode): number {
+  return Math.ceil(clampMaxPlayers(maxPlayers) / TEAM_MODE_SIZE[mode]);
+}
+export function teamOfSlot(slot: number, teamSize: number): number {
+  return Math.floor(slot / teamSize);
+}
+export function memberOfSlot(slot: number, teamSize: number): number {
+  return slot % teamSize;
+}
+export function slotOf(teamId: number, member: number, teamSize: number): number {
+  return teamId * teamSize + member;
+}
+export function clampMaxPlayers(n: number): number {
+  return Number.isFinite(n) ? Math.min(MAX_MATCH_PLAYERS, Math.max(MIN_MATCH_PLAYERS, Math.round(n))) : DEFAULT_MATCH_PLAYERS;
+}
+/** Mode of a team size (1 solo, 2 duo, 4 squad); null for other sizes. */
+export function teamModeOfSize(size: number): TeamMode | null {
+  return size === 1 ? "solo" : size === 2 ? "duo" : size === 4 ? "squad" : null;
+}
+/** `config.teamMode`, else derived from `maxTeamSize` (duo when that is not 1/2/4). */
+export function matchTeamMode(config: Pick<MatchConfig, "teamMode" | "maxTeamSize">): TeamMode {
+  return config.teamMode ?? teamModeOfSize(config.maxTeamSize) ?? DEFAULT_TEAM_MODE;
+}
+
 export interface TeamAssignment {
-  /** 0..4 */
+  /** 0..teamCount-1 (up to 19 in solo). */
   readonly teamId: number;
-  /** 1–2 account ids; bots use `bot:<n>` ids. */
+  /** 1..team size account ids; bots use `bot:<n>` ids. */
   readonly accountIds: readonly string[];
 }
 
@@ -48,8 +87,12 @@ export interface MatchConfig {
   readonly mapId: string;
   /** u32; seeds loot and spawn layout. */
   readonly matchSeed: number;
+  /** MIN_MATCH_PLAYERS..MAX_MATCH_PLAYERS; slots are 0..maxPlayers-1. */
   readonly maxPlayers: number;
+  /** = TEAM_MODE_SIZE[teamMode]. */
   readonly maxTeamSize: number;
+  /** Absent in older configs: derive with `matchTeamMode`. Bots fill empty slots when `rules.fillWithBots`. */
+  readonly teamMode?: TeamMode;
   readonly teams: readonly TeamAssignment[];
   readonly rules: MatchRules;
 }
@@ -122,7 +165,7 @@ export interface MatchResult {
 }
 
 /**
- * `GET /dev/token?sub=<accountId>&team=<0..4>` on a match server started with `--mode=local` (M3 dev only; production
+ * `GET /dev/token?sub=<accountId>&team=<0..teamCount-1>` on a match server started with `--mode=local` (M3 dev only; production
  * tokens come from server-api). The token is a single-use join JWT; fetch a new one for every connect.
  */
 export interface DevJoinTokenResponse {

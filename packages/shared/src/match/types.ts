@@ -6,6 +6,7 @@ import type { DamageContext, DamageOutcome, LifeState, Vitals, VitalsHit } from 
 import type { ThrowableKind } from "../equipment/items";
 import type { Stance, Vec3 } from "../movement/types";
 import type { FiredShot, HitZone, WeaponEvent, WeaponId } from "../weapons/types";
+import type { TeamMode } from "./teams";
 
 // Battle royale match contracts (docs/bots/design.md §8–9): phases, zone, teams, placements and events. Pure data, no
 // engine imports. The offline match (client), the headless bot match (Node tests) and the M5 match server share them.
@@ -124,6 +125,9 @@ export interface BrMatchConfig {
   readonly mapId: string;
   readonly teamCount: number;
   readonly teamSize: number;
+  /** Slots 0..maxPlayers-1 (≤ teamCount × teamSize; the last team may be short). Absent = teamCount × teamSize. */
+  readonly maxPlayers?: number;
+  readonly teamMode?: TeamMode;
   readonly actors: readonly ActorConfig[];
   readonly rules: BrRules;
   readonly zone: ZoneSpec;

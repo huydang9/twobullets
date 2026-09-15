@@ -33,7 +33,8 @@ import { EVENT_RULES } from "./netCombatRules";
 
 /** What NetClient hands to the combat layer (M4). Everything is called synchronously while a message is handled. */
 export interface NetEventSink {
-  onWelcome(slot: number, team: number): void;
+  /** `teamSize` (Welcome v3): teammates are the slots with floor(slot / teamSize) === team. */
+  onWelcome(slot: number, team: number, teamSize?: number): void;
   /**
    * Every decoded snapshot: tier U `shots` and `hits` (entities give shot origins). `entitiesValid` false: a snapshot
    * dropped for a missing baseline, with only its header and events decoded.
@@ -111,7 +112,7 @@ export interface CombatFeedback {
   /** Owner vitals changed. */
   vitals(vitals: Readonly<NetOwnerVitals>, previousLife: LifeState): void;
   /** Our slot and team (Welcome). */
-  welcome?(slot: number, team: number): void;
+  welcome?(slot: number, team: number, teamSize?: number): void;
 }
 
 interface PendingShot {
@@ -191,13 +192,13 @@ export class NetCombat implements NetEventSink {
     for (let i = 0; i < PENDING_HITS; i++) this.hits.push({ active: false, tick: 0, victim: 0, zone: "body", armor: false, dirX: 0, dirZ: 1 });
   }
 
-  onWelcome(slot: number, team: number): void {
+  onWelcome(slot: number, team: number, teamSize?: number): void {
     this.ownSlot = slot;
     this.ownTeam = team;
     this.lastShotId.fill(-1);
     this.feetTick.fill(-1);
     this.hasVitals = false;
-    this.feedback.welcome?.(slot, team);
+    this.feedback.welcome?.(slot, team, teamSize);
   }
 
   onSnapshotEvents(snapshot: Snapshot, entitiesValid = true): void {

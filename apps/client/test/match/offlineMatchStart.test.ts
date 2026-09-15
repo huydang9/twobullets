@@ -7,7 +7,7 @@ import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createMapV1Nav, loadMapV1 } from "../../../../packages/sim/test/match/mapV1World";
-import { createOfflineMatchSim, OFFLINE_TEAM_SIZE } from "../../src/match/createOfflineMatchSim";
+import { createOfflineMatchConfig, createOfflineMatchSim } from "../../src/match/createOfflineMatchSim";
 import { readOfflineMatchOptions } from "../../src/match/options";
 
 // Headless `?bots=1&difficulty=normal&seed=42` start path: the same MatchSim OfflineMatch.start builds
@@ -28,7 +28,8 @@ describe("offline match start (client path, headless)", () => {
     progress("loaded");
     const options = readOfflineMatchOptions("?bots=1&difficulty=normal&seed=42", true);
     const seed = options.seed!;
-    const spawns = planTeamSpawns(seed, options.teams, OFFLINE_TEAM_SIZE, MAP_V1.pois, MAP_V1.spawns, (x, z) => map.terrain.sampleHeight(x, z));
+    const config = createOfflineMatchConfig({ seed, options, difficulty: options.difficulty, humanSlot: 0 });
+    const spawns = planTeamSpawns(seed, config.teamCount, config.teamSize, MAP_V1.pois, MAP_V1.spawns, (x, z) => map.terrain.sampleHeight(x, z));
     const feet = spawns.find((plan) => plan.team === 0)!.feet[0]!;
     let vitals: Vitals = createVitals();
     const inventory = createInventory();

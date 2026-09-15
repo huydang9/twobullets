@@ -109,6 +109,8 @@ export class FakeMatchServer {
         encodeWelcome(this.w, {
           playerSlot: 0,
           teamId: 0,
+          teamSize: 2,
+          maxPlayers: 10,
           serverTick: this.tick,
           tickRate: 60,
           snapshotRate: 60,
