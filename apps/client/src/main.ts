@@ -1,5 +1,6 @@
-import { netLaunchSearch, shouldShowMenu, startMenu, type MatchLaunch } from "./menu";
-import { setJoinTokenProvider } from "./net/handshake";
+import type { GameLaunch } from "./game/launch";
+import { netGameLaunch, shouldShowMenu, startMenu, type MatchLaunch } from "./menu";
+import { showFatalError } from "./ui/FatalError";
 
 const canvas = document.getElementById("game");
 const hudRoot = document.getElementById("hud");
@@ -7,46 +8,39 @@ if (!(canvas instanceof HTMLCanvasElement) || !(hudRoot instanceof HTMLDivElemen
   throw new Error("index.html is missing #game canvas or #hud root");
 }
 
+/** A failed start (map chunk, terrain, nav grid, assets…) shows the error over the loading card instead of hanging. */
 function reportStartFailure(err: unknown): void {
-  console.error("[twobullets] failed to start", err);
-  hudRoot!.textContent = `Failed to start: ${err instanceof Error ? err.message : String(err)}`;
+  showFatalError(err, "start");
 }
 
 /** Game module loaded on demand, so the menu shows before Babylon and Havok download. */
-async function startGame(): Promise<void> {
+async function startGame(launch: GameLaunch): Promise<void> {
   const { Game } = await import("./game/Game");
-  await Game.create(canvas as HTMLCanvasElement, hudRoot as HTMLDivElement);
+  await Game.create(canvas as HTMLCanvasElement, hudRoot as HTMLDivElement, launch);
 }
 
-/**
- * Networked match from the menu: join tokens come from server-api instead of `/dev/token`, and the net flags
- * Game.create reads are in the URL only for its synchronous start (menu/launch.ts; README-wiring.md has the Game.ts
- * option that replaces this).
- */
+/** Networked match from the menu: join tokens from server-api, the match's map, the exit hook back to the menu. */
 async function startNetworkedGame(launch: MatchLaunch): Promise<void> {
-  const { Game } = await import("./game/Game");
-  setJoinTokenProvider(() => launch.tokens());
-  const menuUrl = window.location.href;
-  const url = new URL(menuUrl);
-  url.search = netLaunchSearch(url.search, launch);
-  window.history.replaceState(window.history.state, "", url);
-  let started: Promise<unknown>;
-  try {
-    started = Game.create(canvas as HTMLCanvasElement, hudRoot as HTMLDivElement);
-  } finally {
-    // A reload mid-match lands on the menu, which offers "Rejoin".
-    window.history.replaceState(window.history.state, "", menuUrl);
-  }
-  await started.catch((err: unknown) => {
+  await startGame(netGameLaunch(launch)).catch((err: unknown) => {
     reportStartFailure(err);
     throw err;
   });
 }
 
-// Production: the menu is the entry point. DEV: the menu unless the URL has game flags (`?map=`, `?bots=1`, `?net=`,
-// `?bench=`, …), which start the game directly as before.
-if (shouldShowMenu(window.location.search) || (!import.meta.env.DEV && !new URLSearchParams(window.location.search).has("bots"))) {
+/** Production practice: the menu reloads with `?bots=1&players&mode&difficulty&map` (menu/launch.ts `practiceSearch`). */
+async function startPractice(search: string): Promise<void> {
+  const { readOfflineMatchOptions } = await import("./match/options");
+  await startGame({ kind: "practice", options: readOfflineMatchOptions(search, false), mapId: new URLSearchParams(search).get("map") ?? "v1" });
+}
+
+// Production: the menu is the entry point, `?bots=` is practice. DEV: the menu unless the URL has game flags (`?map=`,
+// `?bots=1`, `?net=`, `?bench=`, …), which start the game directly.
+const search = window.location.search;
+const practice = !import.meta.env.DEV && new URLSearchParams(search).has("bots");
+if (practice) {
+  startPractice(search).catch(reportStartFailure);
+} else if (shouldShowMenu(search) || !import.meta.env.DEV) {
   startMenu({ parent: document.body, launchMatch: startNetworkedGame });
 } else {
-  startGame().catch(reportStartFailure);
+  startGame({ kind: "dev" }).catch(reportStartFailure);
 }

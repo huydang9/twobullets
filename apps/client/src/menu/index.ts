@@ -8,7 +8,7 @@ import { MenuController } from "./MenuController";
 import { MenuView } from "./MenuView";
 import { PreferenceStore } from "./preferences";
 
-export { menuSearch, netLaunchSearch, practiceSearch, shouldShowMenu, type MatchLaunch, type PracticeSettings } from "./launch";
+export { menuSearch, netGameLaunch, practiceSearch, shouldShowMenu, type MatchLaunch, type PracticeSettings } from "./launch";
 export { MenuController } from "./MenuController";
 export { INITIAL_MENU_STATE, menuReducer, type MenuEvent, type MenuState } from "./menuState";
 

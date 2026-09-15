@@ -262,6 +262,11 @@ export class NetClient {
     return this.welcome?.playerSlot ?? -1;
   }
 
+  /** The Welcome of this connection (slot, team, team size, match size), null until it arrives. */
+  get welcomeInfo(): Welcome | null {
+    return this.welcome;
+  }
+
   /** Fractional server tick remote players render at this frame. */
   get renderTick(): number {
     return this.renderTickValue;

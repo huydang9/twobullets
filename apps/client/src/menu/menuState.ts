@@ -19,7 +19,11 @@ export type Screen =
   | { readonly kind: "connecting"; readonly matchId: string; readonly mapId: string; readonly reconnect: boolean }
   /** The game runs; the menu is hidden but keeps listening for the match end. */
   | { readonly kind: "inGame"; readonly matchId: string }
-  | { readonly kind: "results"; readonly matchId: string; readonly result: MatchResultResponse | null; readonly fromGame: boolean };
+  /**
+   * `fromGame`: shown over the game (leaving reloads to the menu). `awaitingGame`: the in-game result screen is still up,
+   * so this one stays hidden (results already load) until the game hands over (`gameExited`).
+   */
+  | { readonly kind: "results"; readonly matchId: string; readonly result: MatchResultResponse | null; readonly fromGame: boolean; readonly awaitingGame: boolean };
 
 export type ScreenKind = Screen["kind"];
 
@@ -59,6 +63,8 @@ export type MenuEvent =
   | { readonly type: "connectFailed"; readonly code: ClientErrorCode }
   | { readonly type: "gameLaunched"; readonly matchId: string }
   | { readonly type: "matchEnded"; readonly matchId: string }
+  /** The game closed its in-game result screen for this match. */
+  | { readonly type: "gameExited"; readonly matchId: string }
   | { readonly type: "resultLoaded"; readonly result: MatchResultResponse }
   | { readonly type: "closeResults" }
   | { readonly type: "upgradeRequired" };
@@ -139,6 +145,11 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
       return screen.kind === "connecting" && screen.matchId === event.matchId ? { ...state, busy: false, rejoin: null, screen: { kind: "inGame", matchId: event.matchId } } : state;
     case "matchEnded":
       return matchEnded(state, event.matchId);
+    case "gameExited":
+      if (screen.kind === "inGame" && screen.matchId === event.matchId) {
+        return { ...state, busy: false, rejoin: null, screen: { kind: "results", matchId: event.matchId, result: null, fromGame: true, awaitingGame: false } };
+      }
+      return screen.kind === "results" && screen.matchId === event.matchId && screen.awaitingGame ? { ...state, screen: { ...screen, awaitingGame: false } } : state;
     case "resultLoaded":
       return screen.kind === "results" && screen.matchId === event.result.matchId ? { ...state, screen: { ...screen, result: event.result } } : state;
     case "closeResults":
@@ -157,7 +168,7 @@ function matchEnded(state: MenuState, matchId: string): MenuState {
   const fromGame = screen.kind === "inGame" && screen.matchId === matchId;
   const waiting = screen.kind === "connecting" && screen.matchId === matchId;
   if (fromGame || waiting || screen.kind === "main" || screen.kind === "boot") {
-    return { ...state, rejoin, busy: false, screen: { kind: "results", matchId, result: null, fromGame } };
+    return { ...state, rejoin, busy: false, screen: { kind: "results", matchId, result: null, fromGame, awaitingGame: fromGame } };
   }
   return { ...state, rejoin };
 }

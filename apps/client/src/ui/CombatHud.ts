@@ -187,12 +187,12 @@ export class CombatHud implements EquipmentHudHost {
   }
 
   /** Shows a hit exactly as a real `onDamage` event would. */
-  showHit(hit: DamageHit, weaponName: string, distance: number, armorAbsorbed = 0): void {
+  showHit(hit: DamageHit, weaponName: string, distance: number, armorAbsorbed = 0, name?: string): void {
     const now = performance.now();
     this.hitMarker.show(hit.killed, now, armorAbsorbed > 0);
     this.damageNumbers?.add(hit, now);
     if (hit.killed) {
-      const kill = { targetId: hit.targetId, headshot: hit.zone === "head", weaponName, distance };
+      const kill = { targetId: hit.targetId, ...(name !== undefined ? { name } : {}), headshot: hit.zone === "head", weaponName, distance };
       this.killFeed.push(kill, now);
       this.killNotice.notify(kill);
     }
@@ -234,7 +234,8 @@ export class CombatHud implements EquipmentHudHost {
   };
 
   private readonly handleDamage = (event: DamageEvent): void => {
-    this.showHit(event, event.weapon.name, event.distance, event.armorAbsorbed);
+    // Networked players ("player_<slot name>", net/RemotePlayers.ts) carry their roster name, digits included.
+    this.showHit(event, event.weapon.name, event.distance, event.armorAbsorbed, event.targetId.startsWith("player_") ? event.targetName : undefined);
   };
 }
 

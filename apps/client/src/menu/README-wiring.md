@@ -1,85 +1,38 @@
 # Front door: wiring
 
-The menu (`menu/`) and the server-api client (`platform/`) are wired in `main.ts` already. One `Game.ts` change is left
-for the lead, because `Game.create` still takes its mode from DEV-only URL flags.
+The menu (`menu/`) and the server-api client (`platform/`) hand over to the game through an explicit launch
+(`game/launch.ts`), so networked play and practice work in production builds.
 
-## What `main.ts` does today
+## Launches
 
-- `shouldShowMenu(location.search)`: no query params besides `?lang=` → the menu. Any game flag (`?map=`, `?bots=1`,
-  `?net=`, `?bench=`, `?teammate=1`, `?quality=`, …) → `Game.create` as before. In production builds the menu is shown
-  unless the URL has `?bots=` (offline practice reloads with `?bots=1&players&mode&difficulty&map`).
+| Launch | From | Game.create does |
+|---|---|---|
+| `{ kind: "net", wsUrl, accountId, teamId, mapId, matchId, tokens, onExit }` | `MenuController.connect` → `main.ts startNetworkedGame` (`netGameLaunch`) | loads `mapId` (`resolveMapDefinition`), joins with server-api join tokens (`tokens()` per connect, so rejoins get fresh ones), `NetMatch` presents phases, zone, roster names, death and results; no ground loot |
+| `{ kind: "practice", options, mapId }` | production `?bots=1&players&mode&difficulty&map` (menu practice reloads with `practiceSearch`) | offline bot match on `mapId` |
+| `{ kind: "dev" }` | DEV URLs with game flags | `?net=` (+ `&map=`, default arena), `?bots=1`, `?map=`, `?bench=` exactly as before |
+
+`resolveLaunch` is the single place that decides; `test/game/launch.test.ts` covers it.
+
+## Entry (`main.ts`)
+
+- `shouldShowMenu(search)`: no query params besides `?lang=` → the menu. Production: always the menu, except `?bots=`
+  (practice). DEV: any game flag starts the game directly.
 - `Game` is imported dynamically, so the menu paints before Babylon and Havok download.
-- **Networked launch** (`startNetworkedGame`):
-  1. `setJoinTokenProvider(() => launch.tokens())` in `net/handshake.ts`. `fetchDevToken` returns server-api join tokens
-     (the one the connecting screen fetched, then a fresh `POST /v1/matches/{id}/join` for every later connect) instead
-     of calling `/dev/token`. `?net=` dev play never installs a provider, so it is unchanged.
-  2. It writes `?net=<wsUrl>&netId=<accountId>&team=<teamId>&map=<mapId>` into the URL, calls `Game.create`, and puts the
-     menu URL back straight after. `Game.create` reads `new URLSearchParams(location.search)` in its first, synchronous
-     statement, so the flags are seen. A reload mid-match lands on the menu, which offers "Vào lại trận".
-- The `MenuController` keeps the lobby socket open during the game. When the match ends (`match.updated` push, or REST
-  polling while the socket is down) the results screen is shown over the game. "Về sảnh" reloads to the menu.
+- A start failure or a throwing frame shows `ui/FatalError` (message, stack, reload, back to menu) instead of a frozen
+  picture or a stuck loading card.
 
-## Game.ts change for the lead (needed for production builds)
+## After the match
 
-Today `readNetConfig`, `?bots=1` and `?map=` are gated on `import.meta.env.DEV`, so in a production build the URL shim
-opens the blockout arena offline and practice has no bots. Replace the shim with an explicit launch option:
-
-```ts
-// game/Game.ts
-import type { NetGameConfig } from "../net/NetGame";
-import type { OfflineMatchOptions } from "../match";
-
-export interface GameLaunch {
-  /** Networked match from the menu (production too). */
-  readonly net?: NetGameConfig;
-  /** Map of a networked match; ignored until server-match loads maps (then pass it to resolveMapDefinition). */
-  readonly netMapId?: string;
-  /** Offline practice from the menu (production too). */
-  readonly practice?: OfflineMatchOptions;
-}
-
-static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement, launch: GameLaunch = {}): Promise<Game> {
-  const params = new URLSearchParams(window.location.search);
-  // …
-  const netConfig = launch.net ?? (import.meta.env.DEV && !benchmark ? readNetConfig(params) : null);
-  const matchOptions = launch.practice ?? readOfflineMatchOptions(window.location.search);
-  const botsMatch = (import.meta.env.DEV || launch.practice !== undefined) && !benchmark && !netConfig && matchOptions.enabled;
-  const mapId = netConfig
-    ? null // later: launch.netMapId once the server runs the map
-    : benchmark === "v1"
-      ? "v1"
-      : launch.practice
-        ? (params.get("map") ?? "v1")
-        : import.meta.env.DEV
-          ? (params.get("map") ?? (botsMatch ? "v1" : null))
-          : null;
-```
-
-Then in `main.ts`:
-
-```ts
-// startNetworkedGame: drop the replaceState shim
-const { parseNetParam } = await import("./net/handshake");
-await Game.create(canvas, hudRoot, {
-  net: { endpoint: parseNetParam(launch.join.wsUrl), sub: launch.account.id, team: launch.join.teamId, avatar: "soldier", debugHitboxes: false },
-  netMapId: launch.mapId,
-});
-
-// production practice: `?bots=1…` URLs
-const { readOfflineMatchOptions } = await import("./match/options");
-await Game.create(canvas, hudRoot, { practice: readOfflineMatchOptions(location.search, false) });
-```
-
-`readOfflineMatchOptions(search, false)` already ignores the DEV-only flags (`zoneScale`, `botDebug`, …).
+1. `MatchEnd` → the in-game result screen (`NetMatch`). Meanwhile the menu may already know the match ended
+   (`match.updated` push or polling): it moves to `results` with `awaitingGame: true`, stays hidden and loads the result.
+2. **Xem kết quả** (or 10 s) → `onExit({ reason: "ended" })` → `MenuController.gameExited` → `gameExited` event → the
+   results table shows over the game (`awaitingGame: false`). If the game never hands over (lost `MatchEnd`), the menu
+   takes over after `GAME_HANDOFF_TIMEOUT_MS`.
+3. **Về sảnh** → `reloadToMenu()`: a navigation to the menu URL (the game can't be torn down in place). Boot resync lands
+   in the lobby when the account is still in one, else the main menu.
+4. **Rời trận** during the match → `onExit({ reason: "left" })` → straight back to the menu, which offers "Vào lại trận"
+   while the match runs and shows its results on a later boot.
 
 ## Local run
 
-```sh
-# terminal 1: server-api (port 8080) allowing the Vite origin; real match processes need server-match --mode=agent
-TB_CORS_ORIGINS=http://localhost:5173 TB_ALLOCATOR=process pnpm --filter @twobullets/server-api dev
-# terminal 2: client
-pnpm dev   # http://localhost:5173 (menu), or VITE_TB_API_URL=http://host:port pnpm dev
-```
-
-`TB_ALLOCATOR=fake` gives lobbies, queue and "match found" without game servers (the join then points at a port with
-nothing listening, so the game shows "cannot reach").
+See [docs/release/local-stack.md](../../../../docs/release/local-stack.md): `pnpm stack:dev -- --fast`.

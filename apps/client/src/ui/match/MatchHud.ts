@@ -8,6 +8,10 @@ import { MatchFeed } from "./MatchFeed";
 const RAD_TO_DEG = 180 / Math.PI;
 /** Teammates farther than this show distance and direction on their card, m. */
 const TEAMMATE_DISTANCE_SHOWN = 30;
+/** Countdowns longer than this show as a "match starts in" banner; the last seconds as the big centre number. */
+const BIG_COUNTDOWN_SECONDS = 5;
+/** Zone notices stay up this long, ms. */
+const NOTICE_MS = 3500;
 
 /** What the match HUD reads each frame (the host fills one object and reuses it). */
 export interface MatchHudFrame {
@@ -62,6 +66,11 @@ export class MatchHud {
   private readonly countdown: HTMLDivElement;
   private readonly countdownText: Text;
   private readonly countdownAnim: Animation;
+  private readonly banner: HTMLDivElement;
+  private readonly bannerText: Text;
+  private readonly notice: HTMLDivElement;
+  private readonly noticeText: Text;
+  private noticeUntil = 0;
   private readonly cards: TeammateCard[] = [];
   private readonly spectating: HTMLDivElement;
   private readonly spectatingName: Text;
@@ -69,7 +78,7 @@ export class MatchHud {
   private readonly unsubscribeLanguage: () => void;
   private readonly barValue = [-1];
   private markerOffset = Number.NaN;
-  private shown = { alive: -1, teams: -1, kills: -1, zoneKey: "", zoneSeconds: -1, outside: -1, marker: -1, countdown: -1, tint: -1 };
+  private shown = { alive: -1, teams: -1, kills: -1, zoneKey: "", zoneSeconds: -1, outside: -1, marker: -1, countdown: -1, tint: -1, banner: -2 };
 
   constructor(
     parent: HTMLElement,
@@ -111,6 +120,12 @@ export class MatchHud {
     this.countdown = el("div", "tb-mhud__countdown", undefined, this.root);
     this.countdownText = textNode(this.countdown);
     this.countdown.hidden = true;
+    this.banner = el("div", "tb-mhud__banner", undefined, this.root);
+    this.bannerText = textNode(this.banner);
+    this.banner.hidden = true;
+    this.notice = el("div", "tb-mhud__notice", undefined, this.root);
+    this.noticeText = textNode(this.notice);
+    this.notice.hidden = true;
     this.countdownAnim = prepareAnimation(this.countdown, [{ opacity: 0, transform: "translate3d(-50%,-50%,0) scale(1.25)" }, { opacity: 1, transform: "translate3d(-50%,-50%,0) scale(1)", offset: 0.25 }, { opacity: 0.85 }], { duration: 900 });
 
     const team = el("div", "tb-mhud__team", undefined, this.root);
@@ -127,6 +142,7 @@ export class MatchHud {
     this.unsubscribeLanguage = onLanguageChange(() => {
       this.shown.zoneKey = "";
       this.shown.outside = -1;
+      this.shown.banner = -2;
       for (const card of this.cards) {
         card.shown = "?";
         card.slot = -1;
@@ -164,6 +180,7 @@ export class MatchHud {
     if (kills !== shown.kills) setText(this.kills, String((shown.kills = kills)));
 
     this.updateCountdown();
+    if (!this.notice.hidden && performance.now() > this.noticeUntil) this.notice.hidden = true;
     this.updateZone(focus ?? null, config.timeScale);
     this.updateTeammates(focus ?? null);
   }
@@ -178,13 +195,28 @@ export class MatchHud {
     const now = performance.now();
     const focus = this.view.state.actors[this.frame.focusSlot];
     this.feed.push(event, this.nameOf, this.teamOf, focus?.team ?? null, now);
-    if (event.type === "zoneWarning" || event.type === "zoneShrinkStarted" || event.type === "zoneAnnounced") replay(this.zoneWarn);
+    if (event.type === "zoneWarning" || event.type === "zoneShrinkStarted" || event.type === "zoneAnnounced") {
+      replay(this.zoneWarn);
+      const text = event.type === "zoneWarning" ? t("zone.warning", { s: event.secondsLeft }) : event.type === "zoneShrinkStarted" ? t("zone.shrinkingNow") : t("zone.announced");
+      setText(this.noticeText, text);
+      this.notice.hidden = false;
+      this.noticeUntil = now + NOTICE_MS;
+    }
   }
 
   private updateCountdown(): void {
     const state = this.view.state;
     let seconds = -1;
     if (state.phase === "warmup" && state.phaseEndTick > state.tick) seconds = Math.ceil((state.phaseEndTick - state.tick) / SIMULATION.tickRate);
+    // Banner: "match starts in 45s" for a long (networked) warmup, "waiting for players" while a started warmup has no
+    // end yet (a view with no phase information reports phaseStartTick −1: no banner).
+    const banner = state.phase !== "warmup" ? -2 : state.phaseEndTick < 0 ? (state.phaseStartTick >= 0 ? -1 : -2) : seconds > BIG_COUNTDOWN_SECONDS ? seconds : -2;
+    if (banner !== this.shown.banner) {
+      this.shown.banner = banner;
+      this.banner.hidden = banner === -2;
+      if (banner !== -2) setText(this.bannerText, banner === -1 ? t("match.waitingPlayers") : t("match.startsIn", { s: banner }));
+    }
+    if (seconds > BIG_COUNTDOWN_SECONDS) seconds = -1;
     if (seconds === this.shown.countdown) return;
     this.shown.countdown = seconds;
     this.countdown.hidden = seconds <= 0;

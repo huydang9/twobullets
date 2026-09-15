@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { creditLinesFrom } from "../../src/menu/credits";
-import { menuSearch, netLaunchSearch, practiceSearch, shouldShowMenu } from "../../src/menu/launch";
+import { menuSearch, netGameLaunch, practiceSearch, shouldShowMenu } from "../../src/menu/launch";
 import { unavailableNetworkMaps } from "../../src/menu/maps";
 import { DEFAULT_PREFERENCES, parsePreferences } from "../../src/menu/preferences";
 import { errorMessageKey, normalizeLobbyCode, normalizeNickname } from "../../src/menu/validation";
@@ -23,10 +23,14 @@ describe("menu entry and launch URLs", () => {
     expect(options).toMatchObject({ enabled: true, difficulty: "hard", teamMode: "squad", maxPlayers: 16, teams: 4 });
   });
 
-  it("networked launch flags carry the join URL, account, team and map; back to menu keeps only lang", () => {
+  it("networked launch carries the join URL, account, team, match, map, tokens and the exit hook; back to menu keeps only lang", async () => {
     const join = { wsUrl: "ws://localhost:7400/m/m_1", joinToken: "J", expiresAt: 0, matchId: "m_1", teamId: 3, reconnect: false };
-    const params = new URLSearchParams(netLaunchSearch("?lang=vi", { join, mapId: "v1", account: ACCOUNT, tokens: async () => ({ token: "J", matchId: "m_1", url: join.wsUrl, expiresAt: 0 }) }));
-    expect(Object.fromEntries(params)).toEqual({ net: join.wsUrl, netId: ACCOUNT.id, team: "3", map: "v1", lang: "vi" });
+    const exits: unknown[] = [];
+    const launch = netGameLaunch({ join, mapId: "v1", account: ACCOUNT, tokens: async () => ({ token: "J", matchId: "m_1", url: join.wsUrl, expiresAt: 0 }), onExit: (exit) => exits.push(exit) });
+    expect(launch).toMatchObject({ kind: "net", wsUrl: join.wsUrl, accountId: ACCOUNT.id, teamId: 3, mapId: "v1", matchId: "m_1" });
+    expect((await launch.tokens()).token).toBe("J");
+    launch.onExit?.({ matchId: "m_1", reason: "ended" });
+    expect(exits).toEqual([{ matchId: "m_1", reason: "ended" }]);
     expect(menuSearch("?net=x&lang=en")).toBe("?lang=en");
     expect(menuSearch("?net=x")).toBe("");
   });

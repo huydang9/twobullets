@@ -60,7 +60,7 @@ export class KillFeed {
 
   push(kill: KillInfo, now: number): void {
     const line = this.acquire();
-    setText(line.victim, targetName(kill.targetId));
+    setText(line.victim, kill.name ?? targetName(kill.targetId));
     setText(line.weapon, kill.weaponName);
     line.headshot.hidden = !kill.headshot;
     line.bornAt = now;

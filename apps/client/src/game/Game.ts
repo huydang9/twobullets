@@ -8,7 +8,7 @@ import { installDebugTools } from "../debug/debugTools";
 import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
 import { LootRenderer, presentationLootModels } from "../equipment/loot";
 import { OfflineMatch, readOfflineMatchOptions } from "../match";
-import { NetGame, readNetConfig } from "../net/NetGame";
+import { NetGame } from "../net/NetGame";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
 import { DynamicResolution } from "../perf/DynamicResolution";
@@ -18,18 +18,21 @@ import type { PerfTools } from "../perf/PerfTools";
 import { PlayerController } from "../player/PlayerController";
 import { PlayerLife } from "../player/PlayerLife";
 import { Hud } from "../ui/Hud";
+import { showFatalError } from "../ui/FatalError";
 import { InventoryScreen } from "../ui/inventory";
 import { cameraMapSource } from "../ui/map";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime, resolveMapDefinition } from "../world/mapRuntime";
+import { resolveLaunch, type GameLaunch } from "./launch";
 
 /**
  * Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop.
  *
- * DEV `?net=ws://localhost:7350/m/local` joins a server-match (docs/backend/m4-local-run.md). The server is
- * authoritative for movement and combat (M4): the local player's movement and weapons are predicted and reconciled,
- * remote players are interpolated, hits, damage, knocks and kills come from the server. Equipment and loot stay local,
- * and there are no practice dummies in that mode. Without `?net` nothing changes.
+ * The mode comes from a `GameLaunch` (game/launch.ts): a networked match or practice from the menu, or DEV URL flags.
+ * Networked (`{ kind: "net" }`, DEV `?net=ws://localhost:7350/m/local[&map=v1]`, docs/release/local-stack.md): the
+ * server is authoritative for movement, combat and the battle royale loop; the local player's movement and weapons are
+ * predicted and reconciled, remote players are interpolated, and NetMatch draws phases, zone, names and results from
+ * server messages. Local equipment stays (not networked until B5); ground loot and practice dummies are off.
  */
 export class Game {
   private net: NetGame | null = null;
@@ -43,7 +46,7 @@ export class Game {
     private readonly equipment: EquipmentSystem,
     private readonly presentation: WeaponPresentation,
     private readonly hud: Hud,
-    private readonly loot: LootRenderer,
+    private readonly loot: LootRenderer | null,
     private readonly inventory: InventoryScreen,
     private readonly world: MapRuntime | null,
     private readonly perf: PerfTools | null,
@@ -51,10 +54,12 @@ export class Game {
     private readonly match: OfflineMatch | null,
   ) {}
 
-  static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement): Promise<Game> {
+  static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement, launch: GameLaunch = { kind: "dev" }): Promise<Game> {
     const params = new URLSearchParams(window.location.search);
-    // DEV: `?bench=v1` runs the Map v1 benchmark (docs/perf/benchmark.md); it implies `?map=v1`.
-    const benchmark = import.meta.env.DEV ? params.get("bench") : null;
+    // DEV: `?bench=v1` runs the Map v1 benchmark (docs/perf/benchmark.md); it implies `?map=v1`. `?net=` joins a
+    // server-match on `?map=` (default arena); `?bots=1` implies `?map=v1` unless `map` names another map.
+    const resolved = resolveLaunch(launch, window.location.search, import.meta.env.DEV, readOfflineMatchOptions);
+    const benchmark = resolved.benchmark;
     // The canvas's multisampling can't change after creation, so the saved AA mode (or DEV `?aa=`) decides it here.
     // A benchmark keeps it on: its MSAA/FXAA variants switch the pass at runtime.
     const aa = import.meta.env.DEV ? params.get("aa") : null;
@@ -68,13 +73,11 @@ export class Game {
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
-    // DEV: `?map=v1|<realMapId>` loads a full map; no query (or `?map=arena`) keeps the blockout arena.
-    // DEV: `?bench=v1` implies `?map=v1`; `?bots=1` implies `?map=v1` unless `map` names another map. `?net=` runs the arena.
-    const netConfig = import.meta.env.DEV && !benchmark ? readNetConfig(params) : null;
-    const matchOptions = readOfflineMatchOptions(window.location.search);
-    const botsMatch = import.meta.env.DEV && !benchmark && !netConfig && matchOptions.enabled;
-    const mapId = !import.meta.env.DEV || netConfig ? null : benchmark === "v1" ? "v1" : (params.get("map") ?? (botsMatch ? "v1" : null));
-    if (netConfig && params.get("map")) console.warn("[net] ?map= is ignored in networked play (the server runs the arena)");
+    // `v1|<realMapId>` loads a full map; null (or `arena`) keeps the blockout arena.
+    const netConfig = resolved.net;
+    const matchOptions = resolved.practice;
+    const botsMatch = matchOptions !== null;
+    const mapId = resolved.mapId;
     const mapDefinition = await resolveMapDefinition(mapId);
     const environment = createEnvironment(scene, { largeWorld: mapDefinition !== null });
     // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
@@ -102,8 +105,10 @@ export class Game {
     // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
     // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
     const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
+    // Networked: no ground loot until loot is on the wire (plan.md B5).
     const equipment = new EquipmentSystem(scene, input, player, {
-      ...(world ? { map: { pois: world.map.pois, buildings: world.layout.buildings } } : {}),
+      ...(world && !net ? { map: { pois: world.map.pois, buildings: world.layout.buildings } } : {}),
+      ...(net ? { loot: [] } : {}),
       targets: () => targets,
     });
     // Networked movement ignores equipment gates (the M3 server doesn't simulate equipment).
@@ -114,9 +119,10 @@ export class Game {
     const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
     presentation.attachEquipment(equipment);
     presentation.audio.attachEquipment(equipment);
-    world?.attach(player, presentation.audio.probe);
+    // Networked: the server owns out-of-bounds, so the map doesn't respawn the player locally.
+    world?.attach(net ? null : player, presentation.audio.probe);
     // Ground loot shares the presentation's throwable and consumable meshes (and their materials).
-    const loot = new LootRenderer(scene, equipment, { assets, skyFill: environment.skyFill, models: presentationLootModels(presentation.itemMeshes) });
+    const loot = net ? null : new LootRenderer(scene, equipment, { assets, skyFill: environment.skyFill, models: presentationLootModels(presentation.itemMeshes) });
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
     input.onLockChange((locked) => hud.setLocked(locked));
@@ -135,7 +141,7 @@ export class Game {
 
     installDebugTools(scene, input, { hud });
     // Builds the nav grid (≈0.5 s), pooled bot soldiers and the spawn plan; the match starts on the first pointer lock.
-    const match = botsMatch && world ? await OfflineMatch.create({ scene, input, player, combat, equipment, life, presentation, hud, world, assets, environment }, matchOptions) : null;
+    const match = matchOptions && world ? await OfflineMatch.create({ scene, input, player, combat, equipment, life, presentation, hud, world, assets, environment }, matchOptions) : null;
 
     // DEV: F4 or `?perf=1` stats panel, `?bench=v1` benchmark. Loaded on demand so production builds leave it out.
     let perf: PerfTools | null = null;
@@ -150,7 +156,7 @@ export class Game {
     if (net) {
       // Networked: no offline life (the server owns health, knocks, deaths and respawns), weapons without equipment.
       life.dispose();
-      net.attach({ scene, player, input, hudRoot, hud, combat, presentation, equipment, soldiers: { assets, environment } });
+      net.attach({ scene, player, input, hudRoot, hud, combat, presentation, equipment, soldiers: { assets, environment }, world, mapId: mapDefinition?.id ?? "arena" });
       game.net = net;
       void net.connect();
     }
@@ -164,31 +170,41 @@ export class Game {
   }
 
   private start(): void {
+    // A throwing frame would stop Babylon's loop silently (a frozen picture): stop on purpose and say what failed.
     this.engine.runRenderLoop(() => {
-      const perf = this.perf;
-      perf?.beginFrame();
-      const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
-      // The benchmark poses the camera itself.
-      this.net?.update(dt);
-      if (!perf?.drivesCamera) this.player.update(dt);
-      this.match?.update(dt);
-      this.net?.lateUpdate(dt);
-      this.combat.update(dt);
-      this.equipment.update();
-      this.presentation.update(dt);
-      this.loot.update();
-      this.world?.update(dt);
-      perf?.beforeRender();
-      this.scene.render();
-      perf?.afterRender();
-      this.hud.setFlashWhiteout(this.presentation.equipment.flashWhiteout);
-      this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
-      this.inventory.update();
-      this.input.endFrame();
-      this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
-      perf?.endFrame();
+      try {
+        this.frame();
+      } catch (error) {
+        this.engine.stopRenderLoop();
+        showFatalError(error, "frame");
+      }
     });
     window.addEventListener("resize", () => this.engine.resize());
+  }
+
+  private frame(): void {
+    const perf = this.perf;
+    perf?.beginFrame();
+    const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
+    // The benchmark poses the camera itself.
+    this.net?.update(dt);
+    if (!perf?.drivesCamera) this.player.update(dt);
+    this.match?.update(dt);
+    this.net?.lateUpdate(dt);
+    this.combat.update(dt);
+    this.equipment.update();
+    this.presentation.update(dt);
+    this.loot?.update();
+    this.world?.update(dt);
+    perf?.beforeRender();
+    this.scene.render();
+    perf?.afterRender();
+    this.hud.setFlashWhiteout(this.presentation.equipment.flashWhiteout);
+    this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
+    this.inventory.update();
+    this.input.endFrame();
+    this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
+    perf?.endFrame();
   }
 }
 

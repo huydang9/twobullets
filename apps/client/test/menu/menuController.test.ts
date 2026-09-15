@@ -107,6 +107,27 @@ describe("MenuController", () => {
     controller.dispose();
   });
 
+  it("game hand-off: the in-game result screen closes into the front-door results; leaving early reloads to the menu", async () => {
+    const { server, controller, launches, reloadToMenu } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_3" }) }) }));
+    server.on("POST /v1/matches/m_3/join", () => ({ body: { wsUrl: "ws://localhost:7402/m/m_3", joinToken: "J3", expiresAt: Date.now() + 120_000, matchId: "m_3", teamId: 0, reconnect: true } }));
+    server.on("GET /v1/matches/m_3/result", () => ({ body: result("m_3") }));
+    await controller.boot();
+    controller.rejoin();
+    await vi.waitFor(() => expect(controller.state.screen).toEqual({ kind: "inGame", matchId: "m_3" }));
+    expect(launches[0]!.onExit).toBeTypeOf("function");
+
+    launches[0]!.onExit!({ matchId: "m_3", reason: "ended" });
+    await vi.waitFor(() => {
+      const screen = controller.state.screen;
+      expect(screen.kind === "results" && screen.fromGame && !screen.awaitingGame && screen.result?.matchId).toBe("m_3");
+    });
+    expect(reloadToMenu).not.toHaveBeenCalled();
+    launches[0]!.onExit!({ matchId: "m_3", reason: "left" });
+    expect(reloadToMenu).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
   it("offers rejoin on load when the API reports an active match, and rejoins with a fresh token", async () => {
     const { server, controller, launches } = setup({ loggedIn: true });
     server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_7" }) }) }));

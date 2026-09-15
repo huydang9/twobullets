@@ -183,9 +183,9 @@ export class MapRuntime {
 
   /**
    * Hooks the local player (out-of-bounds respawns) and audio: building surfaces first, then the terrain mask, plus room
-   * enclosure for indoor reverb. Also hides the loading card.
+   * enclosure for indoor reverb. Also hides the loading card. `player` null (networked play): no local out-of-bounds.
    */
-  attach(player: MapPlayer, audio?: AudioWorldProbe): void {
+  attach(player: MapPlayer | null, audio?: AudioWorldProbe): void {
     this.player = player;
     if (audio) {
       audio.surfaceProviders.push(this.buildingAcoustics.surface, terrainSurfaceProvider(this.terrain.surface));

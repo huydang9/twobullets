@@ -25,4 +25,4 @@ Nothing else: `Hud.update` already drives the map at ≈15 Hz, `Hud.setLocked`/`
 ## Optional
 
 - Play overlay control list (`ui/PlayOverlay.ts`, not owned by the HUD map agent): add `M` "Map" and `N` "Map zoom".
-- Networked play (`?net=`) runs the arena, so no map; when the server gets Map v1, attach the same way and give `setMapSource` a source built from the net match state.
+- Networked play attaches the map the same way; `net/NetMatch.ts` gives `setMapSource` `matchMapSource(NetMatchView, frame)`, so the zone and teammates come from server messages.

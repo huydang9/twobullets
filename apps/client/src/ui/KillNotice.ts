@@ -12,6 +12,8 @@ const SHOW_KEYFRAMES: Keyframe[] = [
 
 export interface KillInfo {
   readonly targetId: string;
+  /** Display name used as is (a player's nickname, "Bot 3"); else formatted from `targetId`. */
+  readonly name?: string;
   readonly headshot: boolean;
   readonly weaponName: string;
   readonly distance: number;
@@ -55,7 +57,7 @@ export class KillNotice {
     this.kills++;
     const locale = getLanguage();
     this.card.toggleAttribute("data-headshot", kill.headshot);
-    setText(this.name, targetName(kill.targetId).toLocaleUpperCase(locale));
+    setText(this.name, (kill.name ?? targetName(kill.targetId)).toLocaleUpperCase(locale));
     setText(this.weapon, kill.weaponName.toLocaleUpperCase(locale));
     setText(this.distance, t("killNotice.distance", { m: Math.round(kill.distance) }));
     setText(this.count, t("killNotice.kills", { count: this.kills }));

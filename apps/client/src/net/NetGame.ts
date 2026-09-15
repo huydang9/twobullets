@@ -1,25 +1,27 @@
 import type { EventState, Scene } from "@babylonjs/core";
 import { LifeCode } from "@twobullets/protocol/codes";
-import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { ShotEvent } from "../combat/types";
 import { HitboxOverlay } from "../debug/HitboxOverlay";
 import type { EquipmentView } from "../equipment/types";
 import type { WeaponPresentation } from "../fx/WeaponPresentation";
+import type { NetGameConfig, NetMatchExit } from "../game/launch";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
 import type { Hud } from "../ui/Hud";
 import { t } from "../i18n";
 import { NetDebugHud } from "../ui/NetDebugHud";
 import type { Environment } from "../world/environment";
-import { devPlayerId, fetchDevToken, parseNetParam, type NetEndpoint } from "./handshake";
+import type { MapRuntime } from "../world/mapRuntime";
+import { fetchDevToken } from "./handshake";
 import { LocalPlayerNet } from "./LocalPlayerNet";
 import { NetClient } from "./NetClient";
 import { NetClock, WS_BUFFER_TICKS } from "./NetClock";
 import { NetCombat } from "./NetCombat";
 import { createNetWeaponState, netInputButtons, netInputSelect, REVIVE_BUTTON } from "./netCombatRules";
 import { NetCombatPresenter } from "./NetCombatPresenter";
+import { NetMatch } from "./NetMatch";
 import { NET_MOVEMENT, NetMovement } from "./netMovement";
 import { NetPlayerBody } from "./NetPlayerBody";
 import { CosmeticHitPredictor, RemoteHitboxes } from "./RemoteHitboxes";
@@ -28,31 +30,7 @@ import { RemoteRoster } from "./RemoteRoster";
 import { openTransport } from "./transportPolicy";
 
 export { NET_MOVEMENT };
-
-export interface NetGameConfig {
-  readonly endpoint: NetEndpoint;
-  /** Dev account id (`?netId=`, else one per tab). */
-  readonly sub: string;
-  /** `?team=0..19` (default 0); the server puts you on the first team with room when it is full or out of range. */
-  readonly team: number;
-  readonly avatar: "soldier" | "capsule";
-  /** DEV `?debug=hitboxes`: shared rig vs bone-driven hitboxes on remote players. */
-  readonly debugHitboxes: boolean;
-}
-
-/** `?net=ws://localhost:7350/m/local[&team=1][&netId=alice][&netAvatar=capsule][&debug=hitboxes]`, or null offline. */
-export function readNetConfig(params: URLSearchParams): NetGameConfig | null {
-  const net = params.get("net");
-  if (!net) return null;
-  const team = Number(params.get("team") ?? 0);
-  return {
-    endpoint: parseNetParam(net),
-    sub: devPlayerId(params.get("netId")),
-    team: Number.isInteger(team) && team >= 0 && team < MAX_MATCH_PLAYERS ? team : 0,
-    avatar: params.get("netAvatar") === "capsule" ? "capsule" : "soldier",
-    debugHitboxes: (params.get("debug") ?? "").split(",").includes("hitboxes"),
-  };
-}
+export { readNetConfig, type NetGameConfig } from "../game/launch";
 
 export interface NetAttachDeps {
   readonly scene: Scene;
@@ -66,6 +44,10 @@ export interface NetAttachDeps {
   /** The offline equipment view; the HUD reads it with the server's vitals and armor swapped in. */
   readonly equipment: EquipmentView;
   readonly soldiers: { readonly assets: AssetLibrary; readonly environment: Environment } | null;
+  /** The loaded map (minimap and map screen from match state), or null on the arena. */
+  readonly world: MapRuntime | null;
+  /** The match's map id (zone radii: `arena` vs full maps). */
+  readonly mapId: string;
 }
 
 /**
@@ -89,6 +71,7 @@ export class NetGame {
   private presenter: NetCombatPresenter | null = null;
   private predictor: CosmeticHitPredictor | null = null;
   private overlay: HitboxOverlay | null = null;
+  private matchValue: NetMatch | null = null;
   private clientValue: NetClient | null = null;
   private connecting = false;
 
@@ -107,6 +90,11 @@ export class NetGame {
 
   get combat(): NetCombat | null {
     return this.combatEvents;
+  }
+
+  /** Battle royale presentation (phase, zone, roster names, death and results). */
+  get match(): NetMatch | null {
+    return this.matchValue;
   }
 
   attach(deps: NetAttachDeps): void {
@@ -162,6 +150,19 @@ export class NetGame {
     });
     deps.hud.attachEquipment(presenter.equipmentView.view);
     this.combatEvents = new NetCombat(presenter);
+    this.matchValue = new NetMatch({
+      scene,
+      player,
+      hud: deps.hud,
+      layer,
+      presentation,
+      world: deps.world,
+      roster: this.roster,
+      presenter,
+      config: this.config,
+      mapId: deps.mapId,
+      exit: (exit) => this.exitMatch(exit),
+    });
     this.predictor = new CosmeticHitPredictor(this.hitboxes, presenter);
     player.onTick.add((tick: PlayerTick) => {
       if (movement.life === LifeCode.alive) this.predictor?.tick(combat.projectiles, tick.dt);
@@ -185,8 +186,8 @@ export class NetGame {
     this.combatEvents?.clear();
     this.hud?.showError(t("net.connecting"));
     try {
-      const { endpoint, sub, team } = this.config;
-      const token = await fetchDevToken(endpoint, sub, team);
+      const { endpoint, sub, team, tokens } = this.config;
+      const token = tokens ? await tokens() : await fetchDevToken(endpoint, sub, team);
       const transport = await openTransport(endpoint.wsUrl);
       const client = new NetClient(transport.session, {
         clock: performance,
@@ -214,6 +215,12 @@ export class NetGame {
 
   disconnect(): void {
     this.clientValue?.disconnect();
+  }
+
+  /** The player is done with this match (result screen or "leave"): drop the connection and hand over to the front door. */
+  private exitMatch(exit: NetMatchExit): void {
+    this.disconnect();
+    this.config.onExit?.(exit);
   }
 
   /** DEV console: visible remote players as seen from this tab (slot, interpolated feet, life code 0/1/2). */
@@ -252,6 +259,7 @@ export class NetGame {
     const client = this.clientValue;
     if (client) this.combatEvents?.update(client.renderTick);
     this.presenter?.update(dt);
+    this.matchValue?.update(dt, client, this.combatEvents);
     this.overlay?.update();
     if (client) this.hud?.update(client.stats, performance.now(), this.combatEvents?.stats ?? null, this.predictor?.predictedHits ?? 0);
   }
@@ -259,6 +267,7 @@ export class NetGame {
   dispose(): void {
     this.disconnect();
     this.avatars?.dispose();
+    this.matchValue?.dispose();
     this.presenter?.dispose();
     this.overlay?.dispose();
     this.hud?.dispose();

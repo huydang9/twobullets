@@ -93,7 +93,7 @@ describe("custom lobbies", () => {
   it("rejects bad settings, unavailable maps, full teams and a full lobby", async () => {
     api = await startTestApi();
     const host = await api.guest("Host");
-    for (const body of [{ mode: "trio" }, { maxPlayers: 21 }, { maxPlayers: 1 }, { mapId: "vn-hoian" }, { fillWithBots: "yes" }]) {
+    for (const body of [{ mode: "trio" }, { maxPlayers: 21 }, { maxPlayers: 1 }, { mapId: "vn-hoian" }, { mapId: "mars" }, { fillWithBots: "yes" }]) {
       expect((await api.call("POST", "/v1/lobbies", { token: host.accessToken, body })).status).toBe(400);
     }
     const { code } = await lobbyWith("Host2", { mode: "duo", maxPlayers: 3, mapId: "arena", fillWithBots: false });

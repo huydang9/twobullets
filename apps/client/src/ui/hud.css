@@ -1590,6 +1590,52 @@
   transform: translate3d(-50%, -50%, 0);
 }
 
+/* Networked warmup ("Trận bắt đầu sau 45s") and zone notices ("Bo thu hẹp sau 30 giây"). */
+.tb-mhud__banner,
+.tb-mhud__notice {
+  position: absolute;
+  left: 50%;
+  padding: 5px 20px;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.55) 18%, rgba(8, 10, 12, 0.55) 82%, transparent);
+  transform: translateX(-50%);
+}
+
+.tb-mhud__banner {
+  top: 24%;
+}
+
+.tb-mhud__notice {
+  top: 132px;
+  font-size: 13px;
+  color: var(--tb-amber);
+}
+
+/* Teammate name above a remote soldier (networked play). */
+.tb-mate-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 1px 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #e9f1ff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.tb-mate-label[data-downed] {
+  color: #ff8a70;
+}
+
 /* Teammate cards, bottom left. */
 .tb-mhud__team {
   position: absolute;

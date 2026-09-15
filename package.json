@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "pnpm --filter @twobullets/client dev",
     "server:dev": "pnpm --filter @twobullets/server-match dev",
+    "stack:dev": "node tools/dev/stack.ts",
     "build": "pnpm --filter @twobullets/client build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

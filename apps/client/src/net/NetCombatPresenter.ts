@@ -47,6 +47,20 @@ interface PendingImpact {
   readonly direction: Vector3;
 }
 
+/** Battle royale hooks (NetMatch): names from the roster, the match kill feed, death without respawn. */
+export interface NetMatchHooks {
+  /** Display name of a slot (roster nickname or "Bot 3"). */
+  nameOf(slot: number): string;
+  /** Kill feed lines go to the match HUD instead of the presenter's own feed. */
+  killFeed(event: MatchEvent): void;
+  /** False in combat: death shows no respawn countdown (the match shows its death screen). */
+  respawns(): boolean;
+  /** The local player died (not knocked). */
+  ownDeath(kill: NetKill | null): void;
+  /** Our confirmed damage on someone else. */
+  confirmedDamage(victim: number, amount: number): void;
+}
+
 export interface NetCombatPresenterDeps {
   readonly scene: Scene;
   readonly player: PlayerController;
@@ -91,6 +105,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
   private readonly teams = new Int8Array(MAX_ENTITY_SLOTS).fill(-1);
   private life: LifeState = "alive";
   private spectateSlot = -1;
+  private matchHooks: NetMatchHooks | null = null;
   private time = 0;
   private reviveHeld = 0;
 
@@ -105,6 +120,52 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     for (let i = 0; i < PENDING_IMPACTS; i++) {
       this.impacts.push({ active: false, at: 0, weaponId: "rifle", point: new Vector3(), normal: new Vector3(), direction: new Vector3() });
     }
+  }
+
+  /** Battle royale mode (null: M4 sandbox behaviour with respawns and slot names). */
+  setMatchHooks(hooks: NetMatchHooks | null): void {
+    this.matchHooks = hooks;
+  }
+
+  /** Display name of a slot: the roster's, else "Người chơi Bravo". */
+  nameOf(slot: number): string {
+    return this.matchHooks?.nameOf(slot) || netPlayerName(slot);
+  }
+
+  /** Slot the dead player's camera follows, or −1. */
+  get spectating(): number {
+    return this.life === "dead" ? this.spectateSlot : -1;
+  }
+
+  /** Follows `slot` while dead (it must be visible and not dead). Returns false otherwise. */
+  follow(slot: number): boolean {
+    if (!this.spectatable(slot)) return false;
+    this.spectateSlot = slot;
+    return true;
+  }
+
+  /** Next (+1) or previous (−1) player still in play, own team first. Returns the new slot or −1. */
+  cycleSpectate(direction: 1 | -1): number {
+    const start = this.spectateSlot < 0 ? (direction > 0 ? -1 : MAX_ENTITY_SLOTS) : this.spectateSlot;
+    for (const teamOnly of [true, false]) {
+      for (let step = 1; step <= MAX_ENTITY_SLOTS; step++) {
+        const slot = (((start + direction * step) % MAX_ENTITY_SLOTS) + MAX_ENTITY_SLOTS) % MAX_ENTITY_SLOTS;
+        if (!this.spectatable(slot) || (teamOnly && this.teams[slot] !== this.ownTeam)) continue;
+        this.spectateSlot = slot;
+        return slot;
+      }
+    }
+    return -1;
+  }
+
+  /** Team of a slot (from Welcome's team size), −1 when unknown. */
+  teamOf(slot: number): number {
+    return slot === this.ownSlot ? this.ownTeam : (this.teams[slot] ?? -1);
+  }
+
+  private spectatable(slot: number): boolean {
+    const { roster } = this.deps;
+    return slot >= 0 && slot < MAX_ENTITY_SLOTS && slot !== this.ownSlot && roster.visible[slot] === 1 && remoteLifeCode(roster.poses[slot]!.flags) !== LifeCode.dead;
   }
 
   /** Blood bodies and footsteps for a newly created remote avatar (RemotePlayers `onAvatarCreated`). */
@@ -175,7 +236,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     combat.onDamage.notifyObservers({
       weapon: combat.activeWeapon,
       targetId: RemotePlayers.bodyId(hit.victim),
-      targetName: netPlayerName(hit.victim),
+      targetName: this.nameOf(hit.victim),
       zone: hit.zone,
       amount: hit.damage,
       remainingHealth: 0,
@@ -186,6 +247,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
       armorSlot: hit.armorHit ? (hit.zone === "head" ? "helmet" : "vest") : null,
       armorDestroyed: hit.armorBroken,
     });
+    this.matchHooks?.confirmedDamage(hit.victim, hit.damage);
   }
 
   damageTaken(hit: NetDamageTaken): void {
@@ -200,6 +262,15 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     if (kill.victim === this.ownSlot) {
       if (kill.knock) return;
       this.spectateSlot = kill.killer >= 0 && kill.killer !== this.ownSlot ? kill.killer : -1;
+      const hooks = this.matchHooks;
+      if (hooks && !hooks.respawns()) {
+        // Battle royale: a standing teammate first, else the killer.
+        const killer = this.spectateSlot;
+        this.spectateSlot = -1;
+        if (this.cycleSpectate(1) < 0 || this.teams[this.spectateSlot] !== this.ownTeam) this.spectateSlot = killer;
+        hooks.ownDeath(kill);
+        return;
+      }
       this.banner.showDeath(this.deathCause(kill), NET_RESPAWN_SECONDS, performance.now());
       return;
     }
@@ -207,6 +278,10 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
   }
 
   killFeed(event: MatchEvent): void {
+    if (this.matchHooks) {
+      this.matchHooks.killFeed(event);
+      return;
+    }
     this.feed.push(event, (slot) => (slot === this.ownSlot ? t("common.you") : netPlayerName(slot)), (slot) => (slot === this.ownSlot ? this.ownTeam : this.teams[slot]!), this.ownTeam, performance.now());
   }
 
@@ -216,7 +291,12 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     const { presentation } = this.deps;
     if (vitals.life === "dead") {
       presentation.weaponLowered = true;
-      if (!this.banner.dead) this.banner.showDeath(t("death.cause.died"), NET_RESPAWN_SECONDS, performance.now());
+      const hooks = this.matchHooks;
+      if (hooks && !hooks.respawns()) {
+        if (previousLife !== "dead") hooks.ownDeath(null);
+      } else if (!this.banner.dead) {
+        this.banner.showDeath(t("death.cause.died"), NET_RESPAWN_SECONDS, performance.now());
+      }
     } else {
       if (previousLife === "dead") {
         this.banner.hide();
@@ -269,7 +349,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
         if (kill.killer < 0) return t("death.cause.died");
         if (kill.killer === this.ownSlot) return t("death.cause.suicide", { weapon: killCauseLabel(kill.cause) });
         const cause = t("death.cause.killedBy", {
-          killer: netPlayerName(kill.killer),
+          killer: this.nameOf(kill.killer),
           weapon: killCauseLabel(kill.cause),
           headshot: kill.headshot ? t("feed.headshot") : "",
           teamKill: kill.friendlyFire ? t("feed.teamKill") : "",
@@ -323,15 +403,9 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
   private spectate(): void {
     const { roster, player } = this.deps;
     let slot = this.spectateSlot;
-    if (slot < 0 || roster.visible[slot] !== 1 || remoteLifeCode(roster.poses[slot]!.flags) === LifeCode.dead) {
-      slot = -1;
-      for (let i = 0; i < MAX_ENTITY_SLOTS; i++) {
-        if (roster.visible[i] === 1 && remoteLifeCode(roster.poses[i]!.flags) !== LifeCode.dead) {
-          slot = i;
-          break;
-        }
-      }
-      this.spectateSlot = slot;
+    if (!this.spectatable(slot)) {
+      this.spectateSlot = -1;
+      slot = this.cycleSpectate(1);
     }
     if (slot < 0) return;
     const pose = roster.poses[slot]!;
@@ -387,7 +461,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
       return;
     }
     this.reviveHeld += dt;
-    this.banner.showReviving(this.reviveHeld / REVIVE_SECONDS, netPlayerName(target));
+    this.banner.showReviving(this.reviveHeld / REVIVE_SECONDS, this.nameOf(target));
     if (this.reviveHeld >= REVIVE_SECONDS + 0.5) this.reviveHeld = REVIVE_SECONDS + 0.5;
   }
 }

@@ -7,6 +7,7 @@ import { errorCodeOf } from "../platform/ApiRequestError";
 import { createApiJoinTokenProvider } from "../platform/joinToken";
 import type { LobbySocket } from "../platform/LobbySocket";
 import type { KeyValueStorage } from "../platform/SessionStore";
+import type { NetMatchExit } from "../game/launch";
 import type { MatchLaunch, PracticeSettings } from "./launch";
 import { INITIAL_MENU_STATE, menuReducer, type MainPanel, type MenuEvent, type MenuState, type Screen } from "./menuState";
 
@@ -35,6 +36,8 @@ export const LAST_MATCH_KEY = "tb.menu.lastMatch";
 /** How long the connecting screen retries `POST /matches/{id}/join` while the match is still starting. */
 export const JOIN_RETRY_MS = 30_000;
 const RESULT_ATTEMPTS = 15;
+/** Results wait behind the game at most this long when the game never hands over (it lost the MatchEnd), ms. */
+export const GAME_HANDOFF_TIMEOUT_MS = 20_000;
 
 export class MenuController {
   private stateValue: MenuState = INITIAL_MENU_STATE;
@@ -199,6 +202,18 @@ export class MenuController {
     this.dispatch({ type: "rejoin" });
   }
 
+  /**
+   * The game is done with a match: after its in-game result screen the front door's results take over; a player who
+   * left early goes back to the menu, which offers "Rejoin" while the match runs (and its results after).
+   */
+  gameExited(exit: NetMatchExit): void {
+    if (exit.reason === "left") {
+      this.deps.reloadToMenu();
+      return;
+    }
+    this.dispatch({ type: "gameExited", matchId: exit.matchId });
+  }
+
   closeResults(): void {
     const screen = this.stateValue.screen;
     if (screen.kind !== "results") return;
@@ -215,7 +230,10 @@ export class MenuController {
 
   private afterTransition(previous: Screen, next: Screen): void {
     if (next.kind === "connecting" && (previous.kind !== "connecting" || previous.matchId !== next.matchId)) void this.connect(next.matchId, next.mapId);
-    if (next.kind === "results" && (previous.kind !== "results" || previous.matchId !== next.matchId)) void this.loadResult(next.matchId);
+    if (next.kind === "results" && (previous.kind !== "results" || previous.matchId !== next.matchId)) {
+      void this.loadResult(next.matchId);
+      if (next.awaitingGame) void this.handoffTimeout(next.matchId);
+    }
   }
 
   /** Account, active match, lobby and ticket from REST; starts the push socket. */
@@ -302,11 +320,17 @@ export class MenuController {
     setItem(this.deps.session, LAST_MATCH_KEY, matchId);
     this.dispatch({ type: "gameLaunched", matchId });
     try {
-      await this.deps.launchMatch({ join, mapId, account, tokens: createApiJoinTokenProvider(api, join, this.now) });
+      await this.deps.launchMatch({ join, mapId, account, tokens: createApiJoinTokenProvider(api, join, this.now), onExit: (exit) => this.gameExited(exit) });
     } catch (error) {
       console.error("[menu] game failed to start", error);
       this.dispatch({ type: "failed", code: "internal" });
     }
+  }
+
+  private async handoffTimeout(matchId: string): Promise<void> {
+    await this.wait(GAME_HANDOFF_TIMEOUT_MS);
+    const screen = this.stateValue.screen;
+    if (screen.kind === "results" && screen.matchId === matchId && screen.awaitingGame) this.dispatch({ type: "gameExited", matchId });
   }
 
   private async loadResult(matchId: string): Promise<void> {

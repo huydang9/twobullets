@@ -70,9 +70,10 @@ export class MenuView {
 
   render(state: MenuState): void {
     const screen = state.screen;
-    this.root.hidden = screen.kind === "inGame";
+    const behindGame = screen.kind === "results" && screen.awaitingGame;
+    this.root.hidden = screen.kind === "inGame" || behindGame;
     this.root.dataset.screen = screen.kind;
-    if (screen.kind === "results" && screen.fromGame && document.pointerLockElement) document.exitPointerLock();
+    if (screen.kind === "results" && screen.fromGame && !behindGame && document.pointerLockElement) document.exitPointerLock();
     if (screen.kind !== "main" && screen.kind !== "lobby" && screen.kind !== "login") this.closePicker();
 
     const active = document.activeElement instanceof HTMLElement && this.frame.contains(document.activeElement) ? document.activeElement : null;

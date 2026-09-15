@@ -22,11 +22,11 @@ import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol/version";
 export const MAPS: readonly MapInfo[] = [
   { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 1000, available: true, kind: "handmade" },
   { id: "arena", name: { vi: "Sân tập", en: "Arena" }, sizeM: 120, available: true, kind: "dev" },
-  // Real-world maps use the `<countryCode>-<place>` ids of packages/shared/src/map/real. Flip `available` once the match
-  // server can load them (plan.md §3.2 B2).
-  { id: "cz-holasovice", name: { vi: "Holašovice (Séc)", en: "Holašovice (Czechia)" }, sizeM: 1000, available: false, kind: "realWorld" },
-  { id: "vn-hoian", name: { vi: "Hội An", en: "Hội An" }, sizeM: 1000, available: false, kind: "realWorld" },
-  { id: "jp-shirakawago", name: { vi: "Shirakawa-go (Nhật)", en: "Shirakawa-go (Japan)" }, sizeM: 1000, available: false, kind: "realWorld" },
+  // Real-world maps: the `<countryCode>-<place>` ids of packages/shared/src/map/real (the client's map picker and the
+  // match server's level registry use the same ids).
+  { id: "cz-holasovice", name: { vi: "Holašovice (Séc)", en: "Holašovice (Czechia)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "vn-camthanh", name: { vi: "Hội An – Cẩm Thanh", en: "Hội An – Cẩm Thanh (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "jp-shirakawago", name: { vi: "Shirakawa-go (Nhật)", en: "Shirakawa-go (Japan)" }, sizeM: 1000, available: true, kind: "realWorld" },
 ];
 export const DEFAULT_MAP_ID = "v1";
 

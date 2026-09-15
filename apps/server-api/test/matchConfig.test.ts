@@ -1,6 +1,6 @@
 import { teamOfSlot } from "@twobullets/contracts/match";
 import { describe, expect, it } from "vitest";
-import { buildMatchConfig, parseSettings, seatInOrder, teamCapacity, teamsOf } from "../src/matches/matchConfig";
+import { buildMatchConfig, MAPS, parseSettings, seatInOrder, teamCapacity, teamsOf } from "../src/matches/matchConfig";
 
 const base = { matchId: "m", hostId: "h", region: "sg", matchSeed: 7 };
 
@@ -36,7 +36,10 @@ describe("match config from lobby/queue settings", () => {
     expect(() => buildMatchConfig({ ...base, settings, humans: [{ accountId: "a", teamId: 2 }] })).toThrow(/range/);
     expect(parseSettings({})).toEqual({ mode: "duo", maxPlayers: 10, mapId: "v1", fillWithBots: true });
     expect(parseSettings({ maxPlayers: 2.5 })).toBe("maxPlayers");
-    expect(parseSettings({ mapId: "cz-holasovice" })).toBe("mapId");
+    // Real-world maps use the client's ids and are playable; unknown or old ids are rejected.
+    for (const mapId of ["cz-holasovice", "vn-camthanh", "jp-shirakawago"]) expect(parseSettings({ mapId })).toMatchObject({ mapId });
+    expect(parseSettings({ mapId: "vn-hoian" })).toBe("mapId");
+    expect(MAPS.map((m) => m.id)).toEqual(["v1", "arena", "cz-holasovice", "vn-camthanh", "jp-shirakawago"]);
   });
 
   it("botDifficulty is optional, validated, inherited by updates and copied into MatchConfig", () => {

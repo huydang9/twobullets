@@ -70,7 +70,11 @@ describe("menu state: custom match", () => {
     expect(state.screen).toEqual({ kind: "inGame", matchId: "m_1" });
 
     state = run(state, { type: "push", message: { t: "match.updated", match: match({ status: "ended", phase: "Ended" }) } });
-    expect(state.screen).toEqual({ kind: "results", matchId: "m_1", result: null, fromGame: true });
+    expect(state.screen).toEqual({ kind: "results", matchId: "m_1", result: null, fromGame: true, awaitingGame: true });
+    // The in-game result screen hands over; another match's exit changes nothing.
+    expect(run(state, { type: "gameExited", matchId: "m_9" })).toBe(state);
+    state = run(state, { type: "gameExited", matchId: "m_1" });
+    expect(state.screen).toEqual({ kind: "results", matchId: "m_1", result: null, fromGame: true, awaitingGame: false });
     state = run(state, { type: "resultLoaded", result: result("m_2") });
     expect(state.screen.kind === "results" && state.screen.result).toBeNull();
     state = run(state, { type: "resultLoaded", result: result() });
@@ -121,7 +125,7 @@ describe("menu state: quick play", () => {
 describe("menu state: reconnect and results", () => {
   it("a match that ended while the tab was closed shows its results from main", () => {
     const state = run(loggedIn(), { type: "matchEnded", matchId: "m_1" });
-    expect(state.screen).toEqual({ kind: "results", matchId: "m_1", result: null, fromGame: false });
+    expect(state.screen).toEqual({ kind: "results", matchId: "m_1", result: null, fromGame: false, awaitingGame: false });
   });
 
   it("a running match pushed to main becomes a rejoin offer, and its end removes it", () => {
