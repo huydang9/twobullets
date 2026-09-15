@@ -1,12 +1,15 @@
 # twobullets — project rules for Claude
 
-Browser multiplayer first-person battle royale: **realistic, PUBG-like**. Up to 10 players in 5 teams (max 2 per team) on a 1×1 km map. Internal release. Owner: a TypeScript engineer who is new to game dev and blogs about the build in Vietnamese.
+Browser multiplayer first-person battle royale: **realistic, PUBG-like**. Configurable match size up to 20 players, team modes solo / duo / squad (4), on a 1×1 km map. Internal release. Owner: a TypeScript engineer who is new to game dev and blogs about the build in Vietnamese.
 
 ## Product decisions (don't re-litigate)
 - **Art:** realistic everything, including a minimal PUBG-style HUD. Free assets only: CC0 preferred; CC-BY with credits; Mixamo allowed.
 - **Match rules:** friendly fire ON. Knocked + teammate revive in 5 s. Player body blocking ON.
 - **Bots:** lobby bots YES, for testing and to fill empty slots.
 - **Map and match:** teams pick a landing spot, then glide down. Shrinking zone. Match length about 10–12 min. No vehicles.
+- **Match size and modes (2026-09-15):** the host picks the match size (up to 20 players) and team mode (solo, duo, squad of 4); bots fill empty slots.
+- **Maps (2026-09-15):** Map v1 plus real-world locations generated from OpenStreetMap (MVP includes a location picker; prebuilt presets, and a tool to add any place). Defaults: scaled real elevation, building cap ~90, no Training Yard on real maps, place names keep diacritics.
+- **Language (2026-09-15):** Vietnamese is the default UI language; English is selectable.
 - **Order of work:** equipment built offline ✅, offline bots on Map v1 (easy/normal/hard) ✅ (in tuning), backend M3 core ✅ locally; next is M4 (networked combat), then M5, per `docs/backend/architecture.md`.
 
 **Start here:** read [`docs/STATUS.md`](docs/STATUS.md) first (roadmap, uncommitted work, open feedback, next steps), then [`docs/architecture-overview.md`](docs/architecture-overview.md) (stack, layout, frame loop, data flows) and [`docs/README.md`](docs/README.md) (docs index and how-tos).
