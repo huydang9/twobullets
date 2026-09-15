@@ -155,10 +155,10 @@ describe("NetMatchView", () => {
     expect(view.state.zone.stage).toBe("idle");
     expect(view.config.timeScale).toBe(1);
 
-    // Time scale 0.5: phase 1 announced at combat + 60 s × 0.5, waits 120 s × 0.5, shrinks 60 s × 0.5.
-    const wait = combatStart + 30 * TICK_RATE;
-    const shrinkStart = wait + 60 * TICK_RATE;
-    const shrinkEnd = shrinkStart + 30 * TICK_RATE;
+    // Time scale 0.5: phase 1 announced at combat + 30 s × 0.5, waits 70 s × 0.5, shrinks 40 s × 0.5.
+    const wait = combatStart + 15 * TICK_RATE;
+    const shrinkStart = wait + 35 * TICK_RATE;
+    const shrinkEnd = shrinkStart + 20 * TICK_RATE;
     const phase: ZonePhaseMessage = { index: 1, waitStartTick: wait, shrinkStartTick: shrinkStart, shrinkEndTick: shrinkEnd, from: { cx: 0, cz: 0, r: 710 }, to: { cx: 100, cz: -50, r: 400 }, dps: 1 };
     source.zonePhases.push(phase);
     view.sync(source);
