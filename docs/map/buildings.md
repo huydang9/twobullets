@@ -106,6 +106,10 @@ Ask the environment pipeline owner (`tools/environment/`) to add these. Each rep
   - At most 45 building draw calls for a cell containing every prefab type, versus 221 for merged unique meshes. A typical POI has 3–4 prefab types, which is 12–20 draws.
   - Each CSM cascade repeats the draws for batches in its range.
   - Geometry and AO bake about 0.56 s on the main thread for all 12 prefabs, done once per page per prefab used. It can move to a worker or be precomputed if load time matters.
+- **Map v1 today: 85 placements** (43 before the blank-space pass; see `docs/map/layout.md`): 22 small houses, 14 ruined, 8 two-story, 2 barns, 1 warehouse, 2 barracks, 5 watchtowers, 2 guard booths, 1 radar station, 28 containers (10 open, 7 open blue, 11 closed, 2 of them stacked).
+  - 178k triangles if all 85 were in view, over the 154k planned for 60; houses and containers are most of the increase.
+  - No new prefab types, so the per-prefab geometry and AO bake is unchanged. The extra placements add thin instances and compound bodies only (about 35 ms per 60 buildings).
+  - The four new minor POIs use 4–5 prefab types each, so 16–22 draws per cell that holds one.
 
 ## Physics
 

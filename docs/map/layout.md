@@ -1,6 +1,6 @@
 # Map v1 layout
 
-Map v1 puts seven points of interest on the v1 terrain (`docs/map/terrain.md`), links them with asphalt and dirt roads, and fills the space between them with forests, groves, tree lines and field cover. Everything below the renderer is pure data: a Node server builds the same terrain, building positions, prop instances and colliders from `MAP_V1`.
+Map v1 puts seven points of interest and four minor ones (hamlets and camps) on the v1 terrain (`docs/map/terrain.md`), links them with asphalt and dirt roads, and fills the space between them with lone buildings, forests, groves, tree lines and field cover. Everything below the renderer is pure data: a Node server builds the same terrain, building positions, prop instances and colliders from `MAP_V1`.
 
 ![Map v1 overview](mapV1.svg)
 
@@ -52,14 +52,17 @@ Why keep a worker fallback:
 | Step | Where | ms |
 |---|---|---|
 | Bake decode + checksum verify | worker | 122 |
-| Layout (buildings, 5,960 prop instances) | worker | 83 |
+| Layout (buildings, 8,230 prop instances) | worker | 93 ¹ |
 | *Fallback: generate terrain* | *worker* | *976* |
 | Terrain physics body | main | 18 |
 | Terrain chunk meshes + horizon | main | 207 |
-| Buildings: 43 placements (prefab geometry and AO bake, compound bodies) | main | 642 |
+| Buildings: 85 placements (prefab geometry and AO bake, compound bodies) | main | ≈ 670 ² |
 | Prop visuals + instances | main | 7 |
-| Prop colliders (3,857 bodies, 167 shapes) | main | 30 |
-| **Map total** | | **≈ 1.1 s** (≈ 0.2 s off-thread) |
+| Prop colliders (6,080 bodies, 219 shapes) | main | ≈ 47 ² |
+| **Map total** | | **≈ 1.15 s** (≈ 0.2 s off-thread) |
+
+¹ Re-measured after the 85-building pass, with the exclusion-bounds prefilter in `scatter.ts` (the old layout takes 87 ms with it).
+² Not re-measured headless. The geometry and AO bake is per prefab type (still the same 12 prefabs); the extra 42 placements add thin instances and compound bodies (≈ 35 ms per 60 buildings). Collider creation scales with bodies (30 ms for 3,857 before).
 
 - **Browser timing.** Browser numbers print on load. Environment textures and prop GLBs download in parallel and aren't counted above.
 - **Biggest cost.** The building geometry and AO bake (the buildings kit's `getPrefabGeometry` cache) is the largest remaining main-thread block; see Risks.
@@ -68,17 +71,22 @@ Why keep a worker fallback:
 
 ## Points of interest
 
-The seven centers are 281–381 m from their nearest neighbour (validated at ≥ 250 m). Each POI is authored in a `PoiFrame` (local coordinates plus a yaw), so a whole POI can move or turn at once.
+The seven major centers are 281–381 m from each other (validated at ≥ 250 m). The four **minor POIs** (radius ≤ 40 m) sit in the biggest empty stretches and are validated at ≥ 150 m, and at least both radii + 40 m, from every other POI; their nearest neighbours are 163–233 m away. Each POI is authored in a `PoiFrame` (local coordinates plus a yaw), so a whole POI can move or turn at once.
 
 | POI | Center (x, z) | Ground (m) | Radius | Buildings | Loot tier | Nearest |
 |---|---|---|---|---|---|---|
-| Central Town | (0, 20) | 30 | 80 | 5× two-story, 5× small, 2× ruined, bell tower (watchtower) | 2 | Training Yard 340 m |
-| Farm | (300, 290) | 31 | 75 | barn, farmhouse (two-story), cottage (small), 2 container sheds | 1 | Training Yard 283 m |
-| Military Compound | (320, −270) | 27 | 70 | 2× barracks, 2× watchtower, guard booth, 7 containers (1 stacked) | 2 | Training Yard 281 m |
-| Radar Hill | (−300, 255) | 63 | 45 | radar station, watchtower | 1 | Forest Cabins 377 m |
-| Quarry | (−60, −340) | 1 (pit floor) | 95 | warehouse, 5 containers (1 stacked), ruined site office | 1 | Forest Cabins 356 m |
-| Forest Cabins | (−340, −120) | 26 | 50 | 3× small, 1× ruined | 0 | Quarry 356 m |
+| Central Town | (0, 20) | 30 | 80 | 5× two-story, 7× small, 3× ruined, bell tower (watchtower) | 2 | Millbrook 166 m |
+| Farm | (300, 290) | 31 | 75 | barn, farmhouse (two-story), cottage and bunkhouse (small), 4 container sheds | 1 | Orchard 163 m |
+| Military Compound | (320, −270) | 27 | 70 | 2× barracks, 2× watchtower, guard booth, 7 containers (1 stacked) | 2 | Truck Stop 233 m |
+| Radar Hill | (−300, 255) | 63 | 45 | radar station, watchtower | 1 | Millbrook 340 m |
+| Quarry | (−60, −340) | 1 (pit floor) | 95 | warehouse, 5 containers (1 stacked), ruined site office | 1 | Truck Stop 208 m |
+| Forest Cabins | (−340, −120) | 26 | 50 | 3× small, 1× ruined | 0 | Millbrook 202 m |
 | Training Yard | (340, 10) | 29 | 55 | blockout arena + soldier range (gate in the north wall) | 0 | Military 281 m |
+| *Millbrook* (minor) | (−150, −50) | 29 | 38 | two-story, 3× small, ruined, barn, container shed | 1 | Central Town 166 m |
+| *Truck Stop* (minor) | (135, −412) | 24 | 32 | shop (small), kiosk (guard booth), ruined workshop, 4 containers (1 stacked) | 1 | Quarry 208 m |
+| *Hunter's Camp* (minor) | (−290, −380) | 30 | 30 | cabin (small), ruined cabin, hunting tower (watchtower), store container | 0 | Quarry 233 m |
+| *Orchard* (minor) | (350, 445) | 27 | 32 | farmhouse (two-story), cottage (small), ruined cider house, 2 container sheds | 0 | Farm 163 m |
+| *Lone buildings* | countryside | – | – | 4× small, 5× ruined, 4 containers (road shoulders and fields, see below) | outskirts | – |
 
 What gives each one its identity:
 
@@ -100,10 +108,15 @@ What gives each one its identity:
   - The pit floor holds a warehouse, containers, rock piles and dense rock scatter. A ruined site office sits on the floor.
 - **Forest Cabins.** Four cabins ring a small dirt clearing and face it, inside the dense western pine forest. A dirt track enters from the north-east and leaves south toward the quarry.
 - **Training Yard.** The arena sits on its 88 m pad (floor 0.2 m above the pad), and the east highway ends at its north gate.
+- **Millbrook.** A hamlet in the west meadow: five houses face a dirt lane (`millbrook_road`) that leaves the west road and runs on south to the forest–quarry road, with the barn's big doors toward the lane and garden fences behind both rows. One grass pad under the hamlet, one pad per building.
+- **Truck Stop.** A roadside cluster on the quarry–compound road, turned to the road (yaw 0.23): a shop, a kiosk (the guard booth), a ruined workshop and a container yard behind a dirt forecourt with wrecks, barrels and a barrier.
+- **Hunter's Camp.** Two cabins, a hunting tower (watchtower) and a store container round a small dirt clearing in the new southern woods, reached by `camp_track` from the forest–quarry road. Fungus oaks ring the clearing.
+- **Orchard.** A farmstead north of the farm, reached by `orchard_track` from the farm road: farmhouse, cottage, cider-house ruin and two sheds inside a part-fenced yard, with 55 fruit trees (small broadleaf, hand-picked row spots) east and south.
+- **Lone buildings** (`roadsideBuilding` in `mapV1.ts`, poi `countryside`, outskirts loot): each faces its road from 10–16 m off the centerline, on its own pad. West road (−110, 31) ruin; farm road (46, 171) house and (151, 238) two sheds; east highway (173, 53) house; south highway (93, −194) ruin; quarry road (2, −150) house; forest–quarry road (−106, −210) two sheds; quarry–compound road (205, −363) ruin; farm–yard road (370, 109) house; fields (−60, 300) and (440, 250) ruins.
 
-**Loot tiers** are metadata only for now (`PointOfInterest.lootTier`): 2 for the hot drops (town, military), 1 for the farm, radar and quarry, and 0 for the forest cabins and the yard. Buildings carry their `poi`, so loot tables can subsample `BuiltBuilding.lootSpots` per tier.
+**Loot tiers** (`PointOfInterest.lootTier`, used by `generateLoot`): 2 for the hot drops (town, military), 1 for the farm, radar, quarry, Millbrook and the Truck Stop, and 0 for the forest cabins, Hunter's Camp, the Orchard and the yard. Lone buildings get outskirts loot (tier 0 × 0.8). With 85 buildings the loot test seed rolls 311 piles (the test caps it below 320) and 60 items per player (cap 70). Buildings carry their `poi`, so loot tables can subsample `BuiltBuilding.lootSpots` per tier.
 
-**Spawns.** There are 14, two on the outskirts of each POI, until landing exists. They face the POI and are validated: walkable, under 30°, 2 m from buildings and collidable props, and ≥ 20 m inside the edge.
+**Spawns.** There are 22, two on the outskirts of each POI (minor POIs included), until landing exists. `spawnsByPoi` assigns each to its nearest POI center, so the offline spawn plan now draws teams from 10 POIs. They face the POI and are validated: walkable, under 30°, 2 m from buildings and collidable props, and ≥ 20 m inside the edge.
 
 ## Roads
 
@@ -128,9 +141,12 @@ They are applied after every pad, so they cut cleanly through pad edges.
 | forest_quarry | dirt | 350 m | forest clearing → quarry ramp top |
 | quarry_military | dirt | 281 m | quarry east ramp → compound south breach |
 | farm_yard | dirt | 211 m | farm south gate → east highway by the yard |
+| millbrook_road | dirt | 243 m | west road → Millbrook lane → forest–quarry road |
+| camp_track | dirt | 135 m | forest–quarry road → Hunter's Camp clearing |
+| orchard_track | dirt | 222 m | farm road → Orchard yard (round the field fence's west end) |
 | ramps | dirt | 93 + 83 m | quarry rim → floor (linear, ≈ 17–21°) |
 
-**Totals:** 940 m of asphalt and 2.06 km of dirt, plus the ramps. `mapV1.test.ts` asserts:
+**Totals:** 940 m of asphalt and 2.66 km of dirt, plus the ramps. `mapV1.test.ts` asserts:
 - a road within each POI's radius;
 - a road ending at the yard gate;
 - a single connected network (roads join when they touch or meet on the same pad).
@@ -146,9 +162,10 @@ Crossing open ground between POIs should never be a death run or trivially safe.
 - **Gap filler.** `cover_fill` puts a `rock_boulder_large` wherever open ground still has no hard cover within 25 m (outside the dense woods). Straight crossings between POIs now pass within 25 m of hard cover at least every 58 m (216 m before); see `docs/map/cover-props.md`.
 - **Big trees and rocks.** Fungus oaks in the western forest and on the wood edges, big oaks in the river valley, big boulders and open rock faces on steep slopes.
 - **Groves and tree lines.**
-  - Clumpy groves (north, south and east masks) break long sightlines.
-  - Deciduous trees follow the river valley.
-  - Tree lines run along the farm road and both highways.
+  - Clumpy groves (north, south, east, west meadow, north-east, east fields and south-east masks) break long sightlines; each mask keeps open lanes between clumps.
+  - Deciduous trees and solitary big oaks follow the river valley; `field_oaks` puts a lone `tree_oak_large` in open meadows (≥ 55 m apart, outside the woods).
+  - Conifer `south_woods` (with fungus oaks) fill the strip south of the western forest round Hunter's Camp.
+  - Tree lines run along the farm road, both sides of every dirt road and track, and both sides of both highways.
 - **Countryside props.**
   - Broken wooden field fences.
   - Hay-bale walls north of town, hay stacks in the fields round the farm and town.
@@ -187,15 +204,17 @@ Crossing open ground between POIs should never be a death run or trivially safe.
 - **Snapping.** Instances snap to `sampleHeight` minus sink × scale. Rocks tilt to the terrain normal; trees stay upright.
 - **Instance format.** 7 floats: x, y, z, yaw, scale, normal x, normal z. Scales are quantized to 1/20 so collider shapes can be shared.
 
-**Counts** (layout checksum `88a2a717`, 6,244 instances plus 43 buildings; 624 explicit placements, the rest scatter):
+**Counts** (layout checksum `ce63f1c3`, 8,230 instances plus 85 buildings; 712 explicit placements, the rest scatter):
 
 | Category | Instances | Props |
 |---|---|---|
-| Trees | 2,253 | fir_b 898, fir_a 487, broadleaf_a 468, broadleaf_b 207, fir_young 106, oak_fungi 67, oak_large 20 |
-| Bushes | 2,073 | fern 661, bush_a 623, bush_c 469, bush_b 320 |
-| Rocks | 1,237 | rock_small 477, boulder_a 198, boulder_large 164, moss_b 148, moss_a 117, boulder_b 102, face_large 26, rock_pile 5 |
-| Props | 681 | fence_wood 323, fence_chainlink 83, log_fallen 46, wall_concrete 43, log_mossy 40, sandbag_barrier 24, stump_boubin 24, hay_bale_stack 23, car_wreck 16, car_covered 14, hay_bale_wall 12, cable_spool 10, road_barrier 9, pipe_stack 6, others 8 |
+| Trees | 4,236 | fir_b 1,498, broadleaf_a 1,149, fir_a 673, broadleaf_b 634, fir_young 117, oak_fungi 90, oak_large 75 |
+| Bushes | 2,150 | fern 745, bush_a 624, bush_c 449, bush_b 332 |
+| Rocks | 1,092 | rock_small 502, boulder_a 172, moss_b 131, moss_a 97, boulder_b 86, boulder_large 74, face_large 25, rock_pile 5 |
+| Props | 752 | fence_wood 379, fence_chainlink 83, wall_concrete 43, log_fallen 41, log_mossy 40, hay_bale_stack 27, stump_boubin 25, sandbag_barrier 24, car_wreck 19, car_covered 16, cable_spool 12, hay_bale_wall 12, road_barrier 10, barrel_rusty 7, pipe_stack 7, others 7 |
 | Grass (client only, near the viewer) | ≈ 600–950 visible | short / medium / tall clumps, density 30/100 m² under a patch mask |
+
+Trees roughly doubled (2,253 before). They also count as hard cover, so `cover_fill` now needs 25 gap boulders instead of 110 and `field_cover` places 556 instances instead of 694.
 
 **Per rule** (in expansion order):
 
@@ -203,28 +222,27 @@ Crossing open ground between POIs should never be a death run or trivially safe.
 |---|---|
 | forest_west_oaks / forest_west_floor | 31 / 41 |
 | ridge_edge_oaks / east_edge_oaks | 10 / 12 |
-| valley_oaks | 12 |
-| forest_west | 839 |
-| forest_west_under | 1,138 |
-| ridge_woods | 340 |
-| east_woods | 310 |
-| east_woods_under | 330 |
-| north_groves | 209 |
-| south_groves | 87 |
-| east_groves | 68 |
-| valley_trees | 184 |
-| town_gardens | 38 |
-| farm_road_trees_l / _r | 27 / 28 |
-| highway_east_trees | 12 |
-| highway_south_trees | 20 |
-| field_cover | 694 |
-| field_hay_farm / field_hay_town | 6 / 5 |
-| slope_boulders / slope_faces | 17 / 6 |
+| valley_oaks / south_woods_oaks / field_oaks | 17 / 18 / 47 |
+| orchard_rows (hand-picked spots) | 55 |
+| forest_west / forest_west_under | 921 / 1,035 |
+| ridge_woods | 468 |
+| east_woods / east_woods_under | 366 / 317 |
+| south_woods / south_woods_under | 345 / 311 |
+| north_groves / south_groves / east_groves | 387 / 223 / 256 |
+| valley_trees | 249 |
+| west_groves / north_east_groves / east_field_groves / south_east_groves | 257 / 136 / 74 / 48 |
+| town_gardens | 36 |
+| farm_road_trees_l / _r | 25 / 27 |
+| highway_east_trees / highway_south_trees (original side) | 10 / 17 |
+| roadside tree lines (`ROADSIDE_TREE_LINES`: 20 bands on 11 roads) | 170 |
+| field_cover | 556 |
+| field_hay_farm / field_hay_town | 6 / 4 |
+| slope_boulders / slope_faces | 17 / 5 |
 | radar_faces / quarry_faces (hand-picked spots) | 6 / 14 |
-| slope_rocks | 342 |
+| slope_rocks | 343 |
 | quarry_rocks | 151 |
-| cover_fill | 110 |
-| meadow_bushes | 533 |
+| cover_fill | 25 |
+| meadow_bushes | 482 |
 
 The build prints the exact current values.
 
@@ -232,10 +250,38 @@ The build prints the exact current values.
 
 | z \ x | −2 | −1 | 0 | 1 |
 |---|---|---|---|---|
-| 1 | 427 | 244 | 269 | 245 |
-| 0 | 521 | 198 | 317 | 129 |
-| −1 | 1,482 (western forest) | 287 | 281 | 330 |
-| −2 | 425 | 273 | 173 | 643 (eastern woods) |
+| 1 | 504 | 299 | 420 | 420 |
+| 0 | 626 | 323 | 395 | 270 |
+| −1 | 1,472 (western forest) | 432 | 389 | 385 |
+| −2 | 843 (southern woods) | 496 | 285 | 671 (eastern woods) |
+
+### Blank space
+
+User feedback on the 43-building layout: "add more building, tree (too much blank space)". Measured on a grid of cell centers inside the playable square (`scratchpad` script, same layout data):
+
+| Metric | Before (43 buildings, 2,253 trees) | After (85 buildings, 4,236 trees) |
+|---|---|---|
+| 50 m cells with no building, tree or hard cover within 40 m | 1.0 % | 0.3 % |
+| 50 m cells with no building or tree within 40 m | 27.3 % | 2.3 % |
+| 25 m cells with no building or tree within 25 m | 43.6 % | 12.6 % |
+| 25 m cells with no building, tree or hard cover within 25 m | 10.4 % | 3.4 % |
+
+- **Before**, the gap boulders already put hard cover almost everywhere, so the brief's first metric hid the problem. The emptiness players saw was the tree/building gap: a west-meadow corridor (x −225…−125 from z −325 to 125), the whole strip south of the western forest and quarry (z < −375), the north-east corner above the farm and the east fields past it.
+- **After**, the remaining 25 m gaps are deliberate: the quarry pit and terraces, the Radar Hill slopes, the Training Yard and compound pads, the farm's plowed field and the meadows between clumps.
+
+**Budget of the pass** (manifest LOD triangles, 100° view cone, worst of 8 directions; compare `docs/map/cover-props.md`):
+
+| | Before | After |
+|---|---|---|
+| Trees, worst case all at their last level (trunks are cover and never cull) | 30k | 55k (billboards are 6 tris; the 165 oaks are most of it) |
+| Tree triangles in view: town square / radar pad / field town–farm | 28k / 35k / 73k | 41k / 59k / 87k |
+| Tree triangles in view: forest clearing / deep western forest | 170k / 168k | 184k / 192k |
+| Tree triangles in view: Millbrook / Hunter's Camp / Truck Stop / Orchard | 35k / 56k / 28k / 28k | 73k / 129k / 74k / 73k |
+| Tree batches in view (prop × 250 m cell × level) | 17–74 | 32–95 |
+| Buildings, all 85 in view | 101k | 178k (`buildings.md` planned 154k for 60) |
+| `rock_boulder_large` far levels (400 tris each, never cull) | 164 → 66k | 74 → 30k |
+
+Net worst-case cover at far levels drops by about 10k: the extra oak and billboard triangles are smaller than the 90 gap boulders that trees replaced. If `?bench=v1` shows vertex cost at the camp or the orchard, first thin `south_woods` or the grove densities; they are single numbers in `mapV1.ts`.
 
 ## Rendering
 
@@ -253,7 +299,7 @@ The build prints the exact current values.
 - **Buffers.** One thin-instance buffer per clump prop and LOD, rebuilt every 8 m of movement.
 - **Range.** Drawn within 45 m, shrinking to zero over the last 12 m instead of popping. No shadows, no collision.
 
-**Headless batch counts** (stand-ins, one mesh per batch, before frustum culling):
+**Headless batch counts** (stand-ins, one mesh per batch, before frustum culling; measured on the 43-building layout, not re-measured after trees doubled):
 
 | View | Prop batches | Shadow-casting instances | Grass |
 |---|---|---|---|
@@ -268,7 +314,7 @@ Real assets add one mesh per material per batch.
 
 - **Buildings.** One compound Havok body per building, with the shape shared per prefab (buildings kit).
 - **Props: `PropColliders`** (from the pure `propColliderGroups`).
-  - **Grouping.** Instances of the same prop at the same quantized scale form one group: one shape and one `PhysicsBody` over an invisible thin-instanced mesh. The Havok plugin creates a static body per instance, all sharing that shape. In total: 167 shapes and 3,857 bodies, created in 30 ms.
+  - **Grouping.** Instances of the same prop at the same quantized scale form one group: one shape and one `PhysicsBody` over an invisible thin-instanced mesh. The Havok plugin creates a static body per instance, all sharing that shape. In total: 219 shapes and 6,080 bodies (167 and 3,857 in 30 ms before the 85-building pass).
   - **Trees** get trunk cylinders; the canopy never blocks.
   - **Rocks and set dressing** get yaw-only boxes, even when the visual is tilted.
   - **Fences** (`bulletproof: false`) sit on the `blocker` membership layer: they stop movement, and bullets pass through.
@@ -304,14 +350,14 @@ Real assets add one mesh per material per batch.
 - Buildings stay ≥ 1 m from each other (stacked containers excepted) and ≥ 1 m from road edges.
 - Terrain under every foundation stays below the floor and above the foundation bottom; containers sit on flat pads.
 - Every entrance is at most a 0.35 m step from the ground outside.
-- POI centers are ≥ 250 m apart.
+- Major POI centers are ≥ 250 m apart; a minor POI (radius ≤ 40 m) is ≥ 150 m and at least both radii + 40 m from every other POI (`poiSpacing`, `minorPoiSpacing`, `minorPoiRadius`).
 - Spawns are clear and walkable.
 - No collidable scatter sits on a road.
 - No collidable prop is within 1.5 m of a building entrance (`prop-at-entrance`), or in or next to a fence gate or wall breach (`prop-in-opening`, when `openings` are passed; `mapV1.test.ts` passes `MAP_V1_OPENINGS`).
 
 **Unit tests: `layout.test.ts`** cover the geometry helpers, fence segmentation, bake round-trips, scatter exclusions and determinism, region-tiling equivalence and the worker pipeline's generate fallback.
 
-**Headless check** (NullEngine + Havok + the client's `CharacterBody`): all 14 spawns settle within 2 cm and walk 11–39 m each way with no ticks below ground. Also verified:
+**Headless check** (NullEngine + Havok + the client's `CharacterBody`): on the 43-building layout, all 14 spawns settled within 2 cm and walk 11–39 m each way with no ticks below ground. Also verified:
 - range rays reach all 10 soldiers;
 - walking in through the yard gate works;
 - the out-of-bounds countdown expires at 10.0 s and respawns at the nearest spawn;
@@ -334,6 +380,11 @@ Real assets add one mesh per material per batch.
 | Training Yard gate | (340, 70) | Road into the north gate, soldier range working inside |
 | Forest clearing | (−340, −120) | Tree density, canopy LOD and shadows within 70 m, grass fade at 45 m |
 | Out of bounds | walk past x = 500 near (495, 60) | Warning, countdown, respawn at (400, 60) |
+| Millbrook lane | (−150, −5), looking south | Houses on both sides of the lane, barn doors, garden fences, west-meadow groves |
+| Hunter's Camp tower | (−284, −402), 9 m up | Clearing, cabins, the new southern woods and fungus oaks |
+| Truck Stop forecourt | (125, −398), looking south-east | Shop, kiosk, container yard; road tree lines both sides |
+| Orchard yard | (348, 437), looking east | Fruit-tree rows, sheds, north-east groves, farm to the south |
+| West meadow | (−170, 120), looking south | Whether the groves keep open lanes and crossings still feel fair |
 
 **Visuals I could not verify** (no browser here):
 - stand-in fence, wall, sandbag and hay meshes (faceted, vertex-coloured PBR);

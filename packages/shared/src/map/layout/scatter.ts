@@ -216,7 +216,7 @@ export class ScatterContext {
         const z = (j + 0.1 + 0.8 * unit(h, 2, seed)) * spacing;
         if (x < x0 || x >= x1 || z < z0 || z >= z1) continue;
         if (!pointInPolygon(rule.area, x, z)) continue;
-        if (rule.exclude?.some((polygon) => pointInPolygon(polygon, x, z))) continue;
+        if (inExclusion(compiled.exclusions, x, z)) continue;
 
         let chance = 1;
         if (rule.mask) {
@@ -241,7 +241,7 @@ export class ScatterContext {
           const anchor = anchored && m === 0;
           const r = rule.cluster.radius * (anchor ? 0.3 : 1) * Math.sqrt(unit(hm, 2, seed));
           // Members spill up to `radius` from the center, so they need the exclusion test too.
-          if (rule.exclude?.some((polygon) => pointInPolygon(polygon, x + cos * r, z + sin * r))) continue;
+          if (inExclusion(compiled.exclusions, x + cos * r, z + sin * r)) continue;
           if (this.place(compiled, anchor ? compiled.anchor! : compiled.palette, x + cos * r, z + sin * r, hm, out, reserve, own)) count++;
         }
       }
@@ -372,6 +372,23 @@ interface CompiledRule {
   readonly maxTan: number;
   readonly minTan: number;
   readonly excluded: ReadonlySet<number>;
+  readonly exclusions: readonly Exclusion[];
+}
+
+/** An `exclude` polygon with its bounds: a point outside the bounds is never inside (ray-cast parity), so most tests skip the polygon walk. */
+interface Exclusion {
+  readonly polygon: readonly Vec2Tuple[];
+  readonly minX: number;
+  readonly minZ: number;
+  readonly maxX: number;
+  readonly maxZ: number;
+}
+
+function inExclusion(exclusions: readonly Exclusion[], x: number, z: number): boolean {
+  for (const e of exclusions) {
+    if (x >= e.minX && x <= e.maxX && z >= e.minZ && z <= e.maxZ && pointInPolygon(e.polygon, x, z)) return true;
+  }
+  return false;
 }
 
 function compileRule(rule: ScatterRule): CompiledRule {
@@ -384,6 +401,7 @@ function compileRule(rule: ScatterRule): CompiledRule {
     maxTan: rule.maxSlopeDegrees === undefined ? Infinity : tanDegrees(rule.maxSlopeDegrees),
     minTan: rule.minSlopeDegrees === undefined ? -1 : tanDegrees(rule.minSlopeDegrees),
     excluded: new Set((rule.excludeSurfaces ?? []).map((s) => TERRAIN_SURFACES.indexOf(s))),
+    exclusions: (rule.exclude ?? []).map((polygon) => ({ polygon, ...polygonBounds(polygon) })),
   };
 }
 

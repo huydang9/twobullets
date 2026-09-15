@@ -1,13 +1,16 @@
-import { bandAlong, catmullRom, round3, segmentDistance } from "./layout/geometry";
+import { getBuildingPrefab, type BuildingPrefabId } from "./buildings/prefabs";
+import type { LayoutBuilding } from "./layout/buildings";
+import { bandAlong, catmullRom, offsetPoint, round3, segmentDistance } from "./layout/geometry";
 import { PoiFrame, rectLoop, type LineOpening } from "./layout/placement";
 import { roadFlatten, type RoadSpec } from "./layout/roads";
 import { seedFromId, type ScatterRule } from "./layout/scatter";
 import { TERRAIN_V1 } from "./terrain/presets";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, Vec2Tuple } from "./types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, TerrainSurface, Vec2Tuple } from "./types";
 
 /**
- * Map v1 layout: seven points of interest on the v1 terrain, joined by asphalt and dirt roads, with forests, tree lines
- * and field cover in between. See docs/map/layout.md (and the generated docs/map/mapV1.svg).
+ * Map v1 layout: seven points of interest and four minor ones (hamlets, camps) on the v1 terrain, joined by asphalt and
+ * dirt roads, with lone buildings, forests, groves, tree lines and field cover in between. See docs/map/layout.md (and
+ * the generated docs/map/mapV1.svg).
  *
  * Coordinates: meters, +X east, +Z north. Every POI is authored in its own frame (PoiFrame), so a POI can move or turn
  * as a whole. Buildings snap to their pads; the validation tests in layout/mapV1.test.ts keep the whole thing honest.
@@ -27,6 +30,11 @@ export const MAP_V1_POIS: readonly PointOfInterest[] = [
   { id: "quarry", name: "Quarry", kind: "quarry", center: [-60, -340], radius: 95, lootTier: 1 },
   { id: "forest", name: "Forest Cabins", kind: "forest", center: [-340, -120], radius: 50, lootTier: 0 },
   { id: "training", name: "Training Yard", kind: "training", center: [340, 10], radius: 55, lootTier: 0 },
+  // Minor POIs (radius ≤ 40 m): hamlets and camps in the biggest empty stretches, ≥ 150 m from any other POI.
+  { id: "millbrook", name: "Millbrook", kind: "town", center: [-150, -50], radius: 38, lootTier: 1 },
+  { id: "truckstop", name: "Truck Stop", kind: "town", center: [135, -412], radius: 32, lootTier: 1 },
+  { id: "camp", name: "Hunter's Camp", kind: "forest", center: [-290, -380], radius: 30, lootTier: 0 },
+  { id: "orchard", name: "Orchard", kind: "farm", center: [350, 445], radius: 32, lootTier: 0 },
 ];
 
 function poi(id: string): PointOfInterest {
@@ -65,6 +73,10 @@ town
   .building("house_n_east", "house_small", 13, 33, -HALF_PI)
   .building("house_s_west", "house_small_ruined", -13, -34, HALF_PI)
   .building("house_s_east", "house_two_story", 13, -34, -HALF_PI)
+  // Outskirts: the cross street and the main street run on past the back yards.
+  .building("house_n_west2", "house_small", -13, 56, HALF_PI)
+  .building("house_s_east2", "house_small", 13, -56, -HALF_PI)
+  .building("house_e_end", "house_small_ruined", 58, -13, 0)
   // Bell tower on the square's north-east corner: the town's silhouette and its best (and most exposed) perch.
   .building("bell_tower", "watchtower", 9, 9.5, Math.PI)
   // Back-yard fences, gaps as garden gates.
@@ -86,10 +98,10 @@ town
   // Street clutter: wrecks on the street edges, clear of the carriageway.
   .prop("car_covered", -60, 6, 0.1)
   .prop("car_covered", 34, -5.2, Math.PI + 0.15)
-  .prop("car_covered", 5.5, 55, HALF_PI - 0.2)
+  .prop("car_covered", 5.5, 44, HALF_PI - 0.2)
   .prop("car_wreck", -66, -6, HALF_PI + 0.3)
   .prop("car_wreck", 64, 6, HALF_PI - 0.25)
-  .prop("car_wreck", -6, 60, 0.25)
+  .prop("car_wreck", -5.5, 67, 0.25)
   .prop("car_wreck", 6, -54, -0.3)
   .prop("car_wreck", -35.5, -5.3, HALF_PI + 0.12)
   .prop("log_fallen", -35, 30, 0.3)
@@ -110,6 +122,10 @@ farm
   .building("cottage", "house_small", -24, 13, HALF_PI)
   .building("shed_red", "container_open", 16, -8, 0)
   .building("shed_blue", "container_open_blue", 21, -8, 0)
+  // Outside the paddock: a farmhands' cottage west of the farmhouse and two grain sheds by the south track.
+  .building("bunkhouse", "house_small", -54, -22, HALF_PI)
+  .building("grain_red", "container_open", 24, -47, 0)
+  .building("grain_blue", "container_open_blue", 27.8, -47, 0)
   // Paddock fence, walked from the south-west corner: gates south (track to the Training Yard), east (hay meadow) and
   // west (farm road).
   .line("fence_wood", rectLoop(0, 0, 36, 32), { gaps: [[40, 52], [96, 108], [210, 222]] })
@@ -278,6 +294,94 @@ const ring = (radius: number, degrees: number): Vec2Tuple => [round3(Math.cos((d
 [[12, 120], [27, 108], [13, -8], [27, -75], [13, -178], [32, 140]].forEach(([radius, degrees], i) => forest.prop("log_mossy", ...ring(radius!, degrees!), ((degrees! + 90) * Math.PI) / 180 + i * 0.2));
 
 // ---------------------------------------------------------------------------------------------------------------
+// Millbrook: a hamlet of five houses and a barn along a dirt lane that runs south from the west road to the quarry road.
+// ---------------------------------------------------------------------------------------------------------------
+
+const millbrook = new PoiFrame("millbrook", poi("millbrook").center);
+millbrook
+  // West of the lane, facing it.
+  .building("house_w1", "house_small", -12, 30, HALF_PI)
+  .building("house_w2", "house_two_story", -13, 8, HALF_PI)
+  .building("house_w3", "house_small_ruined", -12, -14, HALF_PI)
+  // East of the lane: two cottages and the barn, its big doors toward the lane.
+  .building("house_e1", "house_small", 12, 26, -HALF_PI)
+  .building("house_e2", "house_small", 12, 6, -HALF_PI)
+  .building("barn", "barn", 21, -24, -HALF_PI)
+  .building("shed", "container_open", -27, 24, 0)
+  // Garden fences behind both rows, gates at the back.
+  .line("fence_wood", [[-20, 41], [-36, 41], [-36, -24], [-20, -24]], { gaps: [[44, 49]] })
+  .line("fence_wood", [[20, 38], [30, 38], [30, -4]], { gaps: [[22, 27]] })
+  .prop("car_wreck", 6.5, -42, 0.2)
+  .prop("car_covered", -6.5, 44, 3.3)
+  .prop("hay_bale_stack", 35, -18, 0.2)
+  .prop("hay_bale_stack", 35, -16.8, 0.2)
+  .prop("hay_bale_stack", 36.4, -17.4, 0.4)
+  .prop("log_fallen", -27, -8, 1.4)
+  .prop("tree_oak_large", -28, -38, 1.2)
+  .prop("tree_oak_large", 26, 50, 0.4, 0.95);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Truck Stop: a roadside shop, kiosk, workshop ruin and container yard on the dirt road between the quarry and the
+// compound. Frame X runs along the road, which passes ~21 m to the frame's +Z.
+// ---------------------------------------------------------------------------------------------------------------
+
+const truckstop = new PoiFrame("truckstop", poi("truckstop").center, 0.23);
+truckstop
+  .building("shop", "house_small", -16, 2, 0)
+  .building("kiosk", "guard_booth", 0, 8, 0)
+  .building("workshop", "house_small_ruined", -2, -12, 0)
+  .building("container_1", "container_open", 16, 0, 0)
+  .building("container_2", "container_open_blue", 19.8, 0, 0)
+  .building("container_3", "container_closed", 23.6, 0, 0)
+  .building("container_3_top", "container_closed", 23.6, 0, 0, "container_3")
+  // Forecourt: wrecks, barrels and a barrier; pipes and drums behind the workshop.
+  .prop("car_wreck", -6, 15, HALF_PI + 0.25)
+  .prop("car_covered", -31, -4, 0.3)
+  .prop("barrel_rusty", 8, 3.5, 0)
+  .prop("barrel_rusty", 8.8, 4.3, 0)
+  .prop("barrel_rusty", 29, 4, 0)
+  .prop("utility_box", -9, 6.5, 0)
+  .prop("road_barrier", 12, 14, 0.1)
+  .prop("pipe_stack", 2, -25, 0.1)
+  .prop("cable_spool", 30, -8)
+  .prop("cable_spool", -14, -20);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hunter's Camp: two cabins, a hunting tower and a store container round a clearing in the southern woods.
+// ---------------------------------------------------------------------------------------------------------------
+
+const camp = new PoiFrame("camp", poi("camp").center);
+camp
+  .building("cabin", "house_small", -15, 2, HALF_PI)
+  .building("cabin_ruin", "house_small_ruined", 14, -6, -HALF_PI)
+  .building("tower", "watchtower", 6, -22, 0)
+  .building("store", "container_open", -8, -18, 0.4)
+  .prop("log_fallen", -3, 8, 0.1)
+  .prop("stump_boubin", 20, 12, 0.6)
+  .prop("log_mossy", -25, -14, 1.1)
+  .prop("crate_military", -13, -12.5, 0.4)
+  .prop("barrel_rusty", 19, 2, 0);
+for (const [x, z, yaw] of [[27, 18, 0.3], [-29, 15, 2.1], [-25, -32, 4.0], [26, -30, 1.2], [-14, 33, 5.1]] as const) camp.prop("tree_oak_fungi", x, z, yaw);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Orchard: a farmhouse, cottage, cider-house ruin and two sheds north of the farm, with fruit-tree rows east and south.
+// ---------------------------------------------------------------------------------------------------------------
+
+const orchard = new PoiFrame("orchard", poi("orchard").center);
+orchard
+  .building("farmhouse", "house_two_story", -16, 4, HALF_PI)
+  .building("cottage", "house_small", 8, 16, Math.PI)
+  .building("shed_1", "container_open", 16, -8, -HALF_PI)
+  .building("shed_2", "container_open_blue", 16, -12, -HALF_PI)
+  .building("cider_ruin", "house_small_ruined", -2, -22, 0)
+  // Yard fence, west and south: the track gate on the west side, a garden gate south.
+  .line("fence_wood", [[-30, 24], [-30, -32], [8, -32]], { gaps: [[31, 45], [70, 76]] })
+  .prop("hay_bale_stack", 22, 2, 0.3)
+  .prop("hay_bale_stack", 22.6, 3.1, 0.3)
+  .prop("car_wreck", 0, 2, 1.2)
+  .prop("tree_oak_large", -40, 30, 2.2);
+
+// ---------------------------------------------------------------------------------------------------------------
 // Countryside: field fences, hay and wrecks between POIs, so open crossings have something to run to.
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -330,6 +434,33 @@ const PADS: FlattenRegion[] = [
     surface: "dirt",
     surfaceFalloff: 3,
   },
+  // Minor POIs: one pad per settlement (Millbrook stays grass; the truck stop forecourt and the camp clearing are dirt).
+  { shape: "rect", center: millbrook.at(0, 2), halfExtents: [40, 48], falloff: 25, height: "auto" },
+  { shape: "rect", center: truckstop.at(4, -3), halfExtents: [38, 22], yaw: truckstop.yaw, falloff: 14, height: "auto", surface: "dirt", surfaceFalloff: 3 },
+  { shape: "circle", center: camp.at(0, -2), radius: 16, falloff: 10, height: "auto", surface: "dirt", surfaceFalloff: 3 },
+  { shape: "rect", center: orchard.at(-4, -3), halfExtents: [29, 32], falloff: 18, height: "auto" },
+];
+
+/** A rect pad under a whole building (roof and eaves included) plus `margin`, for buildings off the big POI pads. */
+function buildingPad(building: LayoutBuilding, margin = 1.5, falloff = 8, surface?: TerrainSurface): FlattenRegion {
+  const { min, max } = getBuildingPrefab(building.prefab as BuildingPrefabId).bounds;
+  const [cx, cz] = offsetPoint([building.position[0], building.position[2]], building.yaw, (min[0] + max[0]) / 2, (min[2] + max[2]) / 2);
+  return {
+    shape: "rect",
+    center: [round3(cx), round3(cz)],
+    halfExtents: [round3((max[0] - min[0]) / 2 + margin), round3((max[2] - min[2]) / 2 + margin)],
+    yaw: building.yaw,
+    falloff,
+    height: "auto",
+    ...(surface ? { surface, surfaceFalloff: 2 } : {}),
+  };
+}
+
+/** Buildings added after the first layout pass that sit off (or at the edge of) their POI pads. */
+const PADDED_BUILDINGS = new Set(["town_house_n_west2", "town_house_s_east2", "town_house_e_end", "farm_bunkhouse", "farm_grain_red", "farm_grain_blue"]);
+const POI_BUILDING_PADS: FlattenRegion[] = [
+  ...[town, farm, millbrook, orchard].flatMap((frame) => frame.buildings.filter((b) => frame === millbrook || frame === orchard || PADDED_BUILDINGS.has(b.id)).map((b) => buildingPad(b))),
+  ...[truckstop, camp].flatMap((frame) => frame.buildings.filter((b) => !b.stackOn).map((b) => buildingPad(b, 1.5, 7, "dirt"))),
 ];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -360,6 +491,10 @@ export const MAP_V1_ROADS: readonly RoadSpec[] = [
   { id: "forest_quarry", kind: "dirt", points: [forest.at(-2, -8), forest.at(-6, -26), forest.at(10, -70), [-265, -225], [-200, -248], [-130, -228], [-66, -210]] },
   { id: "quarry_military", kind: "dirt", points: [[64, -372], [150, -392], [235, -368], military.at(-10, -62), military.at(17, -44)] },
   { id: "farm_yard", kind: "dirt", points: [farm.at(10, -26), farm.at(10, -44), [338, 190], [356, 128], [348, 92], [334, 76]] },
+  // Minor POIs: Millbrook's lane runs on south to the quarry road; tracks to the camp and the orchard.
+  { id: "millbrook_road", kind: "dirt", points: [[-150, 6], millbrook.at(0, 30), millbrook.at(0, -30), [-154, -150], [-166, -236]] },
+  { id: "camp_track", kind: "dirt", points: [[-252, -232], [-262, -280], [-280, -330], camp.at(2, 18)] },
+  { id: "orchard_track", kind: "dirt", points: [farm.at(-58, 22), [226, 360], [218, 392], [240, 420], [300, 428], orchard.at(-2, -8)] },
 ];
 
 /**
@@ -410,6 +545,27 @@ for (const [id, near, side, skew] of SHOULDER_WRECKS) {
   }
 }
 
+// Lone buildings along the roads and in the fields: sheds, cottages and ruins between the POIs (outskirts loot).
+/** Faces the road: the building's center is `offset` m left of travel (negative: right) of the road point nearest `near`. */
+function roadsideBuilding(id: string, prefab: BuildingPrefabId, roadId: string, near: Vec2Tuple, offset: number, along = 0): void {
+  const { at, yaw } = shoulder(road(roadId), near, offset, along);
+  countryside.building(id, prefab, at[0], at[1], round3(offset > 0 ? yaw + Math.PI : yaw));
+}
+roadsideBuilding("ruin_west_road", "house_small_ruined", "west_road", [-108, 16], -15);
+roadsideBuilding("house_farm_road", "house_small", "farm_road", [58, 158], 15);
+roadsideBuilding("shed_farm_road_1", "container_open", "farm_road", [150, 236], 10);
+roadsideBuilding("shed_farm_road_2", "container_closed", "farm_road", [150, 236], 10, 3.8);
+roadsideBuilding("house_highway_east", "house_small", "highway_east", [178, 40], 16);
+roadsideBuilding("ruin_highway_south", "house_small_ruined", "highway_south", [100, -180], -16);
+roadsideBuilding("house_quarry_road", "house_small", "quarry_road", [-8, -140], 15);
+roadsideBuilding("shed_forest_quarry_1", "container_open_blue", "forest_quarry", [-105, -221], 10);
+roadsideBuilding("shed_forest_quarry_2", "container_closed", "forest_quarry", [-105, -221], 10, 3.8);
+roadsideBuilding("ruin_quarry_military", "house_small_ruined", "quarry_military", [210, -376], 16);
+roadsideBuilding("house_farm_yard", "house_small", "farm_yard", [352, 112], 15);
+countryside.building("ruin_north_field", "house_small_ruined", -60, 300, 0.6).building("ruin_east_field", "house_small_ruined", 440, 250, -1.2);
+
+const OUTLYING_PADS: FlattenRegion[] = [...POI_BUILDING_PADS, ...countryside.buildings.map((b) => buildingPad(b, 2, 8))];
+
 const RAMPS: FlattenRegion[] = [
   // North ramp (from the draft), rim to floor at ~16°.
   { shape: "polyline", points: [[-60, -205], [-60, -298]], width: 7, falloff: 6, height: "auto", profile: "linear", surface: "dirt", surfaceFalloff: 2 },
@@ -439,7 +595,7 @@ function circle(center: Vec2Tuple, radius: number, sides = 20): Vec2Tuple[] {
 /** POI cores kept free of field cover. */
 const POI_CORES = MAP_V1_POIS.map((p) => circle(p.center, p.radius + 10));
 /** Fence gates and wall breaches, widened by 3 m: every non-detail rule leaves them empty. */
-const OPENING_ZONES = [town, farm, military, radar, quarry, forest, countryside].flatMap((frame) => frame.openings).map((o) => circle(o.center, o.width / 2 + 3, 12));
+const OPENING_ZONES = [town, farm, military, radar, quarry, forest, millbrook, truckstop, camp, orchard, countryside].flatMap((frame) => frame.openings).map((o) => circle(o.center, o.width / 2 + 3, 12));
 
 const TREES = [
   { prop: "tree_fir_b", weight: 5 },
@@ -465,12 +621,46 @@ const EAST_WOODS: Vec2Tuple[] = [[395, -110], [495, -100], [495, -495], [240, -4
 const NORTH_GROVES: Vec2Tuple[] = [[-150, 180], [220, 160], [230, 400], [150, 495], [-120, 495], [-160, 360]];
 const SOUTH_GROVES: Vec2Tuple[] = [[60, -290], [220, -150], [330, -130], [250, -30], [80, -80], [-160, -150], [-200, -210]];
 const EAST_GROVES: Vec2Tuple[] = [[90, -60], [260, -100], [460, -60], [460, 200], [250, 190], [100, 110]];
-const VALLEY: Vec2Tuple[] = [[90, 495], [150, 320], [120, 140], [200, -60], [160, -220], [210, -495]];
+const VALLEY: Vec2Tuple[] = [[90, 480], [150, 320], [120, 140], [200, -60], [160, -220], [210, -495]];
+/** Conifer woods south of the western forest round Hunter's Camp and along the south edge. */
+const SOUTH_WOODS: Vec2Tuple[] = [[-495, -345], [-300, -315], [-240, -290], [-195, -310], [-170, -400], [-110, -445], [0, -455], [80, -470], [110, -495], [-495, -495]];
+/** Meadow groves between the western forest, Radar Hill and town (Millbrook); the woods themselves are excluded. */
+const WEST_GROVES: Vec2Tuple[] = [[-495, 70], [-495, 118], [-400, 128], [-360, 240], [-200, 220], [-100, 195], [-85, -110], [-110, -300], [-235, -285]];
+/** Groves in the empty north-east corner (Orchard), the east fields past the farm, and between the quarry and compound (Truck Stop). */
+const NE_GROVES: Vec2Tuple[] = [[160, 340], [495, 330], [495, 495], [140, 495]];
+const EAST_FIELDS: Vec2Tuple[] = [[370, 110], [495, 110], [495, 330], [390, 340]];
+const SOUTH_EAST_GROVES: Vec2Tuple[] = [[-10, -295], [200, -300], [235, -475], [20, -480]];
+/** Big-oak meadows stay open: solitary oaks only outside every wood and grove outline above. */
+const WOODS = [WEST_FOREST, RIDGE_WOODS, EAST_WOODS, SOUTH_WOODS];
+
+/** Orchard rows east and south of the yard, 8 m apart (jittered by the terrain tests only). */
+const ORCHARD_SPOTS: readonly Vec2Tuple[] = Array.from({ length: 6 }, (_, i) => Array.from({ length: 8 }, (_, j) => orchard.at(34 + i * 8, -30 + j * 8)))
+  .flat()
+  .concat(Array.from({ length: 5 }, (_, i) => Array.from({ length: 2 }, (_, j) => orchard.at(-22 + i * 9, -42 - j * 8))).flat());
 
 const farmRoad = MAP_V1_ROADS.find((r) => r.id === "farm_road")!;
 const highwayEast = MAP_V1_ROADS.find((r) => r.id === "highway_east")!;
 const highwaySouth = MAP_V1_ROADS.find((r) => r.id === "highway_south")!;
 const roadside = (road: RoadSpec, side: 1 | -1): Vec2Tuple[] => bandAlong(catmullRom(road.points, 8), 6, 11, side);
+/** Tree lines on both sides of the dirt roads (and the far side of both highways), broken up by a noise mask. */
+const ROADSIDE_TREE_LINES: ScatterRule[] = (
+  [
+    ["west_road", [1, -1]], ["radar_approach", [1, -1]], ["quarry_road", [1, -1]], ["forest_quarry", [1, -1]], ["quarry_military", [1, -1]],
+    ["farm_yard", [1, -1]], ["millbrook_road", [1, -1]], ["camp_track", [1, -1]], ["orchard_track", [1, -1]], ["highway_east", [1]], ["highway_south", [-1]],
+  ] as const
+).flatMap(([id, sides]) =>
+  sides.map((side): ScatterRule => ({
+    id: `${id}_trees_${side > 0 ? "r" : "l"}`,
+    props: DECIDUOUS,
+    area: roadside(road(id), side),
+    density: 2.2,
+    mask: { wavelength: 45, threshold: 0.4 },
+    clearance: 1,
+    maxSlopeDegrees: 30,
+    exclude: POI_CORES,
+    scaleRange: [0.85, 1.25],
+  })),
+);
 
 /** Hand-picked slope spots for open rock faces (backs into the slope, see `faceDownhill`): Radar Hill's north flank, the quarry terrace walls. */
 const RADAR_FACE_SPOTS: readonly Vec2Tuple[] = ([[-44, 40], [-28, 30], [-12, 24], [4, 34], [20, 24], [36, 30]] as const).map(([x, z]) => radar.at(x, z));
@@ -490,25 +680,36 @@ const SCATTER_RULES: readonly ScatterRule[] = [
   { id: "forest_west_floor", props: [{ prop: "stump_boubin", weight: 1 }, { prop: "log_mossy", weight: 1 }], area: WEST_FOREST, density: 0.06, edgeFade: 15, maxSlopeDegrees: 25, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 15, scaleRange: [0.9, 1.1] },
   { id: "ridge_edge_oaks", props: [{ prop: "tree_oak_fungi", weight: 1 }], area: RIDGE_WOODS, density: 0.03, edgeBand: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.9, 1.1] },
   { id: "east_edge_oaks", props: [{ prop: "tree_oak_fungi", weight: 1 }], area: EAST_WOODS, density: 0.03, edgeBand: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.9, 1.1] },
-  { id: "valley_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: bandAlong(VALLEY, -30, 30, 1), density: 0.03, maxSlopeDegrees: 20, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 30, scaleRange: [0.85, 1.15] },
+  { id: "valley_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: bandAlong(VALLEY, -30, 30, 1), density: 0.04, maxSlopeDegrees: 20, excludeSurfaces: ["road"], exclude: POI_CORES, minDistance: 25, scaleRange: [0.85, 1.15] },
+  { id: "south_woods_oaks", props: [{ prop: "tree_oak_fungi", weight: 1 }], area: SOUTH_WOODS, density: 0.04, edgeFade: 20, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [WEST_FOREST, POI_CORES[4]!], minDistance: 22, scaleRange: [0.9, 1.1] },
+  { id: "field_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: PLAYABLE, density: 0.012, maxSlopeDegrees: 14, excludeSurfaces: ["road", "dirt"], exclude: [...POI_CORES, ...WOODS], minDistance: 55, scaleRange: [0.85, 1.15] },
+  // Orchard: fruit-tree rows (small broadleaf trees) on hand-picked spots.
+  { id: "orchard_rows", props: [{ prop: "tree_broadleaf_a", weight: 2 }, { prop: "tree_broadleaf_b", weight: 1 }], area: PLAYABLE, density: 1, spots: ORCHARD_SPOTS, maxSlopeDegrees: 20, excludeSurfaces: ["road"], scaleRange: [0.7, 0.9] },
   // Forests: dense conifers with noise clearings, fading at their edges.
-  { id: "forest_west", props: TREES, area: WEST_FOREST, density: 1.5, mask: { wavelength: 80, threshold: 0.32 }, edgeFade: 25, maxSlopeDegrees: 38, excludeSurfaces: ["road"], scaleRange: [0.75, 1.3] },
+  { id: "forest_west", props: TREES, area: WEST_FOREST, density: 1.7, mask: { wavelength: 80, threshold: 0.3 }, edgeFade: 25, maxSlopeDegrees: 38, excludeSurfaces: ["road"], scaleRange: [0.75, 1.3] },
   { id: "forest_west_under", props: UNDERGROWTH, area: WEST_FOREST, density: 2.2, mask: { wavelength: 60, threshold: 0.3 }, edgeFade: 15, maxSlopeDegrees: 40, excludeSurfaces: ["road"], scaleRange: [0.7, 1.3] },
-  { id: "ridge_woods", props: TREES, area: RIDGE_WOODS, density: 0.9, mask: { wavelength: 70, threshold: 0.4 }, edgeFade: 30, maxSlopeDegrees: 34, excludeSurfaces: ["road"], scaleRange: [0.7, 1.2] },
-  { id: "east_woods", props: TREES, area: EAST_WOODS, density: 1.1, mask: { wavelength: 90, threshold: 0.36 }, edgeFade: 30, maxSlopeDegrees: 36, excludeSurfaces: ["road"], scaleRange: [0.75, 1.25] },
+  { id: "ridge_woods", props: TREES, area: RIDGE_WOODS, density: 1.15, mask: { wavelength: 70, threshold: 0.36 }, edgeFade: 30, maxSlopeDegrees: 34, excludeSurfaces: ["road"], scaleRange: [0.7, 1.2] },
+  { id: "east_woods", props: TREES, area: EAST_WOODS, density: 1.3, mask: { wavelength: 90, threshold: 0.36 }, edgeFade: 30, maxSlopeDegrees: 36, excludeSurfaces: ["road"], scaleRange: [0.75, 1.25] },
   { id: "east_woods_under", props: UNDERGROWTH, area: EAST_WOODS, density: 1.2, mask: { wavelength: 60, threshold: 0.35 }, edgeFade: 20, maxSlopeDegrees: 40, excludeSurfaces: ["road"], scaleRange: [0.7, 1.2] },
+  { id: "south_woods", props: TREES, area: SOUTH_WOODS, density: 0.95, mask: { wavelength: 80, threshold: 0.42 }, edgeFade: 25, maxSlopeDegrees: 36, excludeSurfaces: ["road"], exclude: [WEST_FOREST, POI_CORES[4]!], scaleRange: [0.75, 1.25] },
+  { id: "south_woods_under", props: UNDERGROWTH, area: SOUTH_WOODS, density: 0.8, mask: { wavelength: 60, threshold: 0.4 }, edgeFade: 20, maxSlopeDegrees: 40, excludeSurfaces: ["road"], exclude: [WEST_FOREST, POI_CORES[4]!], scaleRange: [0.7, 1.2] },
   // Groves: sparse, clumpy stands between POIs that break long sightlines.
-  { id: "north_groves", props: DECIDUOUS, area: NORTH_GROVES, density: 1.1, mask: { wavelength: 110, threshold: 0.6, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], scaleRange: [0.8, 1.3] },
-  { id: "south_groves", props: DECIDUOUS, area: SOUTH_GROVES, density: 1.1, mask: { wavelength: 100, threshold: 0.6, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.3] },
-  { id: "east_groves", props: DECIDUOUS, area: EAST_GROVES, density: 1.1, mask: { wavelength: 90, threshold: 0.62, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.3] },
-  { id: "valley_trees", props: DECIDUOUS, area: bandAlong(VALLEY, -30, 30, 1), density: 0.6, mask: { wavelength: 60, threshold: 0.45 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.35] },
+  { id: "north_groves", props: DECIDUOUS, area: NORTH_GROVES, density: 1.25, mask: { wavelength: 110, threshold: 0.56, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], scaleRange: [0.8, 1.3] },
+  { id: "south_groves", props: DECIDUOUS, area: SOUTH_GROVES, density: 1.4, mask: { wavelength: 100, threshold: 0.53, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.3] },
+  { id: "east_groves", props: DECIDUOUS, area: EAST_GROVES, density: 1.4, mask: { wavelength: 90, threshold: 0.55, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.3] },
+  { id: "valley_trees", props: DECIDUOUS, area: bandAlong(VALLEY, -30, 30, 1), density: 0.85, mask: { wavelength: 60, threshold: 0.4 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: POI_CORES, scaleRange: [0.8, 1.35] },
+  { id: "west_groves", props: DECIDUOUS, area: WEST_GROVES, density: 1.3, mask: { wavelength: 90, threshold: 0.55, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...POI_CORES, WEST_FOREST, RIDGE_WOODS], scaleRange: [0.8, 1.3] },
+  { id: "north_east_groves", props: DECIDUOUS, area: NE_GROVES, density: 1.3, mask: { wavelength: 100, threshold: 0.55, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...POI_CORES, NORTH_GROVES], scaleRange: [0.8, 1.3] },
+  { id: "east_field_groves", props: DECIDUOUS, area: EAST_FIELDS, density: 1.2, mask: { wavelength: 90, threshold: 0.56, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...POI_CORES, EAST_GROVES], scaleRange: [0.8, 1.3] },
+  { id: "south_east_groves", props: DECIDUOUS, area: SOUTH_EAST_GROVES, density: 1.3, mask: { wavelength: 90, threshold: 0.55, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...POI_CORES, EAST_WOODS], scaleRange: [0.8, 1.3] },
   // Garden trees and hedges in town.
   { id: "town_gardens", props: [{ prop: "tree_broadleaf_b", weight: 1 }, { prop: "bush_c", weight: 2 }, { prop: "bush_a", weight: 2 }], area: circle(town.center, 60), density: 0.9, avoidPads: false, clearance: 2.5, excludeSurfaces: ["road"], scaleRange: [0.7, 1.1] },
-  // Tree lines along the farm road and the highways outside town.
+  // Tree lines along the farm road and the highways outside town, then along the other roads.
   { id: "farm_road_trees_l", props: DECIDUOUS, area: roadside(farmRoad, -1), density: 3, mask: { wavelength: 40, threshold: 0.3 }, avoidPads: false, clearance: 1, exclude: POI_CORES, scaleRange: [0.9, 1.2] },
   { id: "farm_road_trees_r", props: DECIDUOUS, area: roadside(farmRoad, 1), density: 3, mask: { wavelength: 40, threshold: 0.3 }, avoidPads: false, clearance: 1, exclude: POI_CORES, scaleRange: [0.9, 1.2] },
   { id: "highway_east_trees", props: DECIDUOUS, area: roadside(highwayEast, -1), density: 2.5, mask: { wavelength: 50, threshold: 0.35 }, clearance: 1, exclude: POI_CORES, scaleRange: [0.9, 1.25] },
   { id: "highway_south_trees", props: DECIDUOUS, area: roadside(highwaySouth, 1), density: 2.5, mask: { wavelength: 50, threshold: 0.35 }, clearance: 1, exclude: POI_CORES, scaleRange: [0.9, 1.25] },
+  ...ROADSIDE_TREE_LINES,
   // Field cover: small clusters of rocks, bushes and logs every ~50 m in the open, thinner in a few meadows.
   {
     id: "field_cover",
@@ -559,7 +760,7 @@ const SCATTER_RULES: readonly ScatterRule[] = [
 export const MAP_V1_SCATTERS: readonly ScatterRule[] = SCATTER_RULES.map((rule) => (rule.detail ? rule : { ...rule, exclude: [...(rule.exclude ?? []), ...OPENING_ZONES] }));
 
 // ---------------------------------------------------------------------------------------------------------------
-// Spawns: two per POI on its outskirts until the landing phase exists.
+// Spawns: two per POI (minor POIs included) on its outskirts until the landing phase exists.
 // ---------------------------------------------------------------------------------------------------------------
 
 const SPAWN_SPOTS: readonly { at: Vec2Tuple; face: Vec2Tuple }[] = [
@@ -577,13 +778,21 @@ const SPAWN_SPOTS: readonly { at: Vec2Tuple; face: Vec2Tuple }[] = [
   { at: forest.at(48, 30), face: forest.center },
   { at: [yard.center[0] - 28, yard.center[1] + 62], face: yard.center },
   { at: [yard.center[0] + 60, yard.center[1] + 50], face: yard.center },
+  { at: millbrook.at(-48, -40), face: millbrook.center },
+  { at: millbrook.at(46, 30), face: millbrook.center },
+  { at: truckstop.at(-45, -20), face: truckstop.center },
+  { at: truckstop.at(48, -18), face: truckstop.center },
+  { at: camp.at(-40, 20), face: camp.center },
+  { at: camp.at(40, -30), face: camp.center },
+  { at: orchard.at(-50, -30), face: orchard.center },
+  { at: orchard.at(40, -45), face: orchard.center },
 ];
 
 const SPAWNS: MapSpawn[] = SPAWN_SPOTS.map(({ at, face }) => ({ position: at, yaw: round3(Math.atan2(face[0] - at[0], face[1] - at[1])) }));
 
 // ---------------------------------------------------------------------------------------------------------------
 
-const POI_FRAMES = [town, farm, military, radar, quarry, forest, countryside];
+const POI_FRAMES = [town, farm, military, radar, quarry, forest, millbrook, truckstop, camp, orchard, countryside];
 
 /** Fence gates and wall breaches, kept clear of collidable props (validated in layout/mapV1.test.ts). */
 export const MAP_V1_OPENINGS: readonly LineOpening[] = POI_FRAMES.flatMap((frame) => frame.openings);
@@ -592,7 +801,7 @@ export const MAP_V1: MapData = {
   id: "v1",
   name: "Map v1",
   terrain: TERRAIN_V1,
-  flatten: [...PADS, ...RAMPS, ...MAP_V1_ROADS.map(roadFlatten)],
+  flatten: [...PADS, ...OUTLYING_PADS, ...RAMPS, ...MAP_V1_ROADS.map(roadFlatten)],
   bounds: { outOfBoundsGraceSeconds: 10, killY: -40, landingAltitude: 300 },
   pois: MAP_V1_POIS,
   buildings: POI_FRAMES.flatMap((frame) => frame.buildings),

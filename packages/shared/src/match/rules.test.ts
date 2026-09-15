@@ -131,7 +131,7 @@ describe("kill feed", () => {
 });
 
 describe("spawn plan", () => {
-  it("Map v1: six non-training POIs with two spawns each", () => {
+  it("Map v1: ten non-training POIs (four of them minor) with two spawns each", () => {
     const groups = spawnsByPoi(MAP_V1.pois, MAP_V1.spawns);
     expect(groups.map((g) => [g.poi.id, g.spawns.length])).toEqual([
       ["town", 2],
@@ -140,6 +140,10 @@ describe("spawn plan", () => {
       ["radar", 2],
       ["quarry", 2],
       ["forest", 2],
+      ["millbrook", 2],
+      ["truckstop", 2],
+      ["camp", 2],
+      ["orchard", 2],
     ]);
   });
 
@@ -158,7 +162,7 @@ describe("spawn plan", () => {
     expect(planTeamSpawns(11, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)).toEqual(planTeamSpawns(11, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0));
     const firsts = new Set(Array.from({ length: 30 }, (_, seed) => planTeamSpawns(seed, 5, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)[0]!.poiId));
     expect(firsts.size).toBeGreaterThan(3);
-    expect(() => planTeamSpawns(1, 7, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)).toThrow();
+    expect(() => planTeamSpawns(1, 11, 2, MAP_V1.pois, MAP_V1.spawns, () => 0)).toThrow();
   });
 });
 

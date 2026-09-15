@@ -27,8 +27,9 @@ describe("Map v1 layout", () => {
     expect(of("building-entrance")).toEqual([]);
   });
 
-  it("spreads the seven POIs at least 250 m apart", () => {
-    expect(MAP_V1.pois).toHaveLength(7);
+  it("spreads the seven major POIs at least 250 m apart, and the four minor ones at least 150 m from any POI", () => {
+    expect(MAP_V1.pois).toHaveLength(11);
+    expect(MAP_V1.pois.filter((p) => p.radius <= 40).map((p) => p.id)).toEqual(["millbrook", "truckstop", "camp", "orchard"]);
     expect(of("poi-spacing")).toEqual([]);
   });
 

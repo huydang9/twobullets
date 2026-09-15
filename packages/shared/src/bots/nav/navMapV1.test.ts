@@ -15,7 +15,7 @@ import { emptyPath } from "./testWorld";
  * Recorded Map v1 nav checksum (like MAP_V1_BAKE): a layout, prefab or nav build change fails here. Rerun
  * `node tools/bench/bots/nav.ts` and update after intentional changes.
  */
-const MAP_V1_NAV_CHECKSUM = "21e550b3";
+const MAP_V1_NAV_CHECKSUM = "7061c979";
 
 /** Known unreachable areas, by probe name prefix (none since the radar station's stair got its bottom step). */
 const KNOWN_GAPS: readonly string[] = [];

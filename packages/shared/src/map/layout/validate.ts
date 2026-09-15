@@ -30,8 +30,12 @@ export interface MapIssue {
 }
 
 export interface ValidationOptions {
-  /** Minimum distance between POI centers, m. */
+  /** Minimum distance between major POI centers, m. */
   readonly poiSpacing?: number;
+  /** Minimum distance between a minor POI's center and any other POI center, m (also at least both radii + 40 m). */
+  readonly minorPoiSpacing?: number;
+  /** POIs with a radius up to this are minor (hamlets, camps), m. */
+  readonly minorPoiRadius?: number;
   /** Gap kept between building outlines, m. */
   readonly buildingGap?: number;
   /** Gap kept between building outlines and road edges, m. */
@@ -89,17 +93,17 @@ export function validateMapLayout(map: MapData, terrain: Terrain, layout: MapLay
     }
   }
 
-  // POI spacing.
+  // POI spacing: major POIs keep `poiSpacing` between them; a minor POI (hamlet, camp) keeps `minorPoiSpacing` from any POI.
   const spacing = options.poiSpacing ?? 250;
+  const minorSpacing = options.minorPoiSpacing ?? 150;
+  const minorRadius = options.minorPoiRadius ?? 40;
   for (const poi of map.pois) {
-    let nearest = Infinity;
-    let name = "";
     for (const other of map.pois) {
       if (other === poi) continue;
       const d = distance(poi.center[0], poi.center[1], other.center[0], other.center[1]);
-      if (d < nearest) [nearest, name] = [d, other.id];
+      const needed = poi.radius <= minorRadius || other.radius <= minorRadius ? Math.max(minorSpacing, poi.radius + other.radius + 40) : spacing;
+      if (d < needed) issue("poi-spacing", `${poi.id} is ${d.toFixed(0)} m from ${other.id} (needs ${needed.toFixed(0)} m)`);
     }
-    if (nearest < spacing) issue("poi-spacing", `${poi.id} is ${nearest.toFixed(0)} m from ${name}`);
   }
 
   // Collidable props on roads.
