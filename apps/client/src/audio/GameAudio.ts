@@ -36,6 +36,7 @@ import type {
   AudioBusId,
   ExplosionAudioEvent,
   FootstepAudioEvent,
+  FragCalloutAudioEvent,
   GunshotAudioEvent,
   HitConfirmAudioEvent,
   ImpactAudioEvent,
@@ -68,6 +69,10 @@ const FLESH_ZONE: Readonly<Record<HitZone, { gain: number; rate: number; snap: n
 /** Pitch of the canister body per throwable (a smoke can is bigger and duller). */
 const BOUNCE_RATE: Readonly<Record<ThrowableBounceAudioEvent["kind"], number>> = { frag: 1, smoke: 0.82, flash: 1.12, molotov: 1.3 };
 const AREA_UPDATE_SECONDS = 0.1;
+/** Frag-out shout: a raised voice, clear to ~15 m, gone by 45 m. */
+const FRAG_CALLOUT = { localGain: 0.7, remoteGain: 1, reference: 4, range: 45, rolloff: 1 } as const;
+/** Results clip: above every other UI voice so hit confirms and stings never steal it. */
+const MATCH_END_MUSIC = { gain: 0.8, fadeOut: 0.4, lateStartMs: 4000, priority: Priority.local + 1 } as const;
 
 interface AreaLoop {
   readonly kind: "smoke" | "fire";
@@ -95,6 +100,9 @@ export class GameAudio {
   private readonly areas = new Map<number, AreaLoop>();
   private areaTimer = 0;
   private hiss: AudioBuffer | null = null;
+  private readonly callouts = new Map<FragCalloutAudioEvent["thrower"], Voice>();
+  private music: Voice | null = null;
+  private musicRequest = 0;
 
   constructor(
     readonly engine: AudioEngine,
@@ -709,7 +717,81 @@ export class GameAudio {
     }
   }
 
+  /**
+   * Owner-supplied frag-out shout at release. Local: first person on the foley bus. Thrower elsewhere: spatial within
+   * {@link FRAG_CALLOUT.range}, delayed and occluded like any world voice. A thrower whose shout is still playing (or
+   * still travelling) gets no second copy.
+   */
+  playFragCallout(event: FragCalloutAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx) return;
+    const current = this.callouts.get(event.thrower);
+    if (current && current.end > ctx.currentTime) return;
+    const buffer = this.bank.pick("voice.fragOut");
+    if (!buffer) return;
+    const label = "voice.fragOut";
+    let voice: Voice | null;
+    let when = ctx.currentTime;
+    if (!event.position) {
+      voice = this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: FRAG_CALLOUT.localGain, room: 0.15 * this.probe.enclosure });
+    } else {
+      const place = this.place(event.position, FRAG_CALLOUT.reference, FRAG_CALLOUT.range, FRAG_CALLOUT.rolloff, event.age);
+      if (!place) return;
+      when += place.delay;
+      voice = this.engine.voice({
+        bus: "foley",
+        priority: Priority.important,
+        label,
+        position: event.position,
+        gain: Math.min(1, place.gain * FRAG_CALLOUT.remoteGain),
+        lowpass: place.lowpass,
+        room: 0.3 * this.probe.enclosure,
+        echo: 0.15,
+        distance: place.distance,
+        occluded: place.occluded,
+      });
+    }
+    if (!voice) return;
+    voice.addBuffer(buffer, { when });
+    this.callouts.set(event.thrower, voice);
+  }
+
   // --- UI -------------------------------------------------------------------------------------------------------------
+
+  /**
+   * Owner-supplied results-screen clip, once per call: non-spatial on the UI bus's "clear" route (UI volume and master
+   * volume apply; no muffle, ducking, reverb or echo). Lazy: if it hasn't downloaded yet it starts when it arrives,
+   * unless stopped first or more than {@link MATCH_END_MUSIC.lateStartMs} late.
+   */
+  playMatchEndMusic(): void {
+    this.stopMatchEndMusic(0.05);
+    const request = ++this.musicRequest;
+    const requestedAt = performance.now();
+    const start = () => {
+      if (request !== this.musicRequest || performance.now() - requestedAt > MATCH_END_MUSIC.lateStartMs) return;
+      const ctx = this.engine.live;
+      const buffer = this.bank.pick("music.matchEnd");
+      if (!ctx || !buffer) return;
+      const voice = this.engine.voice({ bus: "ui", priority: MATCH_END_MUSIC.priority, label: "music.matchEnd", gain: MATCH_END_MUSIC.gain, route: "clear" });
+      if (!voice) return;
+      voice.addBuffer(buffer, { when: ctx.currentTime });
+      this.music = voice;
+    };
+    if (this.bank.has("music.matchEnd")) start();
+    else void this.bank.load("music.matchEnd").then(start);
+  }
+
+  /** Fades the results-screen clip out (and cancels a start still waiting for the download). */
+  stopMatchEndMusic(fade: number = MATCH_END_MUSIC.fadeOut): void {
+    this.musicRequest++;
+    const voice = this.music;
+    this.music = null;
+    if (voice && voice.end > this.engine.now) voice.stop(fade);
+  }
+
+  get matchEndMusicPlaying(): boolean {
+    return this.music !== null && this.music.end > this.engine.now;
+  }
 
   /** Shooter-side hit confirmation: a dull body thud, a helmet-like tink for headshots, a low thump on a kill. */
   playHitConfirm(event: HitConfirmAudioEvent): void {

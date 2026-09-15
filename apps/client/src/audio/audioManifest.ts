@@ -55,7 +55,9 @@ export type SoundId =
   | "armor.break"
   | "amb.wind"
   | "amb.birds"
-  | "amb.birdCall";
+  | "amb.birdCall"
+  | "music.matchEnd"
+  | "voice.fragOut";
 
 export interface SoundVariant {
   /** File name without extension, relative to AUDIO_ROOT. */
@@ -136,4 +138,6 @@ export const AUDIO_MANIFEST: Readonly<Record<SoundId, SoundAsset>> = {
   "amb.wind": { channels: 2, load: "lazy", variants: [{ file: "amb.wind.0", duration: 45.0065 }] },
   "amb.birds": { channels: 2, load: "lazy", variants: [{ file: "amb.birds.0", duration: 45.0065 }] },
   "amb.birdCall": { channels: 1, load: "lazy", variants: [{ file: "amb.birdCall.0", duration: 3.0065 }, { file: "amb.birdCall.1", duration: 2.0717 }, { file: "amb.birdCall.2", duration: 3.0065 }, { file: "amb.birdCall.3", duration: 3.0065 }, { file: "amb.birdCall.4", duration: 3.0065 }, { file: "amb.birdCall.5", duration: 3.0065 }, { file: "amb.birdCall.6", duration: 3.0158 }] },
+  "music.matchEnd": { channels: 2, load: "lazy", variants: [{ file: "music.matchEnd.0", duration: 17.1363 }] },
+  "voice.fragOut": { channels: 1, load: "eager", variants: [{ file: "voice.fragOut.0", duration: 4.4811 }] },
 };

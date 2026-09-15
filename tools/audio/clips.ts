@@ -21,6 +21,8 @@ export interface CutSpec {
   readonly rate?: number;
   /** Seconds after the attack where the variation starts (tails without the direct sound). */
   readonly skip?: number;
+  /** Start at 0 s instead of the detected attack (already-edited clips whose soft start must survive). */
+  readonly untrimmed?: boolean;
 }
 
 export interface LoopSpec {
@@ -406,5 +408,30 @@ export const CLIPS: readonly ClipSpec[] = [
     maxSeconds: 3,
     fadeOut: 0.25,
     cuts: [{ source: "isaiahBirds", file: "birds-isaiah658.ogg", at: [1.6, 5.8, 7.9, 11.1, 14.95, 19.15, 24.85] }],
+  },
+
+  // --- Owner-supplied voice clips (sources.ts), kept whole. Hot masters (−8.7 / −13.4 LUFS) brought down to the
+  // foley/mechanics level with one linear gain.
+  {
+    // Results screen, non-spatial on the UI bus. Real stereo; lazy (fetched in the background after the eager set).
+    id: "music.matchEnd",
+    channels: 2,
+    load: "lazy",
+    maxSeconds: 17.2,
+    fadeOut: 0.02,
+    lufs: -18,
+    kbps: 96,
+    highpass: 30,
+    cuts: [{ source: "ownerMatchEnd", file: "trinh-la-gi.mp3", at: "whole", untrimmed: true }],
+  },
+  {
+    // Frag throw shout: first person for the local player, spatial for bots. The source is dual mono.
+    id: "voice.fragOut",
+    ...ONE_SHOT,
+    kbps: 64,
+    highpass: 80,
+    maxSeconds: 4.6,
+    fadeOut: 0.03,
+    cuts: [{ source: "ownerFragOut", file: "chay-di-cac-chau-oi.mp3", at: "whole", untrimmed: true }],
   },
 ];

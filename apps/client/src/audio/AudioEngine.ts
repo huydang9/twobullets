@@ -9,6 +9,7 @@ import type { AudioBusId } from "./types";
  *   voice: sources → layer gains → low-pass → gain → [HRTF panner] → bus ─→ [glue] → duck → fader ─→ master → muffle → limiter
  *                                                                    └→ direct → gentle comp ─┘ (skips glue and duck)  │
  *                                                                    └→ overlay (ear ringing: skips buses and muffle) ────┘
+ *                                                                    └→ clear → bus fader copy → overlay (results music) ─┘
  *                                                  └→ room send ─→ bus room tap ─→ convolver ─→ indoor return ─┘
  *                                                  └→ echo send ─→ bus echo tap ─→ slapback ──→ outdoor return ┘
  *
@@ -56,9 +57,10 @@ export interface VoiceOptions {
   /**
    * "direct" skips the bus glue compressor and ducking (the local player's own gunfire, which does the ducking, and
    * the biggest remote guns whose transient must survive). "overlay" also skips the master muffle (ear ringing, which
-   * must stay audible while everything else is dulled); the bus still counts toward its voice cap.
+   * must stay audible while everything else is dulled); the bus still counts toward its voice cap. "clear" keeps the
+   * bus fader (its volume slider) and master volume but skips ducking and the muffle (results-screen music).
    */
-  readonly route?: "bus" | "direct" | "overlay";
+  readonly route?: "bus" | "direct" | "overlay" | "clear";
 }
 
 export interface LayerOptions {
@@ -102,6 +104,8 @@ interface Bus {
   readonly direct: GainNode;
   readonly duck: GainNode;
   readonly fader: GainNode;
+  /** Fader copy feeding the overlay (master volume, after the muffle): the "clear" route. */
+  readonly clear: GainNode;
   readonly roomTap: GainNode;
   readonly echoTap: GainNode;
   duckUntil: number;
@@ -325,7 +329,8 @@ export class AudioEngine {
       panner.rolloffFactor = 0;
       setPannerPosition(panner, options.position, ctx.currentTime);
     }
-    const destination = options.route === "overlay" && this.overlay ? this.overlay : options.route === "direct" ? bus.direct : bus.input;
+    const route = options.route;
+    const destination = route === "overlay" && this.overlay ? this.overlay : route === "direct" ? bus.direct : route === "clear" ? bus.clear : bus.input;
     (panner ? output.connect(panner) : output).connect(destination);
     const voice = new Voice(ctx, options, filter, output, panner, this.noise);
     if (options.room) voice.send(bus.roomTap, options.room);
@@ -520,13 +525,16 @@ export class AudioEngine {
       gentle.attack.value = 0.02;
       gentle.release.value = 0.25;
       direct.connect(gentle).connect(fader);
+      const clear = ctx.createGain();
+      clear.gain.value = volume;
+      clear.connect(this.overlay as GainNode);
       const roomTap = ctx.createGain();
       roomTap.gain.value = volume;
       roomTap.connect(roomIn);
       const echoTap = ctx.createGain();
       echoTap.gain.value = volume;
       echoTap.connect(echoIn);
-      this.buses.set(id, { input, direct, duck, fader, roomTap, echoTap, duckUntil: 0, duckDepth: 1 });
+      this.buses.set(id, { input, direct, duck, fader, clear, roomTap, echoTap, duckUntil: 0, duckDepth: 1 });
     }
     this.applyEnvironment();
   }
@@ -603,7 +611,7 @@ export class AudioEngine {
     }
     const bus = this.buses.get(key);
     if (!bus) return;
-    for (const node of [bus.fader, bus.roomTap, bus.echoTap]) node.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
+    for (const node of [bus.fader, bus.clear, bus.roomTap, bus.echoTap]) node.gain.setTargetAtTime(value, ctx.currentTime, 0.03);
   }
 }
 

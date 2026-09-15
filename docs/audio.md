@@ -1,6 +1,6 @@
 # Audio
 
-Realistic, PUBG-style game audio built from free CC0 recordings: spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
+Realistic, PUBG-style game audio built from free CC0 recordings (plus two owner-supplied voice clips): spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
 
 > **Ambience is currently switched off** (`AMBIENCE_ENABLED = false` in `apps/client/src/audio/AudioSettings.ts`, by request).
 > - The gate wins over any saved ambience volume.
@@ -19,7 +19,7 @@ Realistic, PUBG-style game audio built from free CC0 recordings: spatial gunshot
 | `tools/audio/pipeline.ts` | cut → mono/stereo → fades → EBU R128 normalize → Opus + AAC; writes the manifest and credits |
 | `tools/audio/fp-mix.ts` | Renders each weapon's first-person shot exactly as the game layers it and prints LUFS / momentary max / true peak relative to the rifle |
 | `tools/audio/verify.ts` | Headless checks: manifest ↔ files, ffprobe codec/channels/duration, decode, credits, budget, acoustic model, weapon loudness hierarchy |
-| `assets-src/audio/` | Raw downloads and extracted sources (gitignored) |
+| `assets-src/audio/` | Raw downloads and extracted sources (gitignored); `owner/` holds the owner-supplied clips, copied by hand |
 | `apps/client/public/assets/audio/` | `<id>.<n>.ogg` / `.m4a` + `credits.json` |
 | `apps/client/src/audio/audioManifest.ts` | Generated typed manifest (`SoundId`) |
 | `apps/client/src/audio/` | Runtime (see Architecture) |
@@ -34,7 +34,14 @@ node_modules/.bin/tsc -p tools/audio/tsconfig.json
 
 ## Sources
 
-All shipped audio is **CC0**. Attribution isn't required, but every file is credited with its exact origin (file and cut time) in `credits.json`.
+All downloaded audio is **CC0**. Attribution isn't required, but every file is credited with its exact origin (file and cut time) in `credits.json`.
+
+**Owner-supplied (2026-09-15, internal release, the owner's choice).** Two voice clips the owner found on the internet (original author and license unknown, credited as "Unknown (from the internet)"; replace before any public release); `license: "Owner-supplied"` in `sources.ts` and `credits.json`, no URL, never fetched (`fetch.ts` only checks they were copied into `assets-src/audio/owner/`):
+
+| Source file | Sound | Plays |
+|---|---|---|
+| `trinh-la-gi.mp3` (stereo, 17.1 s) | `music.matchEnd` (stereo, 96 kbit/s, lazy) | Once per match on the placement screen (see "Event → sound") |
+| `chay-di-cac-chau-oi.mp3` (dual mono, 4.5 s) | `voice.fragOut` (mono, 64 kbit/s, eager) | When a frag grenade is thrown |
 
 | Source | Author | Used for |
 |---|---|---|
@@ -83,11 +90,11 @@ Equipment sounds that no CC0 recording covers are synthesized at runtime: the sm
 
   | | Opus | AAC |
   |---|---|---|
-  | Total | 2.68 MB | 4.04 MB |
-  | Eager (decoded before the first click) | 1.56 MB | |
-  | Lazy (ambience, fetched on first use, so never while ambience is off) | the rest | |
+  | Total | 2.93 MB | 4.37 MB |
+  | Eager (decoded before the first click) | 1.61 MB | |
+  | Lazy (ambience, fetched on first use, so never while ambience is off; the results clip, fetched in the background after the eager set) | the rest | |
 
-  55 sounds, 210 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
+  57 sounds, 212 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
 - **Loudness:**
   - Each variation is measured with ffmpeg `loudnorm` (EBU R128 integrated loudness).
   - Short clips are padded with silence, which R128 gating ignores.
@@ -102,6 +109,7 @@ Equipment sounds that no CC0 recording covers are synthesized at runtime: the sm
     | Explosion and flashbang bangs | −19 / −21 LUFS, lookahead limiter ≤ 3–6 dB |
     | Throwable and consumable foley, armor | −20 to −26 LUFS; peaky hits may shave ≤ 3–5 dB |
     | Ambience | −24/−26 LUFS |
+    | Owner-supplied voice clips (results clip, frag-out shout) | −18 LUFS, kept whole (`untrimmed` cut) |
 
   - Relative mix levels live in `soundDesign.ts` and `weaponMix.ts`.
 - **Gun files:**
@@ -124,9 +132,10 @@ voice: buffer sources ─ layer gain/LP ─→ voice low-pass ─→ voice gain 
                                                                   └→ echo send ─→ bus echo tap ─→ slapback + valley echo ─→ outdoor return ─┤
 bus input ─ [weapons: glue compressor] ─→ duck gain ─→ fader (settings) ─→ master ─→ muffle low-pass ─→ limiter (−1 dB, 20:1) ─→ out ◄──┘
 overlay voices (ear ringing) ─→ overlay gain (master volume) ──────────────────────────────────────────→ limiter
+clear voices (results clip) ─→ bus "clear" gain (bus volume) ─→ overlay gain (master volume) ──────────→ limiter
 ```
 
-The **muffle** is a master low-pass (open at 22 kHz) that `AudioEngine.muffle()` closes for flashbang ringing, close frag overpressure, knocks and eliminations. **Overlay** voices skip the buses and the muffle, so the tinnitus stays clear while everything else is dulled.
+The **muffle** is a master low-pass (open at 22 kHz) that `AudioEngine.muffle()` closes for flashbang ringing, close frag overpressure, knocks and eliminations. **Overlay** voices skip the buses and the muffle, so the tinnitus stays clear while everything else is dulled. **Clear** voices (the results clip on the UI bus) keep the bus volume and master volume but skip ducking, the muffle, reverb and echo.
 
 | File | Role |
 |---|---|
@@ -143,6 +152,7 @@ The **muffle** is a master low-pass (open at 22 kHz) that `AudioEngine.muffle()`
 | `equipment/foley.ts` | Item-use cue layers and the synthesized equipment sounds (gas hiss loop buffer, fire pops, zipper, gulps, spray) |
 | `equipmentMix.ts` | Dependency-free blast recipe by distance (`blastLayers`), echo and duck curves, loop levels, tinnitus model, item-use cue timelines (rendered by `verify.ts`) |
 | `audioCredits.ts` | Loads `credits.json` into lines the HUD's credits list appends |
+| `matchEndCue.ts` | UI → audio bridge for the results clip: `AudioDirector` registers `GameAudio` as the sink; `MatchScreens` drives one `MatchEndCue` per match (play once, owner screen, stop on hide, death → result handover) |
 | `acoustics.ts` | Pure model (unit-checked by `verify.ts`) |
 | `surfaces.ts` | `SurfaceProvider`, terrain/building/arena material → acoustic surface |
 | `soundDesign.ts` | All mix constants per weapon, surface and stance |
@@ -206,7 +216,7 @@ Pistol and shotgun sit either side of the rifle.
 ### Voices
 - Every sound is one `Voice`, which can hold several layers.
 - **Caps:** 64 voices globally. Per bus: weapons 20, impacts 12, footsteps 14, foley 12, ambience 8, ui 4.
-- **Priorities:** local 4 > important 3 (remote gunshots, enemy footsteps) > normal 2 > detail 1 > ambient 0.
+- **Priorities:** results clip 5 > local 4 > important 3 (remote gunshots, enemy footsteps) > normal 2 > detail 1 > ambient 0.
 - **Stealing:** when a cap is hit, the lowest priority×loudness voice is faded out in 25 ms. Ties go to the oldest. A new voice that scores lower than every existing one is refused.
 - **Culling:** sounds whose attenuated gain is below −54 dB, or beyond the event's range, are never created.
 
@@ -259,6 +269,9 @@ Pistol and shotgun sit either side of the rifle.
 | Item use (`onUse`) | One tagged voice scheduling the item's cue timeline over its use time: bandage paper/tape/cloth; first aid zip/paper/tape; medkit zip/pill rattle/spray/tape/zip; energy drink can open (click + pssht), gulps, slosh; painkiller rattle, cap clicks, water, gulps. Cancel stops it (25 ms fade) |
 | Pickup / drop (`onItem`) | Cloth + by kind: ammo casings rattle, weapon latch, armor strap/buckle clank, backpack zip, consumable paper, throwable clink; drop adds a soft thud |
 | Armor absorbs (`onArmor`) | `armor.hit` plate clank by absorbed damage; destroyed adds `armor.break` |
+| Frag thrown (`onThrow` `throwReleased`, overhand/underhand, kind frag) | Owner-supplied `voice.fragOut`, first person on the foley bus at release (not on pin pull or cook). Frags only. At most one instance per thrower (a thrower whose shout is still playing gets none) |
+| Bot frag thrown (offline `MatchFxEvent` `throwRelease`, via `AudioDirector.remoteThrow`) | Same shout, spatial from the bot's head: reference 4 m, range 45 m, delay, air absorption, occlusion; one per bot |
+| Placement screen (`MatchScreens`: `ResultScreen.show`, or `DeathScreen.show` once the team is out and a placement exists) | Owner-supplied `music.matchEnd`, non-spatial on the UI bus "clear" route; once per match (the result screen that follows a placement death screen takes it over without restarting); stops (0.4 s fade) when that screen hides (close, spectate, leave, exit to menu), when a new match's screens are created, or when the director is disposed. If the lazy file isn't in yet it starts on arrival, unless over 4 s late |
 | Knocked / revive / eliminated (`onVitals`) | Knock: low sting, thud, brief muffle; heartbeat while knocked or under 25 HP (faster as it drains); revive: cloth rustles every ~0.7 s; eliminated: low sting and a 4 s muffle |
 | Ambience | `amb.wind` + `amb.birds` loops, `amb.birdCall` one-shots 25–80 m away |
 
@@ -289,6 +302,8 @@ audio.playItemUse({ itemId, seconds, elapsed?, position, tag })  audio.stopItemU
 audio.playPickup(kind | "drop", position?)  audio.playArmorHit({ absorbed, destroyed, position })   // PlayerHit armor flag
 audio.playMechanical({ kind, weaponId, position /* null = first person */, delay?, span?, tag? })  // remote reload = spatial, 12 m
 audio.playHitConfirm({ zone, killed })                                            // HitConfirm
+audio.playFragCallout({ thrower /* slot | "local" */, position /* head; null = first person */, age? })   // frag release
+audio.playMatchEndMusic()  audio.stopMatchEndMusic(fade?)                         // placement screen (via matchEndCue.ts)
 ```
 
 M3–M4 integration (netcode.md §10):
@@ -317,6 +332,8 @@ __audio.explosion(4); __audio.explosion(250, -30)   // close overpressure + ring
 __audio.flashRing(1)                   // full tinnitus: mix ducked and dulled, recovering over 6 s
 __audio.smoke(12, 30); __audio.fire(8, -40)
 __audio.bounce("wood", 5, 45, 7, "smoke"); __audio.throw("pinPull"); __audio.throw("throw")
+__audio.fragOut(); __audio.fragOut(20, 45)   // own frag-out shout; a thrower 20 m away, 45° right
+__audio.matchEnd(); __audio.matchEnd(false)  // results clip on/off
 __audio.useItem("medkit"); __audio.cancelUse(); __audio.pickup("armor"); __audio.armor(true)
 __audio.mech("pump", "shotgun"); __audio.hit("head", true)
 __audio.ambience(true)   // ambience is off by default; this turns wind/birds on for the session

@@ -1,3 +1,4 @@
+import { MatchEndCue } from "../../audio/matchEndCue";
 import { t } from "../../i18n";
 import { prepareAnimation, replay } from "../anim";
 import { el } from "../dom";
@@ -16,8 +17,22 @@ export interface ScreenAction {
   run(): void;
 }
 
+/** One results clip per match: a match's death and result screens share their parent layer. */
+const matchEndCues = new WeakMap<HTMLElement, MatchEndCue>();
+
+function matchEndCueFor(parent: HTMLElement): MatchEndCue {
+  let cue = matchEndCues.get(parent);
+  if (!cue) {
+    MatchEndCue.newMatch();
+    cue = new MatchEndCue();
+    matchEndCues.set(parent, cue);
+  }
+  return cue;
+}
+
 /** Centred panel with a title, lines and buttons; clicks never reach the game or the play overlay. */
 class MatchScreen {
+  protected readonly cue: MatchEndCue;
   protected readonly root: HTMLDivElement;
   private readonly title: HTMLDivElement;
   private readonly subtitle: HTMLDivElement;
@@ -26,6 +41,7 @@ class MatchScreen {
   private readonly showAnim: Animation;
 
   constructor(parent: HTMLElement, modifier: string) {
+    this.cue = matchEndCueFor(parent);
     this.root = el("div", `tb-mscreen tb-mscreen--${modifier}`, undefined, parent);
     this.root.addEventListener("click", (event) => event.stopPropagation());
     this.root.addEventListener("mousedown", (event) => event.stopPropagation());
@@ -43,6 +59,8 @@ class MatchScreen {
 
   hide(): void {
     this.root.hidden = true;
+    // Leaving the screen (close, spectate, leave, exit to menu) stops the results clip it started.
+    this.cue.hide(this);
   }
 
   /** Rare (death, match end), so the content is rebuilt. */
@@ -92,6 +110,8 @@ export class DeathScreen extends MatchScreen {
   show(info: DeathInfo, actions: readonly ScreenAction[]): void {
     const subtitle = info.placement !== null ? t("death.placementOf", { place: info.placement, count: info.teamCount }) : MATCH_STRINGS.screens.teamStillFighting;
     this.render(t("death.title"), info.cause, statRows(info, subtitle), actions);
+    // The team is out: this is the player's placement screen, so the results clip plays here (once per match).
+    if (info.placement !== null) this.cue.show(this);
   }
 }
 
@@ -122,6 +142,7 @@ export class ResultScreen extends MatchScreen {
       [t("stats.survived"), formatClock(info.survivedSeconds)],
     ];
     this.render(winner ? t("result.winner") : t("result.placement", { place: info.placement, count: info.teamCount }), info.reason, rows, actions, winner);
+    this.cue.show(this);
   }
 }
 

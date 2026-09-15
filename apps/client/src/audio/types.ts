@@ -97,6 +97,16 @@ export interface ThrowActionAudioEvent {
   readonly position: Vec3Like | null;
 }
 
+/**
+ * The frag-out shout at the moment a frag leaves the hand. `position` null = the local player (non-positional);
+ * otherwise the thrower's head. At most one instance per `thrower` plays at a time.
+ */
+export interface FragCalloutAudioEvent {
+  readonly thrower: number | "local";
+  readonly position: Vec3Like | null;
+  readonly age?: number;
+}
+
 /** A smoke canister going off or a molotov bursting (`Detonate` / `AreaEffectStart`). */
 export interface AreaStartAudioEvent {
   readonly position: Vec3Like;

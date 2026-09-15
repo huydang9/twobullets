@@ -1,6 +1,8 @@
 // Upstream audio sources: where they come from, how big they are, and who to credit.
-// Licenses were checked on each page (2026-09-14). Only CC0 is used, so nothing here requires attribution,
-// but every shipped file is still credited in apps/client/public/assets/audio/credits.json.
+// Licenses were checked on each page (2026-09-14). Downloaded sources are CC0 only, so nothing here requires
+// attribution, but every shipped file is still credited in apps/client/public/assets/audio/credits.json.
+// Owner-supplied clips (internal release, the owner's choice) are copied by hand into assets-src/audio/owner/ and are
+// never fetched.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,16 +35,26 @@ export type SourceId =
   | "fireCrackle"
   | "glassBreak"
   | "breakingFalling"
-  | "sfx100";
+  | "sfx100"
+  | "ownerMatchEnd"
+  | "ownerFragOut";
+
+/** Clips the project owner supplied for the internal release (not downloaded, no public license). */
+export const OWNER_DIR = path.join(SRC_DIR, "owner");
+export const OWNER_LICENSE = "Owner-supplied";
 
 export interface AudioSource {
   readonly id: SourceId;
   readonly title: string;
   readonly authors: readonly string[];
-  readonly license: "CC0";
+  readonly license: "CC0" | typeof OWNER_LICENSE;
+  /** Empty for owner-supplied clips. */
   readonly page: string;
   readonly url: string;
+  /** Download file name; for owner-supplied clips, the file in OWNER_DIR. */
   readonly file: string;
+  /** Copied by hand into OWNER_DIR; fetch.ts skips it. */
+  readonly ownerSupplied?: true;
   /** Content-Length the server must report; a mismatch means the upstream file changed. */
   readonly bytes: number;
   /** Only the first N bytes are fetched (long WAV field recordings; a truncated WAV still decodes). */
@@ -254,6 +266,30 @@ export const SOURCES: readonly AudioSource[] = [
     file: "100-CC0-SFX.zip",
     bytes: 2_921_904,
     archive: "zip",
+  },
+  // --- Owner-supplied voice clips (2026-09-15), internal release only. Copy from the owner's originals into
+  // assets-src/audio/owner/ before running the pipeline.
+  {
+    id: "ownerMatchEnd",
+    title: "trinh-la-gi.mp3 (match-end results clip)",
+    authors: ["Unknown (from the internet)"],
+    license: OWNER_LICENSE,
+    page: "",
+    url: "",
+    file: "trinh-la-gi.mp3",
+    bytes: 274_181,
+    ownerSupplied: true,
+  },
+  {
+    id: "ownerFragOut",
+    title: "chay-di-cac-chau-oi.mp3 (frag grenade throw callout)",
+    authors: ["Unknown (from the internet)"],
+    license: OWNER_LICENSE,
+    page: "",
+    url: "",
+    file: "chay-di-cac-chau-oi.mp3",
+    bytes: 72_444,
+    ownerSupplied: true,
   },
 ];
 

@@ -7,7 +7,7 @@ import { mkdir, readdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { DOWNLOAD_DIR, EXTRACT_DIR, MAX_DOWNLOAD_BYTES, SOURCES, type AudioSource } from "./sources.ts";
+import { DOWNLOAD_DIR, EXTRACT_DIR, MAX_DOWNLOAD_BYTES, OWNER_DIR, SOURCES, type AudioSource } from "./sources.ts";
 
 setTimeout(() => {
   console.error("fetch: timed out after 20 minutes");
@@ -70,7 +70,12 @@ async function extract(source: AudioSource): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const selected = SOURCES.filter((s) => !only || s.id === only);
+  // Owner-supplied clips are never downloaded; only check that they were copied in.
+  for (const source of SOURCES.filter((s) => s.ownerSupplied && (!only || s.id === only))) {
+    const size = await sizeOf(path.join(OWNER_DIR, source.file));
+    console.log(`  ${size === source.bytes ? "present" : "MISSING"} ${source.file} (owner-supplied, copy into assets-src/audio/owner/)`);
+  }
+  const selected = SOURCES.filter((s) => !s.ownerSupplied && (!only || s.id === only));
   const total = selected.reduce((sum, s) => sum + expectedSize(s), 0);
   if (total > MAX_DOWNLOAD_BYTES) throw new Error(`Refusing to download ${mb(total)} (cap ${mb(MAX_DOWNLOAD_BYTES)})`);
   console.log(`Audio sources: ${selected.length}, ${mb(total)} total`);

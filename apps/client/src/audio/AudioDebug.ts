@@ -81,6 +81,8 @@ export class AudioDebug {
             "__audio.fire(distance=8, bearing=-40, seconds=10)   // molotov shatter + crackle loop",
             "__audio.bounce(surface='concrete', distance=6, bearing=0, speed=6, kind='frag')",
             "__audio.throw(action='pinPull', kind='frag')   // draw | pinPull | spoon | throw | pinReturn | holster",
+            "__audio.fragOut(distance=0, bearing=0, thrower=1)   // frag-out shout; distance 0 = your own (first person)",
+            "__audio.matchEnd(on=true)   // results-screen clip (UI bus, clear route); false stops it",
             "__audio.useItem('medkit')  __audio.cancelUse()   // bandage | first_aid | medkit | energy_drink | painkiller",
             "__audio.pickup('ammo')  __audio.armor(destroyed=false)",
             "__audio.mech(kind='boltOpen', weapon='sniper')",
@@ -142,6 +144,11 @@ export class AudioDebug {
       bounce: (surface: AcousticSurface = "concrete", distance = 6, bearing = 0, speed = 6, kind: ThrowableAudioKind = "frag") =>
         audio.playThrowableBounce({ kind, position: this.around(distance, bearing, -MOVEMENT.standEyeHeight), impactSpeed: speed, surface }),
       throw: (action: ThrowActionAudioEvent["action"] = "pinPull", kind: ThrowableAudioKind = "frag") => audio.playThrowAction({ action, kind, style: "overhand", position: null }),
+      fragOut: (distance = 0, bearing = 0, thrower = 1) =>
+        distance <= 0
+          ? audio.playFragCallout({ thrower: "local", position: null })
+          : audio.playFragCallout({ thrower, position: this.around(distance, bearing, 0) }),
+      matchEnd: (on = true) => (on ? audio.playMatchEndMusic() : audio.stopMatchEndMusic()),
       useItem: (itemId: UseItemAudioId = "medkit") => audio.playItemUse({ itemId, seconds: ITEMS[itemId].useSeconds, position: null, tag: "debug.use" }),
       cancelUse: () => audio.stopItemUse("debug.use"),
       pickup: (kind: PickupAudioKind | "drop" = "ammo") => audio.playPickup(kind),

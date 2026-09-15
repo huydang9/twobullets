@@ -135,7 +135,11 @@ export class EquipmentAudio {
         audio.playThrowAction({ action: "spoon", kind: event.kind, position: null });
         break;
       case "throwReleased":
-        if (event.style === "overhand" || event.style === "underhand") audio.playThrowAction({ action: "throw", kind: event.kind, style: event.style, position: null });
+        if (event.style === "overhand" || event.style === "underhand") {
+          audio.playThrowAction({ action: "throw", kind: event.kind, style: event.style, position: null });
+          // Frag-out shout on a real throw only (not a dropped or in-hand cook-off).
+          if (event.kind === "frag") audio.playFragCallout({ thrower: "local", position: null });
+        }
         break;
       case "pinReturned":
         audio.playThrowAction({ action: "pinReturn", kind: event.kind, position: null });

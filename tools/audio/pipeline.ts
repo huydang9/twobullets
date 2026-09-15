@@ -10,7 +10,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import { CLIPS, type ClipSpec, type CutSpec } from "./clips.ts";
 import { decodeMono } from "./lib/signal.ts";
-import { DOWNLOAD_DIR, EXTRACT_DIR, MANIFEST_TS, OUT_DIR, SRC_DIR, SOURCES, sourceById, type SourceId } from "./sources.ts";
+import { DOWNLOAD_DIR, EXTRACT_DIR, MANIFEST_TS, OUT_DIR, OWNER_DIR, SRC_DIR, SOURCES, sourceById, type SourceId } from "./sources.ts";
 
 setTimeout(() => {
   console.error("pipeline: timed out after 15 minutes");
@@ -70,6 +70,7 @@ function probeDuration(file: string): number {
 
 function sourcePath(source: SourceId, file: string): string {
   const spec = sourceById(source);
+  if (spec.ownerSupplied) return path.join(OWNER_DIR, file);
   return spec.archive ? path.join(EXTRACT_DIR, source, file) : path.join(DOWNLOAD_DIR, file);
 }
 
@@ -144,8 +145,8 @@ function baseFilters(spec: ClipSpec): string[] {
 async function buildCut(spec: ClipSpec, cut: CutSpec, index: number, near: number | null, next: number | null): Promise<BuiltVariant> {
   const input = sourcePath(cut.source, cut.file);
   if (!existsSync(input)) throw new Error(`${spec.id}: missing source ${input} (run node tools/audio/fetch.ts)`);
-  const attack = findAttack(input, near);
-  const start = cut.skip ? attack + cut.skip : Math.max(0, attack - 0.004);
+  const attack = cut.untrimmed ? 0 : findAttack(input, near);
+  const start = cut.untrimmed ? 0 : cut.skip ? attack + cut.skip : Math.max(0, attack - 0.004);
   const available = (next !== null ? next - 0.05 : probeDuration(input)) - start;
   const length = Math.min(spec.maxSeconds, available);
   if (length < 0.05) throw new Error(`${spec.id}: cut at ${near} in ${cut.file} is too short`);
@@ -259,7 +260,7 @@ async function writeCredits(clips: readonly BuiltClip[]): Promise<void> {
     }
   }
   const body = {
-    note: "All shipped audio is CC0 (public domain). Attribution is not required but given here.",
+    note: "All shipped audio is CC0 (public domain) except the clips marked \"Owner-supplied\", which the project owner provided for the internal release. Attribution is not required but given here.",
     licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
     generated: new Date().toISOString().slice(0, 10),
     formats: ["ogg (Opus)", "m4a (AAC-LC)"],

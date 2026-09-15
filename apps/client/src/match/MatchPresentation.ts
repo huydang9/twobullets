@@ -65,6 +65,7 @@ export class MatchPresentation {
       case "throwRelease":
         // The grenade itself renders from EquipmentSystem's world.
         body?.throwRelease();
+        if (body?.actor) this.presentation.audio.remoteThrow(event.kind, event.slot, body.actor.feet);
         break;
       case "itemUse":
         body?.itemUse(event.phase);

@@ -28,7 +28,7 @@ import {
 import { WEAPON_SOUNDS, firstPersonShot, type GunId } from "../../apps/client/src/audio/weaponMix.ts";
 import { CLIPS } from "./clips.ts";
 import { measureMix } from "./lib/mixdown.ts";
-import { OUT_DIR, SOURCES } from "./sources.ts";
+import { OUT_DIR, OWNER_LICENSE, SOURCES } from "./sources.ts";
 
 setTimeout(() => {
   console.error("verify: timed out");
@@ -100,10 +100,12 @@ check("credits.json covers every used source", () => {
   for (const id of used) {
     const entry = credits.sources.find((s) => s.id === id);
     assert.ok(entry, `no credit for ${id}`);
-    assert.equal(entry.license, "CC0");
-    assert.ok(entry.url.startsWith("https://"));
+    const source = SOURCES.find((s) => s.id === id);
+    assert.equal(entry.license, source?.license);
+    // Owner-supplied clips have no public page.
+    if (!source?.ownerSupplied) assert.ok(entry.url.startsWith("https://"));
   }
-  for (const source of SOURCES) assert.equal(source.license, "CC0");
+  for (const source of SOURCES) assert.equal(source.license, source.ownerSupplied ? OWNER_LICENSE : "CC0", `${source.id} license`);
 });
 
 check("size budget", () => {

@@ -1,5 +1,5 @@
 import { Vector3, type Observer, type Scene } from "@babylonjs/core";
-import type { HitZone, Projectile, WeaponId } from "@twobullets/shared";
+import { MOVEMENT, type HitZone, type Projectile, type ThrowableKind, type WeaponId } from "@twobullets/shared";
 import type { CombatView, DamageEvent } from "../combat/types";
 import type { EquipmentView } from "../equipment/types";
 import type { PlayerController } from "../player/PlayerController";
@@ -14,6 +14,7 @@ import { AudioWorldProbe } from "./AudioWorldProbe";
 import { EquipmentAudio } from "./equipment/EquipmentAudio";
 import { FootstepSystem, type FootstepEmitterSource } from "./FootstepSystem";
 import { GameAudio } from "./GameAudio";
+import { matchEndMusicSink, setMatchEndMusicSink } from "./matchEndCue";
 import { NearMissDetector } from "./NearMissDetector";
 import { WEAPON_SOUNDS } from "./soundDesign";
 import { SoundBank } from "./SoundBank";
@@ -44,6 +45,7 @@ export class AudioDirector {
   private readonly damageObserver: Observer<DamageEvent>;
   private readonly forward = new Vector3();
   private readonly up = new Vector3();
+  private readonly calloutHead = { x: 0, y: 0, z: 0 };
   private readonly ownShots = { projectiles: [] as readonly Projectile[], own: true };
   private readonly projectileLists = [this.ownShots, { projectiles: this.flyBys, own: false }, { projectiles: this.remoteShots, own: false }];
 
@@ -64,6 +66,10 @@ export class AudioDirector {
     this.damageObserver = combat.onDamage.add((event) => {
       if (event.armorAbsorbed > 0) this.audio.playArmorHit({ absorbed: event.armorAbsorbed, destroyed: event.armorDestroyed, position: event.point });
     });
+    // Results screens reach the audio through this sink (matchEndCue.ts). The 17 s clip downloads in the background
+    // once the eager set is in, so it never competes with match start.
+    setMatchEndMusicSink(this.audio);
+    void this.bank.ready.then(() => this.bank.load("music.matchEnd"));
     if (import.meta.env.DEV) this.debug = new AudioDebug(this);
   }
 
@@ -141,12 +147,27 @@ export class AudioDirector {
     this.audio.playImpact({ position: point, weaponId: "shotgun", surface: "flesh", zone: "limb" });
   }
 
+  /**
+   * A throwable left a remote actor's hand (offline bots: MatchFxEvent `throwRelease`). Frags only: the frag-out shout
+   * from the thrower's head, at most one per thrower.
+   */
+  remoteThrow(kind: ThrowableKind, thrower: number, feet: Vec3Like): void {
+    if (kind !== "frag") return;
+    const head = this.calloutHead;
+    head.x = feet.x;
+    head.y = feet.y + MOVEMENT.standEyeHeight;
+    head.z = feet.z;
+    this.audio.playFragCallout({ thrower, position: head });
+  }
+
   casing(weaponId: WeaponId, position: Vector3): void {
     const design = WEAPON_SOUNDS[weaponId];
     this.audio.playCasing(position, design.casingRate, design.casingLowpass);
   }
 
   dispose(): void {
+    this.audio.stopMatchEndMusic();
+    if (matchEndMusicSink() === this.audio) setMatchEndMusicSink(null);
     this.damageObserver.remove();
     this.equipment?.dispose();
     this.debug?.dispose();

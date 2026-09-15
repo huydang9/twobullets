@@ -1,7 +1,7 @@
 {
-  "note": "All shipped audio is CC0 (public domain). Attribution is not required but given here.",
+  "note": "All shipped audio is CC0 (public domain) except the clips marked \"Owner-supplied\", which the project owner provided for the internal release. Attribution is not required but given here.",
   "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
-  "generated": "2026-09-14",
+  "generated": "2026-09-15",
   "formats": [
     "ogg (Opus)",
     "m4a (AAC-LC)"
@@ -544,6 +544,38 @@
         "use.paper.3 ← paper_04.ogg@0.053s",
         "use.slosh.0 ← splash_01.ogg@0.004s",
         "use.slosh.1 ← splash_02.ogg@0.006s"
+      ]
+    },
+    {
+      "id": "ownerMatchEnd",
+      "title": "trinh-la-gi.mp3 (match-end results clip)",
+      "authors": [
+        "Unknown (from the internet)"
+      ],
+      "license": "Owner-supplied",
+      "url": "",
+      "download": "",
+      "sounds": [
+        "music.matchEnd"
+      ],
+      "files": [
+        "music.matchEnd.0 ← trinh-la-gi.mp3@0.000s"
+      ]
+    },
+    {
+      "id": "ownerFragOut",
+      "title": "chay-di-cac-chau-oi.mp3 (frag grenade throw callout)",
+      "authors": [
+        "Unknown (from the internet)"
+      ],
+      "license": "Owner-supplied",
+      "url": "",
+      "download": "",
+      "sounds": [
+        "voice.fragOut"
+      ],
+      "files": [
+        "voice.fragOut.0 ← chay-di-cac-chau-oi.mp3@0.000s"
       ]
     }
   ]
