@@ -2,6 +2,8 @@
 import { INFO as CZ_HOLASOVICE } from "./cz-holasovice.info";
 import { INFO as VN_CAMTHANH } from "./vn-camthanh.info";
 import { INFO as JP_SHIRAKAWAGO } from "./jp-shirakawago.info";
+import { INFO as VN_HANGXANH } from "./vn-hangxanh.info";
+import { INFO as VN_PHANDANGLUU } from "./vn-phandangluu.info";
 import type { RealMapInfo, RealMapModule } from "./types";
 
 export type { RealMapCreditId, RealMapInfo, RealMapModule } from "./types";
@@ -17,6 +19,8 @@ export const REAL_MAPS: readonly RealMapEntry[] = [
   { info: CZ_HOLASOVICE, load: () => import("./cz-holasovice").then((m) => m.default) },
   { info: VN_CAMTHANH, load: () => import("./vn-camthanh").then((m) => m.default) },
   { info: JP_SHIRAKAWAGO, load: () => import("./jp-shirakawago").then((m) => m.default) },
+  { info: VN_HANGXANH, load: () => import("./vn-hangxanh").then((m) => m.default) },
+  { info: VN_PHANDANGLUU, load: () => import("./vn-phandangluu").then((m) => m.default) },
 ];
 
 export const DEFAULT_REAL_MAP_ID = "cz-holasovice";

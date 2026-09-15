@@ -27,6 +27,8 @@ export const MAPS: readonly MapInfo[] = [
   { id: "cz-holasovice", name: { vi: "Holašovice (Séc)", en: "Holašovice (Czechia)" }, sizeM: 1000, available: true, kind: "realWorld" },
   { id: "vn-camthanh", name: { vi: "Hội An – Cẩm Thanh", en: "Hội An – Cẩm Thanh (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
   { id: "jp-shirakawago", name: { vi: "Shirakawa-go (Nhật)", en: "Shirakawa-go (Japan)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "vn-phandangluu", name: { vi: "Phan Đăng Lưu", en: "Phan Dang Luu (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
 ];
 export const DEFAULT_MAP_ID = "v1";
 

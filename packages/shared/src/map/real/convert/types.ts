@@ -95,6 +95,18 @@ export interface PlaceConfig {
   readonly genericNames?: readonly [village: string, farm: string, forest: string];
   /** Terrain seed; defaults to a hash of the id. */
   readonly seed?: number;
+  /** Dense city mode (Saigon streets); absent for villages, whose output it never changes. See `convert/urban.ts`. */
+  readonly urban?: UrbanOptions;
+}
+
+/** How a dense city square is built: tube-house rows along the real streets, paved alleys, landmark names. */
+export interface UrbanOptions {
+  /** No frontage rows within this distance of the center, so the junction stays open to fight in, m. Default 40. */
+  readonly openCenter?: number;
+  /** Row houses before a walk-through gap between rows. Default 6. */
+  readonly rowLength?: number;
+  /** At most this many buildings per 100 m grid cell, so the cap spreads over the map. Default 14. */
+  readonly cellQuota?: number;
 }
 
 export type Polygon = readonly Vec2Tuple[];

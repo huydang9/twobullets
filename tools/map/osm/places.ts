@@ -48,6 +48,40 @@ export const PLACES: readonly PlaceConfig[] = [
     directionWords: ["北", "南", "東", "西"],
     genericNames: ["集落", "農家", "森"],
   },
+  {
+    // Ngã Tư Hàng Xanh, Bình Thạnh (HCMC): the roundabout where Xô Viết Nghệ Tĩnh, Điện Biên Phủ and Bạch Đằng meet.
+    // Center is the OSM junction node 2899907852. Dense city blocks, thinned to the cap; flat river lowland.
+    id: "vn-hangxanh",
+    name: "Ngã Tư Hàng Xanh",
+    country: "Vietnam",
+    countryCode: "vn",
+    lat: 10.80144,
+    lon: 106.71132,
+    elevation: { mode: "flat", scale: 1, maxRelief: 4 },
+    climate: "tropical",
+    localName: "Ngã Tư Hàng Xanh",
+    directionWords: ["Bắc", "Nam", "Đông", "Tây"],
+    genericNames: ["Khu phố", "Bãi đất trống", "Công viên"],
+    buildingCap: 190,
+    urban: { openCenter: 40 },
+  },
+  {
+    // Phan Đăng Lưu street in Phường Đức Nhuận (Phú Nhuận, HCMC): the stretch of the one-way primary road inside the
+    // ward, toward the Phú Nhuận intersection. Center checked with Overpass is_in against the ward boundary.
+    id: "vn-phandangluu",
+    name: "Phan Đăng Lưu",
+    country: "Vietnam",
+    countryCode: "vn",
+    lat: 10.80134,
+    lon: 106.68246,
+    elevation: { mode: "flat", scale: 1, maxRelief: 4 },
+    climate: "tropical",
+    localName: "Phan Đăng Lưu",
+    directionWords: ["Bắc", "Nam", "Đông", "Tây"],
+    genericNames: ["Khu phố", "Bãi đất trống", "Công viên"],
+    buildingCap: 170,
+    urban: { openCenter: 40 },
+  },
   // <custom-places>
   // </custom-places>
 ];

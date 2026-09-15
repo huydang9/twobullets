@@ -18,6 +18,7 @@ import { convertPois, REAL_POI_SPACING, type PoiReport } from "./pois";
 import { createProjection } from "./projection";
 import { convertCreeks, convertRoads, type RoadReport } from "./roads";
 import { pickSpawns, spawnKey } from "./spawns";
+import { frontageCandidates, rankFootprints, urbanDefaults } from "./urban";
 import type { ElevationSamples, OsmDocument, PlaceConfig, Polygon } from "./types";
 import { fenceOpenings, fenceProps, type FenceLine } from "../fences";
 
@@ -88,9 +89,12 @@ export interface ConvertResult {
   readonly report: ConvertReport;
 }
 
-/** Validation options for a real map with its fence openings. */
-export function realValidationOptions(openings: readonly LineOpening[]): ValidationOptions {
-  return { ...REAL_POI_SPACING, openings };
+/** Row houses in a city stand this close to each other (frontage rows pack them `ROW_GAP` apart), m. */
+export const URBAN_BUILDING_GAP = 0.1;
+
+/** Validation options for a real map with its fence openings (city maps allow row houses side by side). */
+export function realValidationOptions(openings: readonly LineOpening[], urban = false): ValidationOptions {
+  return urban ? { ...REAL_POI_SPACING, buildingGap: URBAN_BUILDING_GAP, openings } : { ...REAL_POI_SPACING, openings };
 }
 
 /**
@@ -106,7 +110,8 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   const parsed = parseOsm(input.osm, projection, 640);
   const { spec, report: elevation } = realTerrainSpec(config.seed ?? seedFromId(config.id), input.elevation, config.elevation);
 
-  const converted = convertRoads(parsed.lines);
+  const urban = config.urban;
+  const converted = convertRoads(parsed.lines, urban !== undefined);
   const roadReport = converted.report;
   const water = waterPolygons(parsed.areas);
   const roads = trimRoadsAtWater(converted.roads, water);
@@ -117,9 +122,10 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   const openings = fenceOpenings(fences);
   const flattenPaths = mapPaths({ flatten: [...creeks, ...roads.map(roadFlatten)] });
   const isolated = water.length > 0 ? isolatedLand(config, spec, creeks, roads, props) : () => false;
-  const candidates = buildingCandidates(parsed.buildings).filter((c) => !isolated(c.centroid[0], c.centroid[1]));
+  const footprints = buildingCandidates(parsed.buildings, urban !== undefined).filter((c) => !isolated(c.centroid[0], c.centroid[1]));
+  const candidates = urban ? [...rankFootprints(footprints, roads), ...frontageCandidates(roads, parsed.buildings, parsed.areas, urban).filter((c) => !isolated(c.centroid[0], c.centroid[1]))] : footprints;
   const cap = config.buildingCap ?? DEFAULT_BUILDING_CAP;
-  log(`${config.id}: ${roads.length} roads (${roadReport.asphaltKm} km asphalt, ${roadReport.dirtKm} km dirt), ${creeks.length} creek beds, ${water.length} water areas (${edges.length} m of fence), ${candidates.length} building candidates`);
+  log(`${config.id}: ${roads.length} roads (${roadReport.asphaltKm} km asphalt, ${roadReport.dirtKm} km dirt), ${creeks.length} creek beds, ${water.length} water areas (${edges.length} m of fence), ${candidates.length} building candidates${urban ? ` (${footprints.length} OSM footprints, ${candidates.length - footprints.length} frontage slots)` : ""}`);
 
   const excluded = new Set<string>();
   const blockedSpawns = new Set<string>();
@@ -128,7 +134,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const space = new PlacementSpace(flattenPaths, water);
-    const placed = placeBuildings(candidates, space, { cap, excluded });
+    const placed = placeBuildings(candidates, space, urban ? { cap, excluded, cellQuota: urbanDefaults(urban).cellQuota } : { cap, excluded });
     const poiResult = convertPois(placed.buildings, config, parsed.points, parsed.areas, parsed.buildings, water, isolated);
     const pads = buildingPads(placed.buildings, spec);
     const flatten: FlattenRegion[] = [...pads, ...creeks, ...roads.map(roadFlatten)];
@@ -152,7 +158,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
       spawns,
     };
     const layout = buildMapLayout(map, terrain);
-    const validation = realValidationOptions(openings);
+    const validation = realValidationOptions(openings, urban !== undefined);
     const issues = validateMapLayout(map, terrain, layout, validation);
     const before = excluded.size + blockedSpawns.size;
     const unhandled = handleIssues(issues, placed.buildings, excluded, blockedSpawns);

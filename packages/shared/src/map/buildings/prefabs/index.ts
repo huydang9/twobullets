@@ -3,6 +3,7 @@ import { barn } from "./farm";
 import { smallHouse, twoStoryHouse } from "./houses";
 import { closedContainer, openContainer, radarStation, warehouse } from "./industrial";
 import { barracks, guardBooth, watchtower } from "./military";
+import { TUBE_HOUSES, tubeHouse } from "./tubeHouses";
 
 const PREFABS = [
   smallHouse(false),
@@ -17,6 +18,7 @@ const PREFABS = [
   openContainer("container_open", "Container (open, red)", "containerRed"),
   openContainer("container_open_blue", "Container (open, blue)", "containerBlue"),
   closedContainer(),
+  ...TUBE_HOUSES.map(tubeHouse),
 ] as const satisfies readonly BuildingPrefab[];
 
 export type BuildingPrefabId =
@@ -31,7 +33,10 @@ export type BuildingPrefabId =
   | "radar_station"
   | "container_open"
   | "container_open_blue"
-  | "container_closed";
+  | "container_closed"
+  | "tube_house_2"
+  | "tube_house_3"
+  | "tube_house_4";
 
 export const BUILDING_PREFABS: ReadonlyMap<BuildingPrefabId, BuildingPrefab> = new Map(PREFABS.map((p) => [p.id as BuildingPrefabId, p]));
 

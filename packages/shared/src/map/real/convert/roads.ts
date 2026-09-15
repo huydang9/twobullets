@@ -41,7 +41,10 @@ const SKIPPED_SERVICE = new Set(["driveway", "parking_aisle", "drive-through", "
 const FOOTBRIDGE: RoadClass = { kind: "asphalt", width: 3, minLength: 8 };
 const FOOT_WAYS = new Set(["footway", "path", "pedestrian", "cycleway", "bridleway"]);
 
-export function roadClassOf(tags: OsmTags): RoadClass | null {
+/** City alleys (hẻm) and service lanes are paved concrete, narrower than village service roads. */
+const URBAN_SERVICE_WIDTH = 3.5;
+
+export function roadClassOf(tags: OsmTags, urban = false): RoadClass | null {
   if (FOOT_WAYS.has(tags.highway ?? "") && tags.bridge && tags.bridge !== "no") return { ...FOOTBRIDGE, kind: tags.surface && UNPAVED.has(tags.surface) ? "dirt" : "asphalt" };
   const base = CLASSES[tags.highway ?? ""];
   if (!base) return null;
@@ -49,9 +52,10 @@ export function roadClassOf(tags: OsmTags): RoadClass | null {
   if (tags.highway === "service" && tags.service && SKIPPED_SERVICE.has(tags.service)) return null;
   if (tags.access === "private" && tags.highway === "service") return null;
   const surface = tags.surface ?? "";
-  const kind: RoadKind = PAVED.has(surface) ? "asphalt" : UNPAVED.has(surface) ? "dirt" : base.kind;
+  const kind: RoadKind = PAVED.has(surface) ? "asphalt" : UNPAVED.has(surface) ? "dirt" : urban ? "asphalt" : base.kind;
   const tagged = Number.parseFloat(tags.width ?? "");
-  const width = Number.isFinite(tagged) && tagged >= 2.5 ? Math.min(9, Math.max(3.5, tagged)) : base.width;
+  const fallback = urban && tags.highway === "service" ? URBAN_SERVICE_WIDTH : base.width;
+  const width = Number.isFinite(tagged) && tagged >= 2.5 ? Math.min(9, Math.max(3.5, tagged)) : fallback;
   return { kind, width, minLength: base.minLength };
 }
 
@@ -67,7 +71,7 @@ export interface RoadReport {
  * clipped inside the playable edge and stripped of short stubs. Every road keeps straight legs (the OSM geometry already
  * follows the curve).
  */
-export function convertRoads(lines: readonly LineFeature[]): { roads: RoadSpec[]; report: RoadReport } {
+export function convertRoads(lines: readonly LineFeature[], urban = false): { roads: RoadSpec[]; report: RoadReport } {
   interface Piece {
     readonly key: string;
     readonly cls: RoadClass;
@@ -77,7 +81,7 @@ export function convertRoads(lines: readonly LineFeature[]): { roads: RoadSpec[]
   }
   const pieces: Piece[] = [];
   for (const line of lines) {
-    const cls = roadClassOf(line.tags);
+    const cls = roadClassOf(line.tags, urban);
     if (!cls) continue;
     pieces.push({ key: `${cls.kind}:${cls.width}`, cls, osmClass: line.tags.highway!, id: line.id, points: [...line.points] });
   }

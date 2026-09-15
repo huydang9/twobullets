@@ -15,6 +15,11 @@ const SETTLEMENT_PLACES = new Set(["city", "town", "village", "hamlet", "suburb"
 const MINOR_PLACES = new Set(["isolated_dwelling", "farm", "allotments"]);
 const LANDMARK_TOURISM = new Set(["attraction", "museum", "viewpoint", "artwork"]);
 const BIG_PREFABS = new Set(["barn", "warehouse", "barracks", "house_two_story"]);
+/** City landmarks that can name a POI (`PlaceConfig.urban`): markets, schools, churches, pagodas, hospitals. */
+const URBAN_AMENITIES = new Set(["marketplace", "school", "college", "university", "hospital", "townhall", "place_of_worship", "bus_station", "theatre", "kindergarten", "clinic"]);
+const URBAN_BUILDINGS = new Set(["university", "school", "college", "hospital", "church", "cathedral", "temple", "train_station", "apartments", "commercial"]);
+/** Wards' numbered quarters ("Khu phố 12") name a city POI only when nothing better is near. */
+const URBAN_MINOR_PLACES = new Set(["neighbourhood", "quarter", "city_block"]);
 
 export interface PoiReport {
   readonly settlements: number;
@@ -91,13 +96,19 @@ function nameSources(points: readonly PointFeature[], areas: readonly AreaFeatur
     if (!name) continue;
     const t = p.tags;
     const rank = t.place && SETTLEMENT_PLACES.has(t.place) ? 0 : t.place && MINOR_PLACES.has(t.place) ? 1 : t.place === "locality" ? 2 : t.amenity === "place_of_worship" || t.historic || (t.tourism && LANDMARK_TOURISM.has(t.tourism)) ? 3 : t.amenity ? 5 : 6;
+    if (config.urban) {
+      const urbanRank = t.place && URBAN_MINOR_PLACES.has(t.place) ? 4.6 : t.amenity && URBAN_AMENITIES.has(t.amenity) ? Math.min(rank, 4) : rank;
+      if (urbanRank < 5) out.push({ name, at: p.at, rank: urbanRank });
+      continue;
+    }
     if (rank < 5) out.push({ name, at: p.at, rank });
   }
   for (const a of [...areas, ...buildingAreas]) {
     const name = a.tags.name;
     if (!name || a.tags.highway) continue;
     const t = a.tags;
-    const rank = t.amenity === "place_of_worship" || t.historic || (t.tourism && LANDMARK_TOURISM.has(t.tourism)) ? 3 : t.landuse || t.natural || t.leisure ? 4 : 5;
+    let rank = t.amenity === "place_of_worship" || t.historic || (t.tourism && LANDMARK_TOURISM.has(t.tourism)) ? 3 : t.landuse || t.natural || t.leisure ? 4 : 5;
+    if (config.urban && rank === 5 && ((t.amenity && URBAN_AMENITIES.has(t.amenity)) || (t.building && URBAN_BUILDINGS.has(t.building)))) rank = 4.2;
     if (rank < 5) out.push({ name, at: centroid(a.outer), rank });
   }
   return out;

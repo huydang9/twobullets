@@ -53,6 +53,16 @@ Triangles and draw calls are per prefab, after hidden-face removal and AO griddi
 | `radar_station` | 11.1 × 7.1 × 8.1 | Control and equipment rooms, exterior stairs through a parapet gap onto the roof, antenna mast | 2,234 | 5 | 97 | 3 / 46 |
 | `container_open` / `_blue` | 2.5 × 6.1 × 2.6 | 20 ft ISO container with both doors swung back | 336 | 2 | 10 | 1 / 4 |
 | `container_closed` | 2.4 × 6.1 × 2.6 | Solid cover block that can be stacked with `position[1] = 2.59` | 96 | 1 | 1 | – |
+| `tube_house_2` | 4.2 × 13.0 × 6.9 | Saigon tube house (nhà ống): shopfront with a 2.8 m roll-up door opening, stair core, front and back room per floor, front balcony, flat parapet roof | 3,452 | 6 slots | 130 | 5 / 4 |
+| `tube_house_3` | 4.5 × 15.0 × 12.8 | Same plan over 3 stories, balconies, roof terrace reached through a stair head under a steep roof | 6,522 | 6 slots | 223 | 10 / 7 |
+| `tube_house_4` | 4.8 × 16.3 × 15.4 | 4 stories, balconies, steep gable roof (no roof deck) | 8,066 | 6 slots | 274 | 11 / 8 |
+
+**Tube houses** (`prefabs/tubeHouses.ts`, one parametric builder) are row houses for the city maps (`docs/map/real-world.md`, urban mode):
+- Party walls have no windows, so neighbours can stand 0.12 m apart; the entrance faces the street (+Z).
+- One straight flight per story, stacked in a 1.1 m stair core on the west wall. Upper floors wall the core off and put a railing across it where no flight continues.
+- Nav: the grid keeps at most 4 walkable levels per column. So only the 3-story house has a roof deck, its stair head roof is steeper than 50°, and the 4-story house has a gable.
+- Loot: each room is tiled with a 0.12 m raised floor (walkable, under the step height) except round its doors and one kept spot. Loot spots need bare floor, so a tube house holds 4–8 spots instead of 20–60, and a street of them doesn't flood a map with loot.
+- Materials: `darkSteel` frames, railings and the shutter drum; plaster walls; `roofMetal` for the gable and stair head.
 
 Loot spots are on a 1.5 m grid inset 0.6 m from room edges. They skip anything blocked below 1 m and anything without a floor underneath (stair holes). Loot tables should subsample them.
 

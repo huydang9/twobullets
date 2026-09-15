@@ -11,17 +11,25 @@ import { BAKE as CZ_HOLASOVICE_BAKE } from "./cz-holasovice.bake";
 import { BAKE as JP_SHIRAKAWAGO_BAKE } from "./jp-shirakawago.bake";
 import { REAL_MAPS, type RealMapModule } from "./index";
 import { BAKE as VN_CAMTHANH_BAKE } from "./vn-camthanh.bake";
+import { BAKE as VN_HANGXANH_BAKE } from "./vn-hangxanh.bake";
+import { BAKE as VN_PHANDANGLUU_BAKE } from "./vn-phandangluu.bake";
+import { COLLIDER_STRIDE, propColliderGroups } from "../layout/collision";
+import { getPrefabCollision } from "../buildings/placement";
 
 /** Recorded by tools/map/build.ts --map <id>; regenerate the map (tools/map/osm/generate.ts) after converter changes. */
 const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: string; layoutChecksum: string }>> = {
   "cz-holasovice": CZ_HOLASOVICE_BAKE,
   "vn-camthanh": VN_CAMTHANH_BAKE,
   "jp-shirakawago": JP_SHIRAKAWAGO_BAKE,
+  "vn-hangxanh": VN_HANGXANH_BAKE,
+  "vn-phandangluu": VN_PHANDANGLUU_BAKE,
 };
+/** Building caps: villages keep the default 90; the Saigon street maps (urban mode) set their own. */
+const BUILDING_CAPS: Readonly<Record<string, number>> = { "vn-hangxanh": 190, "vn-phandangluu": 170 };
 
 describe("real-world map registry", () => {
-  it("lists the three presets, Holašovice first", () => {
-    expect(REAL_MAPS.map((m) => m.info.id)).toEqual(["cz-holasovice", "vn-camthanh", "jp-shirakawago"]);
+  it("lists the presets, Holašovice first, then the custom places", () => {
+    expect(REAL_MAPS.map((m) => m.info.id)).toEqual(["cz-holasovice", "vn-camthanh", "jp-shirakawago", "vn-hangxanh", "vn-phandangluu"]);
     for (const { info } of REAL_MAPS) {
       expect(info.credits).toContain("osm");
       expect(info.bakeUrl).toBe(`assets/map/${info.id}.terrain.bin`);
@@ -51,9 +59,9 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     expect(validateMapLayout(module.map, terrain, layout, module.validation)).toEqual([]);
   });
 
-  it("has at most 90 buildings, no Training Yard, 10+ POIs and two spawns per POI", () => {
+  it("stays within its building cap, has no Training Yard, 10+ POIs and two spawns per POI", () => {
     const { map, info } = module;
-    expect(map.buildings.length).toBeLessThanOrEqual(90);
+    expect(map.buildings.length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
     expect(map.buildings.length).toBe(info.stats.buildings);
     expect(map.pois.some((p) => p.kind === "training")).toBe(false);
     expect(map.pois.length).toBeGreaterThanOrEqual(10);
@@ -66,6 +74,24 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     }
     for (const poi of map.pois) expect(counts.get(poi.id) ?? 0, poi.name).toBeGreaterThanOrEqual(2);
     expect(new Set(map.pois.map((p) => p.name)).size).toBe(map.pois.length);
+  });
+
+  it("has finite spawns and feet, and non-degenerate colliders with finite transforms", () => {
+    // Guards for the Havok world the client builds from this map (a NaN or zero-size shape corrupts its step).
+    for (const { position: [x, z], yaw } of module.map.spawns) {
+      expect([x, z, yaw].every(Number.isFinite)).toBe(true);
+      expect(Number.isFinite(terrain.sampleHeight(x, z))).toBe(true);
+    }
+    for (const group of propColliderGroups(layout)) {
+      const size = group.shape.kind === "cylinder" ? [group.shape.radius, group.shape.height] : group.shape.size;
+      expect(size.every((v) => Number.isFinite(v) && v > 1e-3), group.prop).toBe(true);
+      expect(group.transforms.length % COLLIDER_STRIDE).toBe(0);
+      expect(group.transforms.every(Number.isFinite), group.prop).toBe(true);
+    }
+    for (const b of layout.buildings) {
+      expect([...b.position, b.yaw].every(Number.isFinite), b.id).toBe(true);
+      for (const shape of getPrefabCollision(b.prefab)) expect(shape.size.every((v) => v > 1e-3), b.prefab).toBe(true);
+    }
   });
 
   it("reaches every POI, spawn, entrance and ground-floor room, 97 %+ of loot, and never the fenced water", () => {

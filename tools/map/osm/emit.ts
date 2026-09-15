@@ -157,7 +157,7 @@ const MODULE: RealMapModule = {
   roads: ROADS,
   water: WATER,
   openings: OPENINGS,
-  validation: { ...${literal({ poiSpacing: result.validation.poiSpacing, minorPoiSpacing: result.validation.minorPoiSpacing, minorPoiRadius: result.validation.minorPoiRadius })}, openings: OPENINGS },
+  validation: { ...${literal({ poiSpacing: result.validation.poiSpacing, minorPoiSpacing: result.validation.minorPoiSpacing, minorPoiRadius: result.validation.minorPoiRadius, buildingGap: result.validation.buildingGap })}, openings: OPENINGS },
 };
 export default MODULE;
 `;

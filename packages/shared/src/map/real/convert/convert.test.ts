@@ -95,6 +95,9 @@ describe("roads", () => {
     expect(roadClassOf({ highway: "motorway" })).toBeNull();
     expect(roadClassOf({ highway: "service", service: "driveway" })).toBeNull();
     expect(roadClassOf({ highway: "tertiary", tunnel: "yes" })).toBeNull();
+    // City mode paves alleys and keeps them narrow.
+    expect(roadClassOf({ highway: "service" }, true)).toMatchObject({ kind: "asphalt", width: 3.5 });
+    expect(roadClassOf({ highway: "track" }, true)).toMatchObject({ kind: "asphalt" });
   });
 
   it("joins ways that continue each other into one road and drops stubs", () => {

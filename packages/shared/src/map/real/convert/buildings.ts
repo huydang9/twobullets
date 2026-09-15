@@ -18,6 +18,8 @@ export const BUILDING_GAP = 2;
 export const WATER_GAP = 5;
 /** Default building cap per map. */
 export const DEFAULT_BUILDING_CAP = 90;
+/** Gap between neighbouring row houses in a city frontage row, m (urban validation keeps 0.1). */
+export const ROW_GAP = 0.12;
 /** At most this many of each expensive or odd prefab per map. */
 const PREFAB_LIMITS: Partial<Record<BuildingPrefabId, number>> = { warehouse: 4, barracks: 5, watchtower: 4, container_open: 6, container_open_blue: 6, container_closed: 4 };
 
@@ -37,6 +39,10 @@ export interface BuildingCandidate {
   readonly rect: MinRect;
   readonly centroid: Vec2Tuple;
   readonly prefab: BuildingPrefabId;
+  /** Urban frontage rows: an exact placement (no push-back) packed `ROW_GAP` from its neighbours. */
+  readonly fixed?: { readonly position: Vec2Tuple; readonly yaw: number };
+  /** Urban placement priority, lower first (distance from the center weighted by street class). */
+  readonly rank?: number;
 }
 
 /** A building placed on the map, before terrain snapping. */
@@ -84,13 +90,45 @@ export function prefabFor(tags: OsmTags, area: number, rect: MinRect): BuildingP
   return ruined ? "house_small_ruined" : "house_small";
 }
 
+/** Tube house variant for a city footprint: by `building:levels` when tagged, else a seeded mix (mostly 2–3 stories). */
+export function tubeHouseFor(osmId: number, levels: number, salt = 0): BuildingPrefabId {
+  if (levels >= 4) return "tube_house_4";
+  if (levels >= 3) return "tube_house_3";
+  if (levels >= 1) return "tube_house_2";
+  const r = unitHash(osmId, 7 + salt);
+  return r < 0.45 ? "tube_house_2" : r < 0.85 ? "tube_house_3" : "tube_house_4";
+}
+
+/**
+ * City mapping (`PlaceConfig.urban`): narrow houses and small shops become tube houses, big footprints become flat-roofed
+ * blocks (barracks, warehouses) or two-story houses. No barns, containers or ruins in a city street.
+ */
+export function urbanPrefabFor(osmId: number, tags: OsmTags, area: number, rect: MinRect): BuildingPrefabId | null {
+  const kind = tags.building ?? "yes";
+  if (SKIPPED.has(kind) || tags["building:part"] || tags.location === "underground") return null;
+  if (area < 20) return null;
+  const length = rect.halfLength * 2;
+  const width = rect.halfWidth * 2;
+  const levels = Number.parseFloat(tags["building:levels"] ?? "");
+  const big = (): BuildingPrefabId => (area >= 600 && width >= 14 ? "warehouse" : area >= 170 && length / width >= 1.5 ? "barracks" : "house_two_story");
+  if (RELIGIOUS.has(kind) || tags.amenity === "place_of_worship" || INDUSTRIAL.has(kind) || INSTITUTIONAL.has(kind)) return area >= 110 ? big() : tubeHouseFor(osmId, levels);
+  if (SMALL_SHEDS.has(kind) || FARM.has(kind)) return tubeHouseFor(osmId, 2);
+  if (width <= 9 || area < 150) return tubeHouseFor(osmId, Number.isFinite(levels) ? levels : 0);
+  return big();
+}
+
 /** Footprints inside the building edge that map to a prefab. */
-export function buildingCandidates(features: readonly AreaFeature[]): BuildingCandidate[] {
+export function buildingCandidates(features: readonly AreaFeature[], urban = false): BuildingCandidate[] {
   const out: BuildingCandidate[] = [];
   for (const feature of features) {
     const c = centroid(feature.outer);
     if (Math.abs(c[0]) > BUILDING_EDGE || Math.abs(c[1]) > BUILDING_EDGE) continue;
     const rect = minAreaRect(feature.outer);
+    if (urban) {
+      const prefab = urbanPrefabFor(feature.id, feature.tags, feature.area, rect);
+      if (prefab) out.push({ osmId: feature.id, tags: feature.tags, area: feature.area, rect, centroid: c, prefab });
+      continue;
+    }
     let prefab = prefabFor(feature.tags, feature.area, rect);
     if (!prefab) continue;
     // A few real houses become ruins (deterministic per OSM id), like the fictional map's mix.
@@ -242,10 +280,11 @@ export interface PlacementReport {
 export function placeBuildings(
   candidates: readonly BuildingCandidate[],
   space: PlacementSpace,
-  options: { readonly cap: number; readonly excluded: ReadonlySet<string> },
+  options: { readonly cap: number; readonly excluded: ReadonlySet<string>; readonly cellQuota?: number },
 ): { buildings: PlacedBuilding[]; report: PlacementReport } {
   const usable = candidates.filter((c) => !options.excluded.has(buildingId(c.osmId)));
-  const ordered = priorityOrder(usable, options.cap);
+  const ordered = options.cellQuota !== undefined ? rankedOrder(usable) : priorityOrder(usable, options.cap);
+  const perCell = new Map<string, number>();
   const buildings: PlacedBuilding[] = [];
   const perPrefab = new Map<BuildingPrefabId, number>();
   let conflicts = 0;
@@ -256,14 +295,21 @@ export function placeBuildings(
     let prefab = candidate.prefab;
     const limit = PREFAB_LIMITS[prefab];
     if (limit !== undefined && (perPrefab.get(prefab) ?? 0) >= limit) {
-      prefab = prefab === "warehouse" || prefab === "barracks" ? "barn" : prefab === "watchtower" ? "house_small" : prefab.startsWith("container") ? "container_closed" : prefab;
+      prefab = prefab === "warehouse" || prefab === "barracks" ? (options.cellQuota !== undefined ? "house_two_story" : "barn") : prefab === "watchtower" ? "house_small" : prefab.startsWith("container") ? "container_closed" : prefab;
       if ((perPrefab.get(prefab) ?? 0) >= (PREFAB_LIMITS[prefab] ?? Infinity)) continue;
     }
-    const placement = placeOne(candidate, prefab, space);
+    let cell = "";
+    if (options.cellQuota !== undefined) {
+      const at = candidate.fixed?.position ?? candidate.rect.center;
+      cell = `${Math.floor(at[0] / 100)},${Math.floor(at[1] / 100)}`;
+      if ((perCell.get(cell) ?? 0) >= options.cellQuota) continue;
+    }
+    const placement = candidate.fixed ? placeFixed(candidate, prefab, space) : placeOne(candidate, prefab, space);
     if (!placement) {
       conflicts++;
       continue;
     }
+    if (cell) perCell.set(cell, (perCell.get(cell) ?? 0) + 1);
     if (placement.displacement > 0.5) pushed++;
     perPrefab.set(prefab, (perPrefab.get(prefab) ?? 0) + 1);
     space.addPlaced(placement.bounds);
@@ -317,6 +363,22 @@ function placeOne(candidate: BuildingCandidate, prefab: BuildingPrefabId, space:
     }
   }
   return null;
+}
+
+/** An urban row house at its frontage slot, packed against its neighbours; null when anything is in the way. */
+function placeFixed(candidate: BuildingCandidate, prefab: BuildingPrefabId, space: PlacementSpace): PlacedBuilding | null {
+  const { position, yaw } = candidate.fixed!;
+  const bounds = prefabRect(prefab, position, yaw);
+  if (!rectCorners(bounds).every(([x, z]) => Math.abs(x) <= BUILDING_EDGE + 5 && Math.abs(z) <= BUILDING_EDGE + 5)) return null;
+  if (!space.clearOfPaths(bounds, ROAD_GAP)) return null;
+  if (!space.clearOfPlaced(bounds, ROW_GAP)) return null;
+  if (!space.clearOfWater(bounds, WATER_GAP)) return null;
+  return { id: buildingId(candidate.osmId), prefab, position: [position[0], 0, position[1]], yaw, snapToTerrain: true, osmId: candidate.osmId, area: Math.round(candidate.area), bounds, displacement: 0 };
+}
+
+/** Urban order: by `rank` (OSM footprints and frontage slots interleaved), then id. */
+function rankedOrder(candidates: readonly BuildingCandidate[]): BuildingCandidate[] {
+  return [...candidates].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.osmId - b.osmId);
 }
 
 /** [back, side] offsets tried in order of distance, m. */

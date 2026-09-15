@@ -9,6 +9,8 @@ Design and candidate places: [`docs/research/real-world-map-investigation.md`](.
 | Holašovice, CZ (recommended default) | ![Holašovice](cz-holasovice.svg) |
 | Hội An – Cẩm Thanh, VN | ![Cẩm Thanh](vn-camthanh.svg) |
 | Shirakawa-gō, JP | ![Shirakawa-gō](jp-shirakawago.svg) |
+| Ngã Tư Hàng Xanh, VN (city) | ![Ngã Tư Hàng Xanh](vn-hangxanh.svg) |
+| Phan Đăng Lưu, VN (city) | ![Phan Đăng Lưu](vn-phandangluu.svg) |
 
 ## Try it
 
@@ -119,6 +121,57 @@ POI names:
 | Cẩm Thanh | last team | 9.5 min | 9 / 9 / 4 | 5 (20 s) | 0.27 / 1.04 ms |
 | Shirakawa-gō | last team | 8.5 min | 8 / 8 / 4 | 5 (10 s) | 0.47 / 1.43 ms |
 
+## City maps (urban mode)
+
+Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without `urban`, the converter's output is unchanged: the three village maps regenerate byte for byte.
+
+**What urban mode does:**
+- **Roads:** alleys (hẻm) and unclassified ways are paved; service ways are 3.5 m.
+- **Buildings:**
+  - OSM footprints map to `tube_house_2/3/4` (by `building:levels`, else a seeded mix) or to flat-roofed blocks. No barns, containers or ruins.
+  - OSM has few of the real tube houses, so `convert/urban.ts` lays **frontage rows** along every mapped street, on both sides:
+    - fronts at the road gap, neighbours 0.16 m apart (validation `buildingGap` 0.1);
+    - a 3 m walk-through every 5–7 houses;
+    - none on parks, pitches, school, market or hospital grounds, water or mapped footprints;
+    - none within 40 m of the center, so the junction stays open.
+  - Main roads get taller houses, alleys lower ones.
+  - Rows and footprints share one ranking: distance from the center × street class (1 main, 1.35 residential, 1.7 alley). Whole rows are placed in street order, with at most 10 buildings per 100 m cell.
+  - Frontage ids are `bld_9000000000000+n`, from road order, so exclusions never renumber them.
+- **POI names:** markets, schools, churches, pagodas and hospitals name POIs. Numbered quarters ("Khu phố 12") come after them.
+
+| | Ngã Tư Hàng Xanh (`vn-hangxanh`) | Phan Đăng Lưu (`vn-phandangluu`) |
+|---|---|---|
+| Center | junction node 2899907852 "Ngã tư Hàng Xanh" (10.80144, 106.71132) | Phan Đăng Lưu inside Phường Đức Nhuận, checked with Overpass `is_in` (10.80134, 106.68246) |
+| Snapshot | 2026-09-15T05:23Z | 2026-09-15T05:34Z |
+| Buildings (cap) | 190 (190): 66 / 77 / 45 tube houses (2/3/4 stories), 1 warehouse, 1 barracks | 170 (170): 81 / 61 / 22 tube houses, 3 two-story, 2 barracks, 1 warehouse |
+| Candidates | 427 OSM footprints + 7,325 frontage slots | 318 OSM footprints + 8,589 frontage slots |
+| POIs | 10 (4 settlements + 6 landmarks), 20 spawns | 10 (4 + 6), 20 spawns |
+| Roads | 316, 31.0 km paved | 389, 35.8 km paved |
+| Water | Rạch Văn Thánh, Rạch Cầu Bông, Rạch Bà Láng, Hồ Văn Thánh: 2.7 ha, 2.5 km fence | Kênh Thị Nghè corner: 0.4 ha, 197 m fence |
+| Validation / reachability | 0 issues; 10/10, 20/20, 195/195, loot 100 % | 0 issues; 10/10, 20/20, 180/180, loot 100 % |
+| Loot, 10 players (3 seeds) | 312 piles, 613 items | 308 piles, 586 items |
+| Bot match (seed 1, duo, real brains) | last team, 8.1 min, 9 kills / 6 knocks / 1 revive, 14 stuck incidents (longest 10 s), tick p50/p99 0.42/1.34 ms | last team, 10.8 min, 8 / 6 / 1, 5 stuck (10 s), 0.39/1.26 ms |
+
+POI names:
+- **Hàng Xanh:** Ngã Tư Hàng Xanh, Chùa Phước Viên, Khu phố 43, Ngã Tư Hàng Xanh (Đông), Rạch Văn Thánh, Bãi đất trống, Khu phố 34, Bãi đất trống (Bắc), Khu phố 40, Khu phố 10.
+- **Phan Đăng Lưu:** Phan Đăng Lưu, Trung Tâm Ngoại Ngữ Dương Minh, Cầu Kiệu, Phan Đăng Lưu (Bắc), Khu phố 24, Đình, Chùa Hải Đức, Đức Nhuận, Bãi đất trống, Khu phố 18.
+
+**Budget per cap** (Hàng Xanh, measured in Node; Map v1 is 85 buildings, 178k tris, 6,509 compound children):
+
+| Cap | Tris, all buildings | Tris within 200 m of center | Compound children | Nav build | Loot piles / items |
+|---|---|---|---|---|---|
+| 150 | 0.88 M | 0.78 M | 30.5k | 640 ms | 245 / 468 |
+| 190 (chosen) | 1.11 M | 0.85 M | 38.4k | 646 ms | 312 / 613 |
+| 250 | 1.46 M | 0.91 M | 50.6k | 656 ms | 402 / 775 |
+| 300 | 1.75 M | 0.91 M | 60.6k | 518 ms | 476 / 915 |
+
+- **The binding limit is loot:** the equipment test caps are under 320 piles and under 700 items. Phan Đăng Lưu reaches it at 170.
+- **Main thread:**
+  - geometry and AO bake about 580–700 ms once for the 5–6 prefab types used (the tube houses are about 380 ms of it);
+  - Havok building bodies about 35 ms;
+  - terrain bake 2.47 / 2.50 MB.
+- Thin instances are culled per prefab per 250 m cell, so a street view at the center draws most of the 0.85 M triangles, before shadows. That needs a `?bench=` run in a real browser.
+
 ## Runtime
 
 - `apps/client/src/world/mapRuntime/maps.ts`:
@@ -137,11 +190,15 @@ POI names:
   - Prefab repetition means a place reads like the real one from above (street plan, fields, woods, river), not up close. Shirakawa-gō's gasshō farmhouses become barns and two-story houses.
   - No water surface: fenced water is grass for now.
   - Palms are broadleaf trees.
-- **Buildings:** capped at 90. Dense places (Cẩm Thanh has 392 candidates) keep their core and a share of each hamlet. Real houses 3–6 m from the street centerline get pushed back, so streets feel wider.
+- **Buildings:** capped at 90 (city maps set their own cap). Dense places (Cẩm Thanh has 392 candidates) keep their core and a share of each hamlet. Real houses 3–6 m from the street centerline get pushed back, so streets feel wider.
 - **POI spacing:** real maps validate with 200 m / 130 m (Map v1 uses 250 m / 150 m).
 - **Spawn groups:** 10–11 per map with 2 spawns each, so a 20-team solo match needs the spawn planner to share POIs.
 - **Terrain:** heights are real only to ±1–2 m (SRTM at 20 m, blurred). Village pads flatten local slopes.
 - **ODbL share-alike:** the generated modules and bakes are a derivative database. That is fine for the internal release; a public release must offer them under the ODbL.
+- **City maps:**
+  - Frontage rows are generated, not surveyed: the street plan is real, the individual houses are not.
+  - The houses cluster within about 350 m of the center, so the outer landmark POIs are open ground.
+  - Village scatter (groves, meadow bushes) still fills the blocks between streets.
 - **OSM coverage** varies a lot. The Vietnam survey is in the investigation: most places are all-or-nothing.
 
 ## Licenses and credits
