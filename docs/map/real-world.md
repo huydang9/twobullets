@@ -10,7 +10,7 @@ Design and candidate places: [`docs/research/real-world-map-investigation.md`](.
 | Hội An – Cẩm Thanh, VN | ![Cẩm Thanh](vn-camthanh.svg) |
 | Shirakawa-gō, JP | ![Shirakawa-gō](jp-shirakawago.svg) |
 | Ngã Tư Hàng Xanh, VN (city) | ![Ngã Tư Hàng Xanh](vn-hangxanh.svg) |
-| Phan Đăng Lưu, VN (city) | ![Phan Đăng Lưu](vn-phandangluu.svg) |
+| Phú Nhuận, VN (city) | ![Phú Nhuận](vn-phandangluu.svg) |
 
 ## Try it
 
@@ -163,9 +163,14 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
   - fewer garden trees and meadow bushes.
 - **POI names:** markets, schools, churches, pagodas, apartment blocks and hospitals name POIs. Numbered quarters ("Khu phố 12") come after them.
 
-| | Ngã Tư Hàng Xanh (`vn-hangxanh`) | Phan Đăng Lưu (`vn-phandangluu`) |
+## Names
+
+- **No political names** on any map: `convert/names.ts` (`isPoliticalName`) matches political figures and revolutionaries, political events and dates (30/4, Cách Mạng Tháng Tám), party and state organs (Ủy ban nhân dân, Công an, Quân khu), memorials, and the city name "Hồ Chí Minh" / "TP.HCM", ignoring case and diacritics, whole words only. Such OSM names never name a POI or a road label; the POI takes the next named thing nearby or a generic word. A place's `name` or `localName` that matches stops the converter (and `generate.ts --name`). Historical kings, generals and scholars are not listed. Player-visible text says "Sài Gòn" for the city.
+- **Road labels** (`convert/roadLabels.ts`, `MapData.roadLabels`): named trunk, primary and secondary roads of 100 m or more inside the map, tertiary from 200 m, any other named road from 300 m. Same-name ways join into chains, clipped and simplified to 2 m. Alleys ("Hẻm …") and names with a house number are skipped; political names get no label. The map screen (M) draws them along the road, upright, at the straightest stretches, once per 400 m, clear of POI names; below 2× zoom only trunk, primary and secondary names show. The minimap has none.
+
+| | Ngã Tư Hàng Xanh (`vn-hangxanh`) | Phú Nhuận (`vn-phandangluu`; the id keeps the street name it was first generated under) |
 |---|---|---|
-| Center | junction node 2899907852 "Ngã tư Hàng Xanh" (10.80144, 106.71132) | Phan Đăng Lưu inside Phường Đức Nhuận, checked with Overpass `is_in` (10.80134, 106.68246) |
+| Center | junction node 2899907852 "Ngã tư Hàng Xanh" (10.80144, 106.71132) | the one-way primary road inside Phường Đức Nhuận, checked with Overpass `is_in` (10.80134, 106.68246) |
 | Snapshot | 2026-09-15T05:23Z | 2026-09-15T05:34Z |
 | Buildings (cap) | 190 (190) + 2 bridges, 24 types | 190 (190), 23 types |
 | Row houses | 113: 23 mezzanine, 20 narrow, 17 ×3, 15 planters, 15 wide, 10 ×4, 8 ×2, 5 shed | 118: 26 narrow, 18 planters, 17 ×3, 13 ×2, 12 mezzanine, 12 wide, 12 shed, 8 ×4 |
@@ -182,18 +187,22 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
 | Bot match (seed 1, duo, real brains) | last team, 8.7 min, 8 kills / 5 knocks / 1 revive, 11 stuck incidents (longest 10 s), tick p50/p99 0.39/1.55 ms | last team, 8.9 min, 8 / 7 / 3, 10 stuck (20 s), 0.40/1.46 ms |
 
 POI names:
-- **Hàng Xanh:** Ngã Tư Hàng Xanh, its Bắc / Đông / Tây / Nam parts, Khu phố 62, 43, 34, 60, Trường Đại học Công nghệ TP.HCM, Chung cư Mỹ Đức, Khu du lịch Văn Thánh.
-- **Phan Đăng Lưu:** Cầu Kiệu, Phan Đăng Lưu, Thánh đường Cơ Đốc Phục lâm Phú Nhuận, Ủy ban nhân dân phường Cầu Kiệu, Chung Cư Satra Eximland, Đình, Cao Ốc Tuổi Trẻ, Đức Nhuận, Trường Cao đẳng Kinh tế Đối ngoại, Thánh thất Phú Nhuận, Anh Văn Hội Việt Mỹ VUS, Tổ Đình Kim Sơn, and quarter parts.
+- **Hàng Xanh:** Ngã Tư Hàng Xanh, its Bắc / Đông / Tây / Nam parts, Khu phố 62, 43, 34, 60, Chung Cư Saigonland, Chung cư Mỹ Đức, Khu du lịch Văn Thánh.
+- **Phú Nhuận:** Cầu Kiệu, Phú Nhuận and its Tây / Bắc parts, Thánh đường Cơ Đốc Phục lâm Phú Nhuận, Khu phố 17, Chung Cư Satra Eximland, Đình, Cao Ốc Tuổi Trẻ, Đức Nhuận, Trường Cao đẳng Kinh tế Đối ngoại, Thánh thất Phú Nhuận, Anh Văn Hội Việt Mỹ VUS, Tổ Đình Kim Sơn, and quarter parts.
+
+Road names on the map screen (see "Names" below):
+- **Hàng Xanh:** Bạch Đằng, Cầu vượt Hàng Xanh, Đinh Bộ Lĩnh, Ngã tư Hàng Xanh, Nguyễn Gia Trí, Đường nội bộ Khu du lịch Văn Thánh. Two big roads get no label (political names).
+- **Phú Nhuận:** Phan Đình Phùng, Phan Xích Long, Thích Quảng Đức, Trường Sa, Đường Nguyễn Đình Chiểu, Trần Khắc Chân, Lê Tự Tài, Cầm Bá Thước. Five long roads get no label (political names).
 
 **Budget** (cap 190, measured in Node; Map v1 is 85 buildings, 178k tris, 6,509 compound children):
 
 | Map | Tris, all buildings | Tris within 200 m of center | Compound children | Geometry + AO bake (types used) | Nav build |
 |---|---|---|---|---|---|
 | Hàng Xanh | 1.06 M | 0.67 M | 36.1k | 2.7 s (24 types) | 636 ms |
-| Phan Đăng Lưu | 1.04 M | 0.64 M | 35.3k | 2.8 s (23 types) | 637 ms |
+| Phú Nhuận | 1.04 M | 0.64 M | 35.3k | 2.8 s (23 types) | 637 ms |
 
 - **Triangles** stay under 1.2 M, so no far LOD was needed. The tallest prefabs are cheap per height because their upper floors are closed bodies.
-- **Loot** is well under the equipment caps (320 piles, 700 items). Phan Đăng Lưu's cap went up from 170 to 190.
+- **Loot** is well under the equipment caps (320 piles, 700 items). Phú Nhuận's cap went up from 170 to 190.
 - **Main thread:** the per-prefab geometry and AO bake is now about 2.7 s for 23–24 prefab types (0.6–0.7 s before). This is the main load-time cost, a candidate for a worker or a precomputed bake. Havok building bodies take about 35 ms.
 - **Stuck incidents** in the bot matches are all inside buildings: tube-house upper floors round the stair core and partition door (the original `tube_house_3/4` too), plus door pinches. None are in alleys.
 - **Browser checks:** a `?bench=` run in a real browser is still needed.
@@ -254,9 +263,9 @@ POI names:
 | Hàng Xanh | Chung cư Mỹ Đức | (276, −287) and (224, −355) | Two high-rises on their real footprints, podium stair up to the terrace |
 | Hàng Xanh | Chùa Phước Viên / market | (69, −59) / (−44, −62) | Pagoda gate, courtyard and roof; open market hall next to the junction |
 | Hàng Xanh | Nhà Thờ Hàng Xanh | (−292, 226) | Church nave, bell tower and spire |
-| Phan Đăng Lưu | Center high-rise | (6, −65) | 16-floor tower right off the main street, shop podium, facade bands |
-| Phan Đăng Lưu | North landmarks | (−269, 365), (−218, 378), (−128, 324) | Market hall, office tower, high-rise |
-| Phan Đăng Lưu | Churches / petrol station | (272, 201), (−300, −202) / (−282, −265) | Pink church with bell tower; canopy and pump islands |
+| Phú Nhuận | Center high-rise | (6, −65) | 16-floor tower right off the main street, shop podium, facade bands |
+| Phú Nhuận | North landmarks | (−269, 365), (−218, 378), (−128, 324) | Market hall, office tower, high-rise |
+| Phú Nhuận | Churches / petrol station | (272, 201), (−300, −202) / (−282, −265) | Pink church with bell tower; canopy and pump islands |
 | Any | Out of bounds | walk past x = 500 | Warning and respawn, as on Map v1; bank fences run on into the border |
 
 Not verified in a browser yet:

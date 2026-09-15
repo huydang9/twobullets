@@ -49,7 +49,7 @@ export const PLACES: readonly PlaceConfig[] = [
     genericNames: ["集落", "農家", "森"],
   },
   {
-    // Ngã Tư Hàng Xanh, Bình Thạnh (HCMC): the roundabout where Xô Viết Nghệ Tĩnh, Điện Biên Phủ and Bạch Đằng meet.
+    // Ngã Tư Hàng Xanh, Bình Thạnh (Saigon): the roundabout where three main roads meet.
     // Center is the OSM junction node 2899907852. Dense city blocks, thinned to the cap; flat river lowland.
     id: "vn-hangxanh",
     name: "Ngã Tư Hàng Xanh",
@@ -66,17 +66,19 @@ export const PLACES: readonly PlaceConfig[] = [
     urban: { openCenter: 40 },
   },
   {
-    // Phan Đăng Lưu street in Phường Đức Nhuận (Phú Nhuận, HCMC): the stretch of the one-way primary road inside the
-    // ward, toward the Phú Nhuận intersection. Center checked with Overpass is_in against the ward boundary.
+    // Phú Nhuận (Saigon), Phường Đức Nhuận: the one-way primary road inside the ward, toward the Phú Nhuận intersection.
+    // Center checked with Overpass is_in against the ward boundary. The id keeps the street name the map was first
+    // generated under: saved preferences, lobby settings and the terrain seed (seedFromId) all use it. Player-visible
+    // names must stay neutral (convert/names.ts), so the display name is the district.
     id: "vn-phandangluu",
-    name: "Phan Đăng Lưu",
+    name: "Phú Nhuận",
     country: "Vietnam",
     countryCode: "vn",
     lat: 10.80134,
     lon: 106.68246,
     elevation: { mode: "flat", scale: 1, maxRelief: 4 },
     climate: "tropical",
-    localName: "Phan Đăng Lưu",
+    localName: "Phú Nhuận",
     directionWords: ["Bắc", "Nam", "Đông", "Tây"],
     genericNames: ["Khu phố", "Bãi đất trống", "Công viên"],
     buildingCap: 190,

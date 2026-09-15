@@ -9,16 +9,18 @@ import { seedFromId, type ScatterRule } from "../../layout/scatter";
 import { validateMapLayout, type MapIssue, type ValidationOptions } from "../../layout/validate";
 import { buildTerrain, type Terrain } from "../../terrain/terrain";
 import { distanceToRect } from "../../layout/geometry";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, PropPlacement, TerrainSpec } from "../../types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, PropPlacement, RoadLabel, TerrainSpec } from "../../types";
 import { findBridges, type BridgeSite } from "./bridges";
 import { buildingCandidates, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, type PlacedBuilding, type PlacementReport } from "./buildings";
 import { realTerrainSpec, type ElevationReport } from "./elevation";
 import { convertLanduse, insideAny, trimRoadsAtWater, waterEdges, waterPolygons, type LanduseReport } from "./landuse";
 import { buildingPads } from "./pads";
+import { isPoliticalName } from "./names";
 import { parseOsm } from "./parse";
 import { convertPois, REAL_POI_SPACING, type PoiReport } from "./pois";
 import { createProjection } from "./projection";
 import { convertCreeks, convertRoads, type RoadReport } from "./roads";
+import { convertRoadLabels, type RoadLabelReport } from "./roadLabels";
 import { pickSpawns, spawnKey } from "./spawns";
 import { frontageCandidates, rankFootprints, urbanDefaults } from "./urban";
 import type { ElevationSamples, OsmDocument, PlaceConfig, Polygon } from "./types";
@@ -52,6 +54,7 @@ export interface ConvertReport {
   readonly osmTimestamp: string | null;
   readonly elevation: ElevationReport;
   readonly roads: RoadReport;
+  readonly roadLabels: RoadLabelReport;
   readonly placement: PlacementReport;
   /** Buildings removed by the terrain validation and reachability passes. */
   readonly droppedByValidation: number;
@@ -84,6 +87,8 @@ export interface ConvertResult {
     readonly fences: readonly FenceLine[];
     readonly scatters: readonly ScatterRule[];
     readonly spawns: readonly MapSpawn[];
+    /** Map-screen road names (may be empty). */
+    readonly roadLabels: readonly RoadLabel[];
   };
   readonly water: readonly Polygon[];
   readonly openings: readonly LineOpening[];
@@ -110,6 +115,9 @@ export function realValidationOptions(openings: readonly LineOpening[], urban = 
 export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}): ConvertResult {
   const { config } = input;
   const log = options.log ?? (() => {});
+  for (const name of [config.name, config.localName]) {
+    if (name && isPoliticalName(name)) throw new Error(`${config.id}: "${name}" is a political name; pick a neutral map name (see convert/names.ts)`);
+  }
   const projection = createProjection(config.lat, config.lon);
   const parsed = parseOsm(input.osm, projection, 640);
   const { spec, report: elevation } = realTerrainSpec(config.seed ?? seedFromId(config.id), input.elevation, config.elevation);
@@ -119,6 +127,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   const roadReport = converted.report;
   const water = waterPolygons(parsed.areas);
   const roads = trimRoadsAtWater(converted.roads, water);
+  const roadLabels = convertRoadLabels(parsed.lines, urban !== undefined);
   const creeks = convertCreeks(parsed.lines, (x, z) => insideAny(water, x, z));
   const bridges: readonly BridgeSite[] = urban ? findBridges(roads, water, parsed.lines) : [];
   const edges = urban ? waterEdges(water, roads, (x, z) => bridges.some((b) => distanceToRect(b.bounds, x, z) === 0)) : waterEdges(water, roads);
@@ -164,6 +173,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
       props,
       scatters,
       spawns,
+      ...(roadLabels.labels.length > 0 ? { roadLabels: roadLabels.labels } : {}),
     };
     const layout = buildMapLayout(map, terrain);
     const validation = realValidationOptions(openings, urban !== undefined);
@@ -181,7 +191,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     for (const b of buildings) byPrefab[b.prefab] = (byPrefab[b.prefab] ?? 0) + 1;
     result = {
       map,
-      parts: { terrain: spec, pads, creeks, roads, pois: poiResult.pois, buildings, props, fences, scatters, spawns },
+      parts: { terrain: spec, pads, creeks, roads, pois: poiResult.pois, buildings, props, fences, scatters, spawns, roadLabels: roadLabels.labels },
       water,
       openings,
       validation,
@@ -192,6 +202,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
         osmTimestamp: parsed.timestamp,
         elevation,
         roads: roadReport,
+        roadLabels: roadLabels.report,
         placement: placed.report,
         droppedByValidation: excluded.size,
         buildings: buildings.length,

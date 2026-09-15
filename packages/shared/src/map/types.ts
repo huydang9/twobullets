@@ -203,6 +203,20 @@ export interface PointOfInterest {
   readonly lootTier: 0 | 1 | 2;
 }
 
+/**
+ * A named road for map labels (real-world maps): same-name OSM ways merged and clipped to the playable square. Labels
+ * only; the road surfaces themselves are `flatten` polylines.
+ */
+export interface RoadLabel {
+  readonly name: string;
+  /** 0 trunk or primary, 1 secondary, 2 tertiary, 3 any other named road: label priority. */
+  readonly rank: 0 | 1 | 2 | 3;
+  /** Total centerline length inside the map, m. */
+  readonly length: number;
+  /** Centerlines (continuous chains), m. */
+  readonly lines: readonly (readonly Vec2Tuple[])[];
+}
+
 /** Gameplay limits. The playable square itself is `terrain.playableHalfExtent`, so terrain and bounds can't disagree. */
 export interface MapBounds {
   /** Players outside the playable square get this long before being pushed back or killed, s. */
@@ -232,4 +246,6 @@ export interface MapData {
   readonly props: readonly PropPlacement[];
   readonly scatters: readonly PropScatter[];
   readonly spawns: readonly MapSpawn[];
+  /** Road names the map screen draws along big roads (real-world maps; absent when none qualify). */
+  readonly roadLabels?: readonly RoadLabel[];
 }

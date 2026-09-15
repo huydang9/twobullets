@@ -113,7 +113,7 @@ export const INFO: RealMapInfo = ${literal(infoFor(result, config))};
   const module = `${header}import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
 import type { ScatterRule } from "../layout/scatter";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, TerrainSpec, Vec2Tuple } from "../types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, ${parts.roadLabels.length > 0 ? "RoadLabel, " : ""}TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./${config.id}.info";
 import type { RealMapModule } from "./types";
@@ -135,7 +135,7 @@ ${list("WATER", "readonly (readonly Vec2Tuple[])[]", result.water, true)}
 /** Water-edge fences (gaps where roads cross) and railings where roads cross water. */
 ${list("FENCES", "readonly FenceLine[]", parts.fences)}
 ${scatterSource(parts.scatters)}
-${list("SPAWNS", "readonly MapSpawn[]", parts.spawns)}
+${list("SPAWNS", "readonly MapSpawn[]", parts.spawns)}${parts.roadLabels.length > 0 ? `\n/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */\n${list("ROAD_LABELS", "readonly RoadLabel[]", parts.roadLabels)}` : ""}
 export const OPENINGS = fenceOpenings(FENCES);
 
 export const MAP: MapData = {
@@ -148,7 +148,7 @@ export const MAP: MapData = {
   buildings: BUILDINGS,
   props: fenceProps(FENCES),
   scatters: SCATTERS,
-  spawns: SPAWNS,
+  spawns: SPAWNS,${parts.roadLabels.length > 0 ? "\n  roadLabels: ROAD_LABELS," : ""}
 };
 
 const MODULE: RealMapModule = {

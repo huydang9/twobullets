@@ -5,6 +5,7 @@ import { el, elT, textNode } from "../dom";
 import { formatClock } from "../match/MatchHud";
 import { MapProjection, drawMapImage, drawRunLine, drawTeammates, drawViewer, drawZone, fitCanvas, markerFont } from "./mapDraw";
 import type { MapImage } from "./mapImage";
+import { placeRoadLabels, type LabelBox } from "./roadLabels";
 import type { MapInput, MapTeammate, MapViewer, MapZoneInfo } from "./types";
 
 /** N cycles through these; the wheel zooms continuously between the first and MAX_ZOOM. */
@@ -16,6 +17,8 @@ const GRID_CELL = 100;
 const SCALE_LENGTHS = [10, 25, 50, 100, 200, 250, 500] as const;
 const COLUMN_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MAP_KEYS: readonly string[] = KEY_BINDINGS.map;
+/** Below this zoom only trunk, primary and secondary road names show, so the whole-map view stays readable. */
+const ALL_ROAD_NAMES_ZOOM = 2;
 const ZOOM_KEYS: readonly string[] = KEY_BINDINGS.mapZoom;
 
 /** The frame's data for one overlay pass, read once by MapHud and shared with the minimap. */
@@ -27,7 +30,7 @@ export interface MapFrameData {
 }
 
 /**
- * Full-screen PUBG-style map (M): the cached map image with grid, POI names and scale bar on the base layer, redrawn only
+ * Full-screen PUBG-style map (M): the cached map image with grid, road names, POI names and scale bar on the base layer, redrawn only
  * when the view changes; zone, run line and markers on the overlay layer at the MapHud rate. N cycles 1×/2×/4× centred
  * on the player, the wheel zooms at the cursor and drag pans. Releases pointer lock while open, like the inventory.
  */
@@ -56,6 +59,7 @@ export class MapScreen {
   private dragX = 0;
   private dragY = 0;
   private shown = { label: "?", seconds: -2, progress: -2, zoom: -1 };
+  private readonly nameWidths = new Map<string, Map<string, number>>();
 
   constructor(
     parent: HTMLElement,
@@ -218,11 +222,19 @@ export class MapScreen {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
     ctx.stroke();
 
-    // POI names.
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
     const poiSize = Math.min(20, 13 + this.zoom * 1.2);
+    ctx.font = markerFont(poiSize, 700);
+    const poiBoxes: LabelBox[] = [];
+    for (const poi of this.map.pois) {
+      const name = poi.name.toUpperCase();
+      poiBoxes.push({ x: proj.sx(poi.center[0]), y: proj.sy(poi.center[1]), halfW: ctx.measureText(name).width / 2 + 3, halfH: poiSize * 0.6, angle: 0 });
+    }
+    this.drawRoadNames(poiBoxes, dpr);
+
+    // POI names.
     ctx.font = markerFont(poiSize, 700);
     for (const poi of this.map.pois) {
       const x = proj.sx(poi.center[0]);
@@ -275,6 +287,51 @@ export class MapScreen {
     ctx.font = markerFont(12, 600);
     ctx.lineWidth = 3;
     outlinedText(ctx, `${length} m`, barX + barW + 6, barY + 1);
+  }
+
+  /** Road names along big roads (real-world maps), clear of POI names, grid labels and the scale bar. */
+  private drawRoadNames(obstacles: LabelBox[], dpr: number): void {
+    const labels = this.map.roadLabels;
+    if (!labels || labels.length === 0) return;
+    const ctx = this.baseCtx;
+    const size = this.proj.size;
+    const fontPx = Math.min(15, 10.5 + this.zoom * 0.8);
+    const font = markerFont(fontPx, 600);
+    ctx.font = font;
+    const widths = this.roadNameWidths(font);
+    obstacles.push(
+      { x: size / 2, y: 11, halfW: size / 2, halfH: 11, angle: 0 },
+      { x: 11, y: size / 2, halfW: 11, halfH: size / 2, angle: 0 },
+      { x: 90, y: size - 18, halfW: 90, halfH: 14, angle: 0 },
+    );
+    const placed = placeRoadLabels(labels, this.proj, {
+      fontPx,
+      obstacles,
+      maxRank: this.zoom < ALL_ROAD_NAMES_ZOOM ? 1 : 3,
+      measure: (text) => {
+        let width = widths.get(text);
+        if (width === undefined) widths.set(text, (width = ctx.measureText(text).width));
+        return width;
+      },
+    });
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(10, 12, 14, 0.72)";
+    ctx.fillStyle = "rgba(238, 234, 220, 0.94)";
+    for (const label of placed) {
+      const cos = Math.cos(label.angle) * dpr;
+      const sin = Math.sin(label.angle) * dpr;
+      ctx.setTransform(cos, sin, -sin, cos, label.x * dpr, label.y * dpr);
+      ctx.strokeText(label.name, 0, 0);
+      ctx.fillText(label.name, 0, 0);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /** Measured road name widths per font, so pans and zooms don't re-measure. */
+  private roadNameWidths(font: string): Map<string, number> {
+    let widths = this.nameWidths.get(font);
+    if (!widths) this.nameWidths.set(font, (widths = new Map()));
+    return widths;
   }
 
   private drawOverlay(data: MapFrameData, now: number): void {

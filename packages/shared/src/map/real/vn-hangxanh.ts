@@ -5,7 +5,7 @@
 import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
 import type { ScatterRule } from "../layout/scatter";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, TerrainSpec, Vec2Tuple } from "../types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, RoadLabel, TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./vn-hangxanh.info";
 import type { RealMapModule } from "./types";
@@ -539,7 +539,7 @@ const POIS: readonly PointOfInterest[] = [
   { id: "poi_04", name: "Khu phố 43", kind: "village", center: [-178.171, 103.108], radius: 40, lootTier: 1 },
   { id: "poi_05", name: "Ngã Tư Hàng Xanh (Đông)", kind: "village", center: [254.715, 41.395], radius: 40, lootTier: 1 },
   { id: "poi_06", name: "Khu phố (Đông)", kind: "village", center: [383.649, -103.829], radius: 36, lootTier: 0 },
-  { id: "poi_07", name: "Trường Đại học Công nghệ Thành phố Hồ Chí Minh", kind: "village", center: [391.076, 115.901], radius: 51, lootTier: 0 },
+  { id: "poi_07", name: "Chung Cư Saigonland", kind: "village", center: [391.076, 115.901], radius: 51, lootTier: 0 },
   { id: "poi_08", name: "Khu phố 34", kind: "village", center: [-227.808, 330.076], radius: 25, lootTier: 0 },
   { id: "poi_09", name: "Khu phố (Bắc)", kind: "village", center: [207.824, 354.302], radius: 25, lootTier: 0 },
   { id: "poi_10", name: "Khu phố 60", kind: "village", center: [-424.826, -360.449], radius: 25, lootTier: 0 },
@@ -1117,6 +1117,16 @@ const SPAWNS: readonly MapSpawn[] = [
   { position: [369.622, -375.272], yaw: 1.405 },
 ];
 
+/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */
+const ROAD_LABELS: readonly RoadLabel[] = [
+  { name: "Bạch Đằng", rank: 0, length: 1001, lines: [[[-492, 187.4], [-14.9, 148.8], [2.9, 153.7], [-14.2, 160.1], [-45.2, 162.9], [-492, 197.4]], [[2.9, 153.7], [9.1, 153.2]]] },
+  { name: "Cầu vượt Hàng Xanh", rank: 0, length: 922, lines: [[[241.5, -4.6], [223.7, -6.1], [135.5, 3.4], [3.9, 3.9], [-45, -1.8], [-157.2, -22.2], [-228.9, -40.6]], [[-211, -48.1], [-197.3, -40.4], [-151.5, -30.1], [-80.5, -15.8], [9.6, -2.7], [167.7, -6.1], [229.1, -18.7]]] },
+  { name: "Đinh Bộ Lĩnh", rank: 0, length: 509, lines: [[[-200.2, 492], [-199.7, 395.6], [-222.7, -16]]] },
+  { name: "Ngã tư Hàng Xanh", rank: 0, length: 182, lines: [[[-21.2, -17.8], [-2.2, -28.3], [6, -28.2], [20.6, -21.5], [29.8, -7.4], [30.9, 1.3], [25.3, 17.9], [17.7, 25.1], [4.8, 29.7], [-3.8, 29.4], [-17.4, 23], [-25, 13.8], [-27.8, -0.1], [-21.2, -17.8]]] },
+  { name: "Nguyễn Gia Trí", rank: 2, length: 248, lines: [[[492, 197.3], [485.8, 156.9], [473.5, 110], [419.6, -39.3]]] },
+  { name: "Đường nội bộ Khu du lịch Văn Thánh", rank: 3, length: 683, lines: [[[406.9, -492], [360.5, -433.9], [445.6, -402.9], [492, -369.3]], [[360.5, -433.9], [339.6, -426.9], [312.4, -402.6]], [[458.8, -340.8], [482.5, -320.2], [492, -316.9]], [[492, -352.3], [424.2, -327.6], [333.2, -379.3], [289.7, -429.1], [251, -489.3]], [[271.5, -454.9], [300.1, -482.6], [306.1, -484.2]]] },
+];
+
 export const OPENINGS = fenceOpenings(FENCES);
 
 export const MAP: MapData = {
@@ -1130,6 +1140,7 @@ export const MAP: MapData = {
   props: fenceProps(FENCES),
   scatters: SCATTERS,
   spawns: SPAWNS,
+  roadLabels: ROAD_LABELS,
 };
 
 const MODULE: RealMapModule = {

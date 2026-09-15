@@ -16,6 +16,7 @@ import { BAKE as VN_PHANDANGLUU_BAKE } from "./vn-phandangluu.bake";
 import { COLLIDER_STRIDE, propColliderGroups } from "../layout/collision";
 import { getPrefabCollision } from "../buildings/placement";
 import { getBuildingPrefab, isBuildingPrefabId } from "../buildings/prefabs";
+import { isPoliticalName } from "./convert/names";
 
 /** Recorded by tools/map/build.ts --map <id>; regenerate the map (tools/map/osm/generate.ts) after converter changes. */
 const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: string; layoutChecksum: string }>> = {
@@ -54,6 +55,15 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     expect(terrainInputsHash(module.map.terrain, module.map.flatten)).toBe(bake.inputsHash);
     expect(terrain.checksum()).toBe(bake.terrainChecksum);
     expect(layout.checksum).toBe(bake.layoutChecksum);
+  });
+
+  it("shows no political names (map, POIs, road labels)", () => {
+    const names = [entry.info.name, module.map.name, ...module.map.pois.map((p) => p.name), ...(module.map.roadLabels ?? []).map((r) => r.name)];
+    expect(names.filter(isPoliticalName)).toEqual([]);
+    for (const label of module.map.roadLabels ?? []) {
+      expect(label.lines.length).toBeGreaterThan(0);
+      for (const line of label.lines) for (const [x, z] of line) expect(Math.max(Math.abs(x), Math.abs(z))).toBeLessThanOrEqual(module.map.terrain.playableHalfExtent);
+    }
   });
 
   it("validates with no issues", () => {

@@ -5,7 +5,7 @@
 import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
 import type { ScatterRule } from "../layout/scatter";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, TerrainSpec, Vec2Tuple } from "../types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, RoadLabel, TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./vn-phandangluu.info";
 import type { RealMapModule } from "./types";
@@ -608,13 +608,13 @@ export const ROADS: readonly RoadSpec[] = [
 
 const POIS: readonly PointOfInterest[] = [
   { id: "poi_01", name: "Cầu Kiệu", kind: "town", center: [131.718, 54.208], radius: 100, lootTier: 2 },
-  { id: "poi_02", name: "Phan Đăng Lưu", kind: "town", center: [-147.999, -105.54], radius: 69, lootTier: 2 },
+  { id: "poi_02", name: "Phú Nhuận", kind: "town", center: [-147.999, -105.54], radius: 69, lootTier: 2 },
   { id: "poi_03", name: "Thánh đường Cơ Đốc Phục lâm Phú Nhuận", kind: "town", center: [-265.118, -200.26], radius: 40, lootTier: 2 },
-  { id: "poi_04", name: "Phan Đăng Lưu (Tây)", kind: "village", center: [-170.908, 136.045], radius: 43, lootTier: 0 },
-  { id: "poi_05", name: "Ủy ban nhân dân phường Cầu Kiệu", kind: "village", center: [-75.626, -270.282], radius: 40, lootTier: 0 },
+  { id: "poi_04", name: "Phú Nhuận (Tây)", kind: "village", center: [-170.908, 136.045], radius: 43, lootTier: 0 },
+  { id: "poi_05", name: "Khu phố 17", kind: "village", center: [-75.626, -270.282], radius: 40, lootTier: 0 },
   { id: "poi_06", name: "Chung Cư Satra Eximland", kind: "village", center: [25.148, -161.252], radius: 32, lootTier: 0 },
   { id: "poi_07", name: "Khu phố (Tây)", kind: "village", center: [-335.477, 55.116], radius: 25, lootTier: 0 },
-  { id: "poi_08", name: "Phan Đăng Lưu (Bắc)", kind: "village", center: [17.591, 182.351], radius: 25, lootTier: 0 },
+  { id: "poi_08", name: "Phú Nhuận (Bắc)", kind: "village", center: [17.591, 182.351], radius: 25, lootTier: 0 },
   { id: "poi_09", name: "Đình", kind: "village", center: [262.188, 303.545], radius: 34, lootTier: 0 },
   { id: "poi_10", name: "Cầu Kiệu (Nam)", kind: "village", center: [411.495, -323.308], radius: 31, lootTier: 0 },
   { id: "poi_11", name: "Cao Ốc Tuổi Trẻ", kind: "village", center: [-436.195, -162.56], radius: 25, lootTier: 0 },
@@ -1060,11 +1060,23 @@ const SPAWNS: readonly MapSpawn[] = [
   { position: [290.707, -201.325], yaw: 2.225 },
 ];
 
+/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */
+const ROAD_LABELS: readonly RoadLabel[] = [
+  { name: "Phan Đình Phùng", rank: 0, length: 364, lines: [[[-159, -414.4], [-160.2, -417.1], [-127.1, -492]], [[-122.3, -492], [-238.6, -238.1]]] },
+  { name: "Phan Xích Long", rank: 2, length: 1367, lines: [[[-148, 278.4], [-116.4, 237.5], [-36.6, 147.2], [82.3, 24.5], [83.7, 15.8], [182.1, -77.9], [311.8, -194.6], [357.6, -219.2], [492, -276.4]], [[492, -258.4], [324.5, -189.6], [93.3, 24.5], [82.3, 24.5]]] },
+  { name: "Thích Quảng Đức", rank: 2, length: 412, lines: [[[221.1, 218], [135.5, 318.9], [78.1, 367.6], [-84.5, 492]]] },
+  { name: "Trường Sa", rank: 2, length: 208, lines: [[[251.3, -492], [276.6, -469], [298.8, -456.3], [327.9, -448.4], [353.5, -448.1], [394.1, -459.8], [407.9, -468], [431.8, -492]]] },
+  { name: "Đường Nguyễn Đình Chiểu", rank: 3, length: 407, lines: [[[11.6, 319.9], [-20.5, 316.4], [-148, 278.4], [-181.1, 265.5], [-368, 223.3], [-380.1, 215.5]]] },
+  { name: "Trần Khắc Chân", rank: 3, length: 374, lines: [[[-437.5, -220.8], [-492, -168.2]], [[-431.3, -231.5], [-238.1, -459.3]]] },
+  { name: "Lê Tự Tài", rank: 3, length: 363, lines: [[[-397.1, 375.9], [-263.9, 399.9], [-244.4, 400.1], [-145.3, 428.9], [-138.9, 438.4], [-213.2, 490.3], [-211.5, 492]]] },
+  { name: "Cầm Bá Thước", rank: 3, length: 326, lines: [[[240.7, 60.8], [274.2, 81.1], [327.6, 125.6], [419, 216.7], [471.5, 275.2], [472.5, 284.9]]] },
+];
+
 export const OPENINGS = fenceOpenings(FENCES);
 
 export const MAP: MapData = {
   id: "vn-phandangluu",
-  name: "Phan Đăng Lưu",
+  name: "Phú Nhuận",
   terrain: TERRAIN,
   flatten: [...PADS, ...CREEKS, ...ROADS.map(roadFlatten)],
   bounds: { outOfBoundsGraceSeconds: 10, killY: -40, landingAltitude: 300 },
@@ -1073,6 +1085,7 @@ export const MAP: MapData = {
   props: fenceProps(FENCES),
   scatters: SCATTERS,
   spawns: SPAWNS,
+  roadLabels: ROAD_LABELS,
 };
 
 const MODULE: RealMapModule = {

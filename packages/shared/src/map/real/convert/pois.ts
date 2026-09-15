@@ -2,6 +2,7 @@ import { distance, pointInPolygon, round3 } from "../../layout/geometry";
 import type { PointOfInterest, PoiKind, Vec2Tuple } from "../../types";
 import { clusterPoints, type PlacedBuilding } from "./buildings";
 import { centroid } from "./geometry";
+import { isPoliticalName } from "./names";
 import type { AreaFeature, PlaceConfig, PointFeature, Polygon } from "./types";
 
 /** POI spacing rules for real maps (passed to `validateMapLayout`): villages sit closer than Map v1's authored POIs. */
@@ -86,14 +87,17 @@ interface NameSource {
   readonly rank: number;
 }
 
-/** Named things that can label a POI, best first: settlements, farmsteads and localities, landmarks, named areas, amenities. */
+/**
+ * Named things that can label a POI, best first: settlements, farmsteads and localities, landmarks, named areas, amenities.
+ * Political names (`isPoliticalName`) never label a POI.
+ */
 function nameSources(points: readonly PointFeature[], areas: readonly AreaFeature[], buildingAreas: readonly AreaFeature[], config: PlaceConfig): NameSource[] {
   const out: NameSource[] = [];
   // The place itself, for villages OSM has no place node for.
-  if (config.localName) out.push({ name: config.localName, at: [0, 0], rank: 0.5 });
+  if (config.localName && !isPoliticalName(config.localName)) out.push({ name: config.localName, at: [0, 0], rank: 0.5 });
   for (const p of points) {
     const name = p.tags.name;
-    if (!name) continue;
+    if (!name || isPoliticalName(name)) continue;
     const t = p.tags;
     const rank = t.place && SETTLEMENT_PLACES.has(t.place) ? 0 : t.place && MINOR_PLACES.has(t.place) ? 1 : t.place === "locality" ? 2 : t.amenity === "place_of_worship" || t.historic || (t.tourism && LANDMARK_TOURISM.has(t.tourism)) ? 3 : t.amenity ? 5 : 6;
     if (config.urban) {
@@ -105,7 +109,7 @@ function nameSources(points: readonly PointFeature[], areas: readonly AreaFeatur
   }
   for (const a of [...areas, ...buildingAreas]) {
     const name = a.tags.name;
-    if (!name || a.tags.highway) continue;
+    if (!name || a.tags.highway || isPoliticalName(name)) continue;
     const t = a.tags;
     let rank = t.amenity === "place_of_worship" || t.historic || (t.tourism && LANDMARK_TOURISM.has(t.tourism)) ? 3 : t.landuse || t.natural || t.leisure ? 4 : 5;
     if (config.urban && rank === 5 && ((t.amenity && URBAN_AMENITIES.has(t.amenity)) || (t.building && URBAN_BUILDINGS.has(t.building)))) rank = 4.2;
@@ -184,7 +188,7 @@ export function convertPois(
   for (const p of localities) {
     if (accepted.length >= TARGET_POIS) break;
     const center: Vec2Tuple = [round3(p.at[0]), round3(p.at[1])];
-    if (usable(center) && spacingOk(center, landmarkRadius, accepted)) accepted.push({ center, radius: landmarkRadius, members: [], landmark: landmarkKind(center), name: p.tags.name! });
+    if (usable(center) && spacingOk(center, landmarkRadius, accepted)) accepted.push({ center, radius: landmarkRadius, members: [], landmark: landmarkKind(center), ...(isPoliticalName(p.tags.name!) ? {} : { name: p.tags.name! }) });
   }
   while (accepted.length < TARGET_POIS) {
     let best: Vec2Tuple | null = null;

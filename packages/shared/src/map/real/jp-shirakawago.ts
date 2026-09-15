@@ -5,7 +5,7 @@
 import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
 import type { ScatterRule } from "../layout/scatter";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, TerrainSpec, Vec2Tuple } from "../types";
+import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, RoadLabel, TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./jp-shirakawago.info";
 import type { RealMapModule } from "./types";
@@ -476,6 +476,11 @@ const SPAWNS: readonly MapSpawn[] = [
   { position: [17.751, -118.372], yaw: 1.222 },
 ];
 
+/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */
+const ROAD_LABELS: readonly RoadLabel[] = [
+  { name: "国道156号", rank: 0, length: 337, lines: [[[-294.8, 234.1], [-415.5, 42.6], [-464.2, -23]], [[-44.3, 492], [-70.4, 479.8]]] },
+];
+
 export const OPENINGS = fenceOpenings(FENCES);
 
 export const MAP: MapData = {
@@ -489,6 +494,7 @@ export const MAP: MapData = {
   props: fenceProps(FENCES),
   scatters: SCATTERS,
   spawns: SPAWNS,
+  roadLabels: ROAD_LABELS,
 };
 
 const MODULE: RealMapModule = {

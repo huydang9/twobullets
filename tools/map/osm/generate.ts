@@ -32,6 +32,7 @@ const { sampleElevation } = await import("./dem.ts");
 const { writeRealMapModule, literal } = await import("./emit.ts");
 const { createProjection } = await import("../../../packages/shared/src/map/real/convert/projection.ts");
 const { convertRealMap } = await import("../../../packages/shared/src/map/real/convert/assemble.ts");
+const { isPoliticalName } = await import("../../../packages/shared/src/map/real/convert/names.ts");
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -59,6 +60,10 @@ function customPlace(): PlaceConfig {
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 85 || Math.abs(lon) > 180 || !name) {
     console.error("usage: generate.ts <placeId> | --lat <deg> --lon <deg> --name <display name> [--id <id>] [--country <name> --cc <iso2>] [--flat | --scale <0..1>] [--max-relief <m>] [--tropical]");
     console.error(`known places: ${PLACES.map((p) => p.id).join(", ")}`);
+    process.exit(1);
+  }
+  if (isPoliticalName(name)) {
+    console.error(`[osm] "${name}" is a political name; pick a neutral display name (see packages/shared/src/map/real/convert/names.ts)`);
     process.exit(1);
   }
   const cc = (option("cc") ?? "xx").toLowerCase();
@@ -118,6 +123,7 @@ console.info(
       poiNames: result.map.pois.map((p) => `${p.name} (${p.kind}, tier ${p.lootTier})`),
       spawns: r.spawns,
       roads: r.roads,
+      roadLabels: r.roadLabels,
       elevation: r.elevation,
       landuse: r.landuse,
       waterFenceMeters: r.waterFenceMeters,

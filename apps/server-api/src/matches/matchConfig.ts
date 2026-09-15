@@ -28,7 +28,9 @@ export const MAPS: readonly MapInfo[] = [
   { id: "vn-camthanh", name: { vi: "Hội An – Cẩm Thanh", en: "Hội An – Cẩm Thanh (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
   { id: "jp-shirakawago", name: { vi: "Shirakawa-go (Nhật)", en: "Shirakawa-go (Japan)" }, sizeM: 1000, available: true, kind: "realWorld" },
   { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
-  { id: "vn-phandangluu", name: { vi: "Phan Đăng Lưu", en: "Phan Dang Luu (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  // Shown as Phú Nhuận: the id keeps the street name the map was first generated under, so saved preferences, lobby
+  // settings and the terrain seed stay valid. Player-visible names stay non-political (map/real/convert/names.ts).
+  { id: "vn-phandangluu", name: { vi: "Phú Nhuận", en: "Phu Nhuan (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
 ];
 export const DEFAULT_MAP_ID = "v1";
 
