@@ -65,8 +65,12 @@ async function main() {
   await reportSizes();
 }
 
-async function buildModel(io, pool, model, props, credit) {
-  const dir = path.join(SRC_DIR, "models", model.id);
+/**
+ * Builds one model's props into `<urlDir>/<model>.glb` (relative to OUT_DIR). Other prop sets (tools/environment/vn)
+ * pass their own source and output folders; `model.textures` overrides MODEL_TEXTURES.
+ */
+export async function buildModel(io, pool, model, props, credit, { modelsDir = path.join(SRC_DIR, "models"), urlDir = "props" } = {}) {
+  const dir = path.join(modelsDir, model.id);
   const doc = model.files ? await readExternalModel(io, model) : await io.read(path.join(dir, model.meshes ? `${model.id}.subset.gltf` : `${model.id}.gltf`));
   const root = doc.getRoot();
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
@@ -75,7 +79,7 @@ async function buildModel(io, pool, model, props, credit) {
   else await mergeAlphaMaps(doc, model, dir);
 
   const entries = {};
-  const url = `props/${model.id}.glb`;
+  const url = `${urlDir}/${model.id}.glb`;
   const built = [];
   const foliage = [];
   for (const prop of props) {
@@ -86,7 +90,7 @@ async function buildModel(io, pool, model, props, credit) {
       const levels = buildLevels(parts, prop.lods);
       built.push({ prop, levels });
       // Debug side views of every level for props from external sources (their scale and orientation are hand-set).
-      if (model.files) {
+      if (model.files || model.preview) {
         await mkdir(path.join(CACHE_DIR, "previews"), { recursive: true });
         await writePreview(levels, path.join(CACHE_DIR, "previews", `${prop.id}.png`));
       }
@@ -126,7 +130,7 @@ async function buildModel(io, pool, model, props, credit) {
     // Poly Haven marks everything double-sided; only cutouts need it.
     material.setDoubleSided(material.getAlphaMode() !== "OPAQUE");
   }
-  const limits = { ...DEFAULT_TEXTURES, ...MODEL_TEXTURES[model.id] };
+  const limits = { ...DEFAULT_TEXTURES, ...(model.textures ?? MODEL_TEXTURES[model.id]) };
   const rules = [
     // Per-material limits first (first matching rule wins).
     ...Object.entries(limits.materials ?? {}).flatMap(([name, sizes]) =>
@@ -180,7 +184,7 @@ export function placeParts(parts, { rotate, scale, ground = "min", pivot, trim }
 }
 
 /** Adds or replaces credits.json entries by id; true when something changed. */
-function upsertCredits(credits, entries) {
+export function upsertCredits(credits, entries) {
   let changed = false;
   for (const entry of entries) {
     const index = credits.findIndex((c) => c.id === entry.id);

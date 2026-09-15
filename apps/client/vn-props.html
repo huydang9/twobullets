@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>twobullets · Vietnamese street props preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0e1116;
+      }
+      #game {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+        touch-action: none;
+      }
+      #panel {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        max-width: 560px;
+        padding: 10px 12px;
+        border-radius: 6px;
+        background: rgba(10, 12, 16, 0.72);
+        color: #e8e8e8;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="panel">Loading…</div>
+    <script type="module" src="/src/dev/vnPropsPreview.ts"></script>
+  </body>
+</html>

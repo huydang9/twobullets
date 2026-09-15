@@ -7,16 +7,18 @@ import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { DERIVED_MAPS, HDRI, MODELS, OUT_DIR, POLY_HAVEN_API, SRC_DIR, TEXTURE_MAPS, TEXTURES } from "./config.mjs";
 
-setTimeout(() => {
-  console.error("aborted after 1800 s");
-  process.exit(2);
-}, 1_800_000).unref();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  setTimeout(() => {
+    console.error("aborted after 1800 s");
+    process.exit(2);
+  }, 1_800_000).unref();
+}
 
 const USER_AGENT = "twobullets-environment-pipeline";
 /** Refuse single downloads above this; big multi-tree .bin files are fetched by byte range instead. */
 const MAX_DOWNLOAD_BYTES = 120e6;
 
-async function getJson(url) {
+export async function getJson(url) {
   const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
   if (!res.ok) throw new Error(`GET ${url}: ${res.status}`);
   return res.json();
@@ -30,7 +32,7 @@ async function md5Of(file) {
   }
 }
 
-async function download(url, file, md5, size) {
+export async function download(url, file, md5, size) {
   if ((await md5Of(file)) === md5) {
     console.log(`  cached  ${path.relative(SRC_DIR, file)}`);
     return;
@@ -110,6 +112,9 @@ async function main() {
 
   await mkdir(OUT_DIR, { recursive: true });
   const creditsFile = path.join(OUT_DIR, "credits.json");
+  // Entries owned by other pipelines (e.g. `set: "vn"` from tools/environment/vn) survive a re-fetch.
+  const kept = await readFile(creditsFile, "utf8").then((text) => JSON.parse(text).assets.filter((a) => a.set), () => []);
+  credits.push(...kept.filter((a) => !credits.some((c) => c.id === a.id)));
   const body = {
     source: "Poly Haven (https://polyhaven.com)",
     license: "CC0 1.0 Universal (public domain). Attribution is not required but given here.",
@@ -228,7 +233,7 @@ async function downloadSubset(url, subset, gltfFile, binName) {
   console.log(`  fetched ${path.relative(SRC_DIR, binFile)} (${(out.length / 1e6).toFixed(2)} MB in ${spans.length} ranges)`);
 }
 
-function creditEntry(id, info, type, files) {
+export function creditEntry(id, info, type, files) {
   return {
     id,
     name: info.name,
@@ -240,7 +245,9 @@ function creditEntry(id, info, type, files) {
   };
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -1141,6 +1141,1086 @@
       ],
       "license": "CC-BY-4.0",
       "url": "https://sketchfab.com/3d-models/oak-tree-3dc59560f2d24345bdbe65c44636453b"
+    },
+    {
+      "id": "plastic_monobloc_chair_01",
+      "name": "Plastic Monobloc Chair 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Kuutti Siitonen",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/plastic_monobloc_chair_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/plastic_monobloc_chair_01/plastic_monobloc_chair_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/plastic_monobloc_chair_01/plastic_monobloc_chair_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_monobloc_chair_01/plastic_monobloc_chair_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_monobloc_chair_01/plastic_monobloc_chair_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_monobloc_chair_01/plastic_monobloc_chair_01_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "chinese_stool",
+      "name": "Chinese Stool",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Kirill Sannikov",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/chinese_stool",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_stool/chinese_stool_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_stool/chinese_stool.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_stool/chinese_stool_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "chinese_tea_table",
+      "name": "Chinese Tea Table",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Kirill Sannikov",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/chinese_tea_table",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/chinese_tea_table/chinese_tea_table_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/chinese_tea_table/chinese_tea_table.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/chinese_tea_table/chinese_tea_table_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "metal_stool_02",
+      "name": "Metal Stool 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Ulan Cabanilla",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/metal_stool_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_stool_02/metal_stool_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_stool_02/metal_stool_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_stool_02/metal_stool_02.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "folding_wooden_stool",
+      "name": "Folding Wooden Stool",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Ulan Cabanilla",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/folding_wooden_stool",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/folding_wooden_stool/folding_wooden_stool_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/folding_wooden_stool/folding_wooden_stool_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/folding_wooden_stool/folding_wooden_stool.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/folding_wooden_stool/folding_wooden_stool_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/folding_wooden_stool/folding_wooden_stool_arm_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "wooden_stool_01",
+      "name": "Wooden Stool 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Kuutti Siitonen",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/wooden_stool_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_stool_01/wooden_stool_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_stool_01/wooden_stool_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_stool_01/wooden_stool_01_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wooden_stool_01/wooden_stool_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_stool_01/wooden_stool_01_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "outdoor_table_chair_set_01",
+      "name": "Outdoor Table Chair Set 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/outdoor_table_chair_set_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_table_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_chair_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_table_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_table_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/outdoor_table_chair_set_01/outdoor_table_chair_set_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_chair_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/outdoor_table_chair_set_01/outdoor_table_chair_set_01_chair_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "rollershutter_door",
+      "name": "Rollershutter Door",
+      "type": "model",
+      "authors": [
+        {
+          "name": "MP",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rollershutter_door",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rollershutter_door/rollershutter_door_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/rollershutter_door/rollershutter_door.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_door/rollershutter_door_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_door/rollershutter_door_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_door/rollershutter_door_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_door/rollershutter_door_graffiti_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "rollershutter_window_01",
+      "name": "Rollershutter Window 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "MP",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rollershutter_window_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rollershutter_window_01/rollershutter_window_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_01/rollershutter_window_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/rollershutter_window_01/rollershutter_window_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_01/rollershutter_window_01_graffiti_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_01/rollershutter_window_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_01/rollershutter_window_01_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "rollershutter_window_02",
+      "name": "Rollershutter Window 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "MP",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rollershutter_window_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rollershutter_window_02/rollershutter_window_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_02/rollershutter_window_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_02/rollershutter_window_02_graffiti_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_02/rollershutter_window_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/rollershutter_window_02/rollershutter_window_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_02/rollershutter_window_02_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "rollershutter_window_03",
+      "name": "Rollershutter Window 03",
+      "type": "model",
+      "authors": [
+        {
+          "name": "MP",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/rollershutter_window_03",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rollershutter_window_03/rollershutter_window_03_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_03/rollershutter_window_03_graffiti_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_03/rollershutter_window_03_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_03/rollershutter_window_03_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/rollershutter_window_03/rollershutter_window_03_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/rollershutter_window_03/rollershutter_window_03.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "steel_frame_shelves_01",
+      "name": "Steel Frame Shelves 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/steel_frame_shelves_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/steel_frame_shelves_01/steel_frame_shelves_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/steel_frame_shelves_01/steel_frame_shelves_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/steel_frame_shelves_01/steel_frame_shelves_01.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "large_iron_gate",
+      "name": "Large Iron Gate",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Josh Dean",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/large_iron_gate",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/large_iron_gate/large_iron_gate_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/large_iron_gate/large_iron_gate_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/large_iron_gate/large_iron_gate_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/large_iron_gate/large_iron_gate.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/large_iron_gate/large_iron_gate_arm_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "exterior_aircon_unit",
+      "name": "Exterior Aircon Unit",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Monsta3D",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/exterior_aircon_unit",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/exterior_aircon_unit/exterior_aircon_unit_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_01_opacity_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/exterior_aircon_unit/exterior_aircon_unit.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_02_opacity_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_01_opacity_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/exterior_aircon_unit/exterior_aircon_unit_rusted_02_opacity_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "security_camera_01",
+      "name": "Security Camera 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Alexander Otterbeck",
+          "role": "Modeling & Texturing"
+        },
+        {
+          "name": "Yann Kervran",
+          "role": "Rigging"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/security_camera_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/security_camera_01/security_camera_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/security_camera_01/security_camera_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/security_camera_01/security_camera_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/security_camera_01/security_camera_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/security_camera_01/security_camera_01_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "modular_electricity_poles",
+      "name": "Modular Electricity Poles",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/modular_electricity_poles",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/modular_electricity_poles/modular_electricity_poles_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_pieces_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/modular_electricity_poles/modular_electricity_poles.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_pieces_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_pieces_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/modular_electricity_poles/modular_electricity_poles_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "utility_box_01",
+      "name": "Utility Box 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/utility_box_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/utility_box_01/utility_box_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/utility_box_01/utility_box_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/utility_box_01/utility_box_01.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "street_lamp_01",
+      "name": "Street Lamp 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Josh Dean",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/street_lamp_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/street_lamp_01/street_lamp_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_01/street_lamp_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/street_lamp_01/street_lamp_01.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "street_lamp_02",
+      "name": "Street Lamp 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Josh Dean",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/street_lamp_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/street_lamp_02/street_lamp_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_02/street_lamp_02_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_02/street_lamp_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/street_lamp_02/street_lamp_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/street_lamp_02/street_lamp_02_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "water_manhole_cover",
+      "name": "Water Manhole Cover",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Raunox",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/water_manhole_cover",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/water_manhole_cover/water_manhole_cover_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/water_manhole_cover/water_manhole_cover_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/water_manhole_cover/water_manhole_cover_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/water_manhole_cover/water_manhole_cover_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/water_manhole_cover/water_manhole_cover.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "fire_hydrant",
+      "name": "Fire Hydrant",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Gonçalo Felício",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/fire_hydrant",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fire_hydrant/fire_hydrant_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fire_hydrant/fire_hydrant.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_aged_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fire_hydrant/fire_hydrant_arm_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "concrete_road_barrier",
+      "name": "Concrete Road Barrier",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Amal Kumar",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/concrete_road_barrier",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/concrete_road_barrier/concrete_road_barrier_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/concrete_road_barrier/concrete_road_barrier_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/concrete_road_barrier/concrete_road_barrier.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "small_lpg_tank",
+      "name": "Small Lpg Tank",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Ulan Cabanilla",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/small_lpg_tank",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/small_lpg_tank/small_lpg_tank_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_lpg_tank/small_lpg_tank_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_lpg_tank/small_lpg_tank_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/small_lpg_tank/small_lpg_tank_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/small_lpg_tank/small_lpg_tank.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "propane_tank",
+      "name": "Propane Tank",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Slinc",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/propane_tank",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/propane_tank/propane_tank_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/propane_tank/propane_tank_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/propane_tank/propane_tank_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/propane_tank/propane_tank_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/propane_tank/propane_tank.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "metal_trash_can",
+      "name": "Metal Trash Can",
+      "type": "model",
+      "authors": [
+        {
+          "name": "GurJas Studios",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/metal_trash_can",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/metal_trash_can/metal_trash_can_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/metal_trash_can/metal_trash_can.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/metal_trash_can/metal_trash_can_rust_arm_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "trashbag",
+      "name": "Trashbag",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Benny Weimer",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/trashbag",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/trashbag/trashbag_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/trashbag/trashbag_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/trashbag/trashbag.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "cardboard_box_01",
+      "name": "Cardboard Box 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rahul Chaudhary",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/cardboard_box_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/cardboard_box_01/cardboard_box_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cardboard_box_01/cardboard_box_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/cardboard_box_01/cardboard_box_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cardboard_box_01/cardboard_box_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cardboard_box_01/cardboard_box_01_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "plastic_crate_02",
+      "name": "Plastic Crate 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Fabi_G",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/plastic_crate_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/plastic_crate_02/plastic_crate_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_crate_02/plastic_crate_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_crate_02/plastic_crate_02_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_crate_02/plastic_crate_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/plastic_crate_02/plastic_crate_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_crate_02/plastic_crate_02_opacity_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "wicker_basket_02",
+      "name": "Wicker Basket 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Kuutti Siitonen",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/wicker_basket_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wicker_basket_02/wicker_basket_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wicker_basket_02/wicker_basket_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wicker_basket_02/wicker_basket_02_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "bananas",
+      "name": "Bananas",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Alexander Shulha",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/bananas",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/bananas/bananas_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bananas/bananas_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bananas/bananas_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/bananas/bananas_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/bananas/bananas.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "plastic_bottle_gallon",
+      "name": "Plastic Bottle Gallon",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rahul Chaudhary",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/plastic_bottle_gallon",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/plastic_bottle_gallon/plastic_bottle_gallon_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_bottle_gallon/plastic_bottle_gallon_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_bottle_gallon/plastic_bottle_gallon_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_bottle_gallon/plastic_bottle_gallon_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/plastic_bottle_gallon/plastic_bottle_gallon.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "Barrel_02",
+      "name": "Barrel 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Jorge Camacho",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/Barrel_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/Barrel_02/Barrel_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Barrel_02/Barrel_02_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/Barrel_02/Barrel_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Barrel_02/Barrel_02_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/Barrel_02/Barrel_02_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "plastic_jerrycan",
+      "name": "Plastic Jerrycan",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Ulan Cabanilla",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/plastic_jerrycan",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/plastic_jerrycan/plastic_jerrycan_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_jerrycan/plastic_jerrycan_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_jerrycan/plastic_jerrycan_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/plastic_jerrycan/plastic_jerrycan_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/plastic_jerrycan/plastic_jerrycan.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "cement_bag",
+      "name": "Cement Bag",
+      "type": "model",
+      "authors": [
+        {
+          "name": "PierreB3D",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/cement_bag",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/cement_bag/cement_bag_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cement_bag/cement_bag_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cement_bag/cement_bag_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/cement_bag/cement_bag_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/cement_bag/cement_bag.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "hand_truck",
+      "name": "Hand Truck",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Mutanzom3D",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/hand_truck",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/hand_truck/hand_truck_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hand_truck/hand_truck_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hand_truck/hand_truck_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/hand_truck/hand_truck_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/hand_truck/hand_truck.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "potted_plant_01",
+      "name": "Potted Plant 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rico Cilliers",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/potted_plant_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_01/potted_plant_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_pot_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_leaves_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_pot_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_01/potted_plant_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_leaves_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_pot_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_leaves_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_01/potted_plant_01_leaves_alpha_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "potted_plant_02",
+      "name": "Potted Plant 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rico Cilliers",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/potted_plant_02",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_02/potted_plant_02_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_02/potted_plant_02.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_pot_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_02/potted_plant_02_leaves_alpha_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "potted_plant_04",
+      "name": "Potted Plant 04",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/potted_plant_04",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/potted_plant_04/potted_plant_04_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/potted_plant_04/potted_plant_04.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/potted_plant_04/potted_plant_04_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "planter_pot_clay",
+      "name": "Planter Pot Clay",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Amal Kumar",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/planter_pot_clay",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_pot_clay/planter_pot_clay_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_pot_clay/planter_pot_clay_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/planter_pot_clay/planter_pot_clay.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_pot_clay/planter_pot_clay_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_pot_clay/planter_pot_clay_nor_gl_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "ceramic_pot",
+      "name": "Ceramic Pot",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Aron Łyczek",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/ceramic_pot",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/ceramic_pot/ceramic_pot_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_pot/ceramic_pot_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_pot/ceramic_pot_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/ceramic_pot/ceramic_pot_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/ceramic_pot/ceramic_pot.bin"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "pachira_aquatica_01",
+      "name": "Pachira Aquatica 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "scanning"
+        },
+        {
+          "name": "Rico Cilliers",
+          "role": "modeling"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/pachira_aquatica_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/pachira_aquatica_01/pachira_aquatica_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_bark_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_leaves_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_leaves_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_bark_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_bark_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_leaves_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/pachira_aquatica_01/pachira_aquatica_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pachira_aquatica_01/pachira_aquatica_01_leaves_alpha_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "calathea_orbifolia_01",
+      "name": "Calathea Orbifolia 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "scanning"
+        },
+        {
+          "name": "Rico Cilliers",
+          "role": "modeling"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/calathea_orbifolia_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/calathea_orbifolia_01/calathea_orbifolia_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/calathea_orbifolia_01/calathea_orbifolia_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/calathea_orbifolia_01/calathea_orbifolia_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/calathea_orbifolia_01/calathea_orbifolia_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/calathea_orbifolia_01/calathea_orbifolia_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/calathea_orbifolia_01/calathea_orbifolia_01_alpha_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "anthurium_botany_01",
+      "name": "Anthurium Botany 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Rob Tuytel",
+          "role": "scanning"
+        },
+        {
+          "name": "Rico Cilliers",
+          "role": "modeling"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/anthurium_botany_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/anthurium_botany_01/anthurium_botany_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/anthurium_botany_01/anthurium_botany_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/anthurium_botany_01/anthurium_botany_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/anthurium_botany_01/anthurium_botany_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/anthurium_botany_01/anthurium_botany_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/anthurium_botany_01/anthurium_botany_01_alpha_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "planter_box_01",
+      "name": "Planter Box 01",
+      "type": "model",
+      "authors": [
+        {
+          "name": "James Ray Cock",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://polyhaven.com/a/planter_box_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/planter_box_01/planter_box_01_1k.gltf",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_01/planter_box_01_nor_gl_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_01/planter_box_01_arm_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/planter_box_01/planter_box_01.bin",
+        "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/planter_box_01/planter_box_01_diff_1k.jpg"
+      ],
+      "set": "vn"
+    },
+    {
+      "id": "oga_free-palm-treez-v3",
+      "name": "Free palm treeZ v3",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/free-palm-treez-v3",
+      "set": "vn"
+    },
+    {
+      "id": "oga_free-bamboo-v1",
+      "name": "Free Bamboo v1",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/free-bamboo-v1",
+      "set": "vn"
+    },
+    {
+      "id": "oga_free-palm-plant",
+      "name": "Free Palm Plant",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC-BY-4.0",
+      "url": "https://opengameart.org/content/free-palm-plant",
+      "set": "vn"
+    },
+    {
+      "id": "oga_tropical-plant-02-0",
+      "name": "Tropical plant 02",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/tropical-plant-02-0",
+      "set": "vn"
+    },
+    {
+      "id": "oga_tropical-shrubs",
+      "name": "Tropical shrubs",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/tropical-shrubs",
+      "set": "vn"
+    },
+    {
+      "id": "oga_free-houseplants",
+      "name": "Free houseplants",
+      "type": "model",
+      "authors": [
+        {
+          "name": "Yughues (Nobiax)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://opengameart.org/content/free-houseplants",
+      "set": "vn"
+    },
+    {
+      "id": "acg_3DMango001",
+      "name": "Mango 001",
+      "type": "model",
+      "authors": [
+        {
+          "name": "ambientCG (Lennart Demes)",
+          "role": "All"
+        }
+      ],
+      "license": "CC0",
+      "url": "https://ambientcg.com/a/3DMango001",
+      "set": "vn"
     }
   ]
 }
