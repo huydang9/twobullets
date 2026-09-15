@@ -41,6 +41,13 @@ const FOV_REFERENCE_ASPECT = 16 / 9;
 const STEP_SMOOTH_THRESHOLD = 0.02;
 /** Cap on the accumulated smoothing offset (running up stairs stacks a few steps), m. */
 const MAX_STEP_OFFSET = MOVEMENT.maxStepHeight * 2;
+/**
+ * Low-pass rate (1/s) of the horizontal speed the camera effects (sprint FOV, bob) read. Tick speed can dip for a tick
+ * or two (collision contacts on terrain); unfiltered, every dip pulled the sprint FOV back and pumped the zoom.
+ */
+const CAMERA_SPEED_SMOOTH_RATE = 10;
+/** Sprint FOV engages above walk speed and only releases below this (hysteresis), m/s. */
+const SPRINT_FOV_RELEASE_SPEED = MOVEMENT.walkSpeed * 0.75;
 /** Weapon state movement sees when no combat link is attached. */
 const UNARMED: WeaponState = createWeaponState([null]);
 
@@ -127,6 +134,10 @@ export class PlayerController {
   /** Camera-only vertical offset that eases out step-ups and ground snaps. */
   private stepOffset = 0;
   private sprintBlend = 0;
+  /** Render-side low-passed horizontal speed, m/s. */
+  private cameraSpeed = 0;
+  /** Sprint FOV latch with speed hysteresis. */
+  private sprintFov = false;
   private bobPhase = 0;
   private bobWeight = 0;
   private zoomFovDegrees: number = CAMERA.fovDegrees;
@@ -192,6 +203,8 @@ export class PlayerController {
     this.eyeHeight = MOVEMENT.standEyeHeight;
     this.stepOffset = 0;
     this.sprintBlend = 0;
+    this.cameraSpeed = 0;
+    this.sprintFov = false;
     this.updateCamera(0, 1);
   }
 
@@ -341,9 +354,11 @@ export class PlayerController {
 
     // Vertical motion the velocity doesn't explain (step-ups, ground snaps) is a discontinuity. Remove it from the
     // interpolation and let the camera ease through it instead. Landings (downward, from the air) stay crisp.
+    // The feet must really have jumped: a collision-resolved velocity.y on flat ground alone is not a step.
     if (this.state.grounded) {
-      const jump = this.currentFeet.y - this.previousFeet.y - this.state.velocity.y * TICK_SECONDS;
-      if (Math.abs(jump) > STEP_SMOOTH_THRESHOLD && (wasGrounded || jump > 0)) {
+      const rise = this.currentFeet.y - this.previousFeet.y;
+      const jump = rise - this.state.velocity.y * TICK_SECONDS;
+      if (Math.abs(rise) > STEP_SMOOTH_THRESHOLD && Math.abs(jump) > STEP_SMOOTH_THRESHOLD && (wasGrounded || jump > 0)) {
         this.previousFeet.y += jump;
         this.stepOffset = Math.max(-MAX_STEP_OFFSET, Math.min(MAX_STEP_OFFSET, this.stepOffset - jump));
       }
@@ -362,12 +377,14 @@ export class PlayerController {
 
   private updateCamera(dt: number, alpha: number): void {
     const v = this.state.velocity;
-    const speed = len2(v.x, v.z);
+    this.cameraSpeed += (len2(v.x, v.z) - this.cameraSpeed) * blendFactor(CAMERA_SPEED_SMOOTH_RATE, dt);
+    const speed = this.cameraSpeed;
 
     this.eyeHeight += (eyeHeightFor(this.state.stance) - this.eyeHeight) * blendFactor(CAMERA.crouchBlendRate, dt);
     this.stepOffset -= this.stepOffset * blendFactor(CAMERA.stepSmoothRate, dt);
 
-    const sprintTarget = this.state.sprinting && speed > MOVEMENT.walkSpeed ? 1 : 0;
+    this.sprintFov = this.state.sprinting && speed > (this.sprintFov ? SPRINT_FOV_RELEASE_SPEED : MOVEMENT.walkSpeed);
+    const sprintTarget = this.sprintFov ? 1 : 0;
     this.sprintBlend += (sprintTarget - this.sprintBlend) * blendFactor(CAMERA.fovBlendRate, dt);
     const moveFov = CAMERA.fovDegrees + (CAMERA.sprintFovDegrees - CAMERA.fovDegrees) * this.sprintBlend;
     this.camera.fov = verticalFovFromHorizontal(moveFov + (this.zoomFovDegrees - moveFov) * this.zoomBlend);
