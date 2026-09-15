@@ -29,6 +29,7 @@ import type { PlayerController, PlayerTick } from "../player/PlayerController";
 import type { PlayerLife } from "../player/PlayerLife";
 import { SoldierResources } from "../targets/SoldierResources";
 import type { Hud } from "../ui/Hud";
+import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
 import type { Environment } from "../world/environment";
@@ -237,6 +238,7 @@ export class OfflineMatch {
     this.bodies.dispose();
     this.deps.equipment.setTargetsSource(null);
     this.deps.equipment.setTeammatesSource(null);
+    this.deps.hud.setMapSource(null);
     this.layer.remove();
   }
 
@@ -284,6 +286,8 @@ export class OfflineMatch {
     }
     if (!skip.has("fx")) this.presentationBridge = trace.time("start fx", () => new MatchPresentation(sim, this.bodies, presentation));
     if (!skip.has("hud")) this.hudView = trace.time("start hud", () => new MatchHud(this.layer, sim, this.frame));
+    // Map (M) and minimap: zone, teammates and the viewer from the same frame the match HUD reads.
+    hud.setMapSource(matchMapSource(sim, this.frame));
     this.spectator = new Spectator(player.camera, this.bodies, sim, this.raycastWorld.cast);
     if (options.spectate) this.spectator.cycle(1);
     if (options.botDebug) this.debugOverlay = new BotDebugOverlay(scene, sim, this.bodies, this.layer);

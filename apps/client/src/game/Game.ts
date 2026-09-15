@@ -19,6 +19,7 @@ import { PlayerController } from "../player/PlayerController";
 import { PlayerLife } from "../player/PlayerLife";
 import { Hud } from "../ui/Hud";
 import { InventoryScreen } from "../ui/inventory";
+import { cameraMapSource } from "../ui/map";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
 
@@ -127,6 +128,8 @@ export class Game {
 
     // Equipment HUD (armor, boost, rings, prompts, pickup feed, death recap) lives in the combat HUD.
     hud.attachEquipment(equipment);
+    // M: full-screen map (N zooms, wheel/drag), minimap bottom right; OfflineMatch swaps in zone and teammates.
+    if (world && !benchmark) hud.attachMap({ world, input, source: cameraMapSource(player.camera) });
     // Tab: releases pointer lock while open and asks for it again on close (the play overlay's click is the fallback).
     const inventory = new InventoryScreen(hudRoot, equipment, input);
     // DEV: `?teammate=1` simulates a standing teammate, so 0 HP knocks (revive with `__twobullets.life.revive()`).

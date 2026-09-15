@@ -25,6 +25,9 @@ export const KEY_BINDINGS = {
   /** Tap: pick up / interact. Hold: revive a downed teammate. */
   interact: ["KeyF"],
   inventory: ["Tab"],
+  /** Full-screen map (also closes it with Esc) and its zoom levels. */
+  map: ["KeyM"],
+  mapZoom: ["KeyN"],
   holster: ["KeyX"],
   useBandage: ["Digit7"],
   useFirstAid: ["Digit8"],

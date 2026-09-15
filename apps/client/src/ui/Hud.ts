@@ -7,6 +7,7 @@ import { CombatHud } from "./CombatHud";
 import { Crosshair } from "./Crosshair";
 import { el } from "./dom";
 import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEquipment";
+import { MapHud, type MapHudOptions, type MapViewSource } from "./map";
 import { PlayOverlay, type MatchSetup } from "./PlayOverlay";
 import { StatsPanel } from "./StatsPanel";
 import "./hud.css";
@@ -56,6 +57,7 @@ export class Hud {
   private readonly container: HTMLDivElement;
   private readonly inspectorTag: HTMLDivElement;
   private combat: CombatHud | undefined;
+  private mapHud: MapHud | null = null;
   private equipment: EquipmentView | null = null;
   private preview: PreviewEquipment | null = null;
   private baseCredits: readonly string[] = [];
@@ -103,7 +105,29 @@ export class Hud {
   /** A match screen (death, result) with its own buttons is open: the click-to-play overlay stays hidden meanwhile. */
   setModal(open: boolean): void {
     this.modal = open;
+    if (open) this.mapHud?.screen.setOpen(false, false);
     this.refreshVisibility();
+  }
+
+  /**
+   * Full-screen map (M, N zooms) and minimap for a map with terrain (not the arena). Renders the map image in slices
+   * right away. `source` gives the viewer (and in a match, teammates and zone); see ui/map/README-wiring.md.
+   */
+  attachMap(options: MapHudOptions): MapHud {
+    this.mapHud?.dispose();
+    this.mapHud = new MapHud(this.container, options);
+    this.refreshVisibility();
+    return this.mapHud;
+  }
+
+  /** Swaps the map's data source (the offline match once it starts); null restores the source given to attachMap. */
+  setMapSource(source: MapViewSource | null): void {
+    this.mapHud?.setSource(source);
+  }
+
+  /** The map HUD, or null without a map (DEV console: `__twobullets.hud.map.screen.setOpen(true)`). */
+  get map(): MapHud | null {
+    return this.mapHud;
   }
 
   /** Toggles the debug stats panel (F3). */
@@ -158,6 +182,7 @@ export class Hud {
     this.combat?.update(now);
     this.crosshair.update(dt);
     this.stats.update(state.fps, state.player);
+    this.mapHud?.update(now);
   }
 
   /**
@@ -292,5 +317,6 @@ export class Hud {
     this.inspectorTag.hidden = !this.inspectorOpen || playing;
     this.container.classList.toggle("tb-hud--inspector", this.inspectorOpen);
     if (this.combat) this.combat.visible = playing && !this.inspectorOpen;
+    if (this.mapHud) this.mapHud.minimapVisible = playing && !this.inspectorOpen;
   }
 }
