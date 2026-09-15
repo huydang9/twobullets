@@ -17,6 +17,9 @@ import { COLLIDER_STRIDE, propColliderGroups } from "../layout/collision";
 import { getPrefabCollision } from "../buildings/placement";
 import { getBuildingPrefab, isBuildingPrefabId } from "../buildings/prefabs";
 import { isPoliticalName } from "./convert/names";
+import { distanceToRect } from "../layout/geometry";
+import { mapPaths } from "../layout/roads";
+import { planStreetSigns, STREET_SIGN } from "../layout/streetSigns";
 
 /** Recorded by tools/map/build.ts --map <id>; regenerate the map (tools/map/osm/generate.ts) after converter changes. */
 const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: string; layoutChecksum: string }>> = {
@@ -57,13 +60,40 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     expect(layout.checksum).toBe(bake.layoutChecksum);
   });
 
-  it("shows no political names (map, POIs, road labels)", () => {
-    const names = [entry.info.name, module.map.name, ...module.map.pois.map((p) => p.name), ...(module.map.roadLabels ?? []).map((r) => r.name)];
+  it("shows no political map or POI names (road labels keep real street names)", () => {
+    const names = [entry.info.name, module.map.name, ...module.map.pois.map((p) => p.name), ...(module.map.landmarks ?? []).map((l) => l.name)];
     expect(names.filter(isPoliticalName)).toEqual([]);
     for (const label of module.map.roadLabels ?? []) {
       expect(label.lines.length).toBeGreaterThan(0);
       for (const line of label.lines) for (const [x, z] of line) expect(Math.max(Math.abs(x), Math.abs(z))).toBeLessThanOrEqual(module.map.terrain.playableHalfExtent);
     }
+  });
+
+  it("puts street signs off the roadway, outside buildings and apart, for every labeled road", () => {
+    const { map } = module;
+    const signs = planStreetSigns(map, layout.buildings);
+    const labels = map.roadLabels ?? [];
+    if (labels.length === 0) expect(signs.filter((s) => s.kind !== "facade")).toEqual([]);
+    const paths = mapPaths(map);
+    for (const sign of signs) {
+      const [x, z] = sign.position;
+      expect(Math.max(Math.abs(x), Math.abs(z))).toBeLessThan(map.terrain.playableHalfExtent);
+      if (sign.kind === "facade") continue;
+      for (const path of paths) expect(polylineDistance(path.points, x, z) - path.halfWidth, `${sign.blades[0]!.name} (${x}, ${z})`).toBeGreaterThanOrEqual(STREET_SIGN.roadClearance - 1e-3);
+      for (const b of layout.buildings) expect(distanceToRect(b.bounds, x, z), `${sign.blades[0]!.name} in ${b.id}`).toBeGreaterThanOrEqual(STREET_SIGN.buildingClearance - 1e-3);
+      for (const other of signs) if (other !== sign && other.kind !== "facade") expect(distance(x, z, other.position[0], other.position[1])).toBeGreaterThanOrEqual(STREET_SIGN.signGap - 1e-3);
+    }
+    const street = signs.filter((s) => s.kind === "street");
+    for (const a of street) {
+      for (const b of signs) if (a !== b && b.blades.some((blade) => blade.name === a.blades[0]!.name) && signs.indexOf(b) < signs.indexOf(a)) expect(distance(a.position[0], a.position[1], b.position[0], b.position[1])).toBeGreaterThanOrEqual(STREET_SIGN.sameNameGap - 1e-3);
+    }
+    const named = new Set(signs.flatMap((s) => s.blades.map((b) => b.name)));
+    for (const label of labels) expect(named.has(label.name), label.name).toBe(true);
+    if (id === "vn-hangxanh" || id === "vn-phandangluu") {
+      expect(signs.filter((s) => s.kind === "corner").length).toBeGreaterThanOrEqual(5);
+      expect(signs.filter((s) => s.kind === "corner").every((s) => s.blades.length === 2)).toBe(true);
+    }
+    for (const landmark of map.landmarks ?? []) expect(signs.some((s) => s.kind === "facade" && s.building === landmark.building), landmark.name).toBe(true);
   });
 
   it("validates with no issues", () => {

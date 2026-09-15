@@ -9,7 +9,7 @@ import { seedFromId, type ScatterRule } from "../../layout/scatter";
 import { validateMapLayout, type MapIssue, type ValidationOptions } from "../../layout/validate";
 import { buildTerrain, type Terrain } from "../../terrain/terrain";
 import { distanceToRect } from "../../layout/geometry";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, PropPlacement, RoadLabel, TerrainSpec } from "../../types";
+import type { FlattenRegion, MapData, MapLandmark, MapSpawn, PointOfInterest, PropPlacement, RoadLabel, TerrainSpec } from "../../types";
 import { findBridges, type BridgeSite } from "./bridges";
 import { buildingCandidates, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, type PlacedBuilding, type PlacementReport } from "./buildings";
 import { realTerrainSpec, type ElevationReport } from "./elevation";
@@ -55,6 +55,8 @@ export interface ConvertReport {
   readonly elevation: ElevationReport;
   readonly roads: RoadReport;
   readonly roadLabels: RoadLabelReport;
+  /** Landmarks named by the place config: placed ones, and OSM ids whose footprint got no building. */
+  readonly landmarks: { readonly named: readonly string[]; readonly missing: readonly number[] };
   readonly placement: PlacementReport;
   /** Buildings removed by the terrain validation and reachability passes. */
   readonly droppedByValidation: number;
@@ -89,6 +91,8 @@ export interface ConvertResult {
     readonly spawns: readonly MapSpawn[];
     /** Map-screen road names (may be empty). */
     readonly roadLabels: readonly RoadLabel[];
+    /** Named buildings (may be empty). */
+    readonly landmarks: readonly MapLandmark[];
   };
   readonly water: readonly Polygon[];
   readonly openings: readonly LineOpening[];
@@ -115,7 +119,7 @@ export function realValidationOptions(openings: readonly LineOpening[], urban = 
 export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}): ConvertResult {
   const { config } = input;
   const log = options.log ?? (() => {});
-  for (const name of [config.name, config.localName]) {
+  for (const name of [config.name, config.localName, ...(config.landmarks ?? []).map((l) => l.name)]) {
     if (name && isPoliticalName(name)) throw new Error(`${config.id}: "${name}" is a political name; pick a neutral map name (see convert/names.ts)`);
   }
   const projection = createProjection(config.lat, config.lon);
@@ -162,6 +166,13 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     for (const b of keptBridges) buildings.push({ id: b.id, prefab: b.prefab, position: b.position, yaw: b.yaw, snapToTerrain: true });
     const { spawns, short } = pickSpawns(poiResult.pois, terrain, placed.buildings, props, space, blockedSpawns, isolated);
     const { scatters, report: landuse } = convertLanduse(parsed.areas, parsed.lines, roads, poiResult.pois, water, openings, config);
+    const landmarks: MapLandmark[] = [];
+    const missingLandmarks: number[] = [];
+    for (const wanted of config.landmarks ?? []) {
+      const building = placed.buildings.find((b) => b.osmId === wanted.osmId);
+      if (building) landmarks.push({ name: wanted.name, building: building.id, center: [building.position[0], building.position[2]] });
+      else missingLandmarks.push(wanted.osmId);
+    }
     const map: MapData = {
       id: config.id,
       name: config.name,
@@ -174,6 +185,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
       scatters,
       spawns,
       ...(roadLabels.labels.length > 0 ? { roadLabels: roadLabels.labels } : {}),
+      ...(landmarks.length > 0 ? { landmarks } : {}),
     };
     const layout = buildMapLayout(map, terrain);
     const validation = realValidationOptions(openings, urban !== undefined);
@@ -191,7 +203,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     for (const b of buildings) byPrefab[b.prefab] = (byPrefab[b.prefab] ?? 0) + 1;
     result = {
       map,
-      parts: { terrain: spec, pads, creeks, roads, pois: poiResult.pois, buildings, props, fences, scatters, spawns, roadLabels: roadLabels.labels },
+      parts: { terrain: spec, pads, creeks, roads, pois: poiResult.pois, buildings, props, fences, scatters, spawns, roadLabels: roadLabels.labels, landmarks },
       water,
       openings,
       validation,
@@ -203,6 +215,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
         elevation,
         roads: roadReport,
         roadLabels: roadLabels.report,
+        landmarks: { named: landmarks.map((l) => l.name), missing: missingLandmarks },
         placement: placed.report,
         droppedByValidation: excluded.size,
         buildings: buildings.length,

@@ -95,6 +95,11 @@ export interface PlaceConfig {
   readonly genericNames?: readonly [village: string, farm: string, forest: string];
   /** Terrain seed; defaults to a hash of the id. */
   readonly seed?: number;
+  /**
+   * Named buildings by OSM way id (a negative id is a relation). The footprint must be placed; the converter reports any
+   * that are not. Names go through the political filter like POI names.
+   */
+  readonly landmarks?: readonly { readonly osmId: number; readonly name: string }[];
   /** Dense city mode (Saigon streets); absent for villages, whose output it never changes. See `convert/urban.ts`. */
   readonly urban?: UrbanOptions;
 }

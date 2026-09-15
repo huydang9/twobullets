@@ -165,8 +165,26 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
 
 ## Names
 
-- **No political names** on any map: `convert/names.ts` (`isPoliticalName`) matches political figures and revolutionaries, political events and dates (30/4, Cách Mạng Tháng Tám), party and state organs (Ủy ban nhân dân, Công an, Quân khu), memorials, and the city name "Hồ Chí Minh" / "TP.HCM", ignoring case and diacritics, whole words only. Such OSM names never name a POI or a road label; the POI takes the next named thing nearby or a generic word. A place's `name` or `localName` that matches stops the converter (and `generate.ts --name`). Historical kings, generals and scholars are not listed. Player-visible text says "Sài Gòn" for the city.
-- **Road labels** (`convert/roadLabels.ts`, `MapData.roadLabels`): named trunk, primary and secondary roads of 100 m or more inside the map, tertiary from 200 m, any other named road from 300 m. Same-name ways join into chains, clipped and simplified to 2 m. Alleys ("Hẻm …") and names with a house number are skipped; political names get no label. The map screen (M) draws them along the road, upright, at the straightest stretches, once per 400 m, clear of POI names; below 2× zoom only trunk, primary and secondary names show. The minimap has none.
+- **No political map, POI, area or landmark names:** `convert/names.ts` (`isPoliticalName`) matches political figures and revolutionaries, political events and dates (30/4, Cách Mạng Tháng Tám), party and state organs (Ủy ban nhân dân, Công an, Quân khu), memorials, and the city name "Hồ Chí Minh" / "TP.HCM", ignoring case and diacritics, whole words only. Such OSM names never name a POI; the POI takes the next named thing nearby or a generic word. A place's `name`, `localName` or landmark name that matches stops the converter (and `generate.ts --name`). Historical kings, generals and scholars are not listed. Player-visible text says "Sài Gòn" for the city.
+- **Road names keep the real street name**, political or not (owner decision 2026-09-15: street names are addresses players navigate by). The filter is not applied to road labels or street signs.
+- **Road labels** (`convert/roadLabels.ts`, `MapData.roadLabels`): named trunk, primary and secondary roads of 100 m or more inside the map, tertiary from 200 m, any other named road from 300 m. Same-name ways join into chains, clipped and simplified to 2 m. Alleys ("Hẻm …") and names with a house number are skipped. The map screen (M) draws them along the road, upright, at the straightest stretches, once per 400 m, clear of POI names; below 2× zoom only trunk, primary and secondary names show. The minimap has none.
+- **Landmarks** (`PlaceConfig.landmarks`, `MapData.landmarks`, additive): a named building picked by OSM way id. The converter resolves it to the placed building on that footprint (`generate.ts` fails when the footprint got no building). The map screen draws a small blue square with the name; the street signs put the name on its entrance facade. Not a POI: no spawns, loot tier or spacing. No map has one yet.
+
+### Street signs
+
+`layout/streetSigns.ts` (`planStreetSigns`, pure) plans them from `MapData` and the resolved buildings at load; `apps/client/src/world/streetSigns/StreetSigns.ts` renders them from `MapRuntime`. Visual only: no colliders.
+- **Look:** Vietnamese blue blade (1.1 × 0.275 m) with a thin white border and the road name in white capitals, full diacritics, on a 3.2 m grey pole. Landmark boards are 2.8 × 0.7 m, 2.6 m above the floor, 8 cm off the entrance facade.
+- **Corners:** where two labeled roads cross (T junctions included), one pole per junction (crossings within 28 m merge), with a blade along each road. The pole goes on the first corner, 0.9, 1.3 or 2 m past the widest road edge, whose pole and blade ends clear every road by 0.6 m (blade ends 0.1 m) and every building outline by 0.35 m. Crossings flatter than about 20° get none.
+- **Along roads:** every 175 m (one per chain from 60 m), alternating sides, sliding up to 30 m along the road when blocked, skipped within 90 m of another sign naming the road and 12 m of any sign.
+- **Rendering:** one merged mesh and one PBR material over a canvas atlas baked at load (512 × 128 px per name, Arial/Helvetica/Roboto/Noto stack). One draw call. Signs past 120 m (hysteresis 124 m) are hidden by collapsing their vertices onto a visible sign, rewritten only when the visible set changes, so the mesh bounds and frustum culling follow the nearby signs. No shadow casting. Planning takes 1–3 ms.
+
+| Map | Road labels | Signs (corner / along) | Triangles | Most signs within 120 m | Draw calls |
+|---|---|---|---|---|---|
+| Holašovice | 0 | 0 | 0 | 0 | 0 |
+| Cẩm Thanh | 5 | 13 (2 / 11) | ~420 | 4 | ≤ 1 |
+| Shirakawa-gō | 1 | 1 (0 / 1) | 30 | 1 | ≤ 1 |
+| Hàng Xanh | 8 | 20 (9 / 11) | ~710 | 7 | ≤ 1 |
+| Phú Nhuận | 13 | 29 (12 / 17) | ~1,010 | 4 | ≤ 1 |
 
 | | Ngã Tư Hàng Xanh (`vn-hangxanh`) | Phú Nhuận (`vn-phandangluu`; the id keeps the street name it was first generated under) |
 |---|---|---|
@@ -190,9 +208,10 @@ POI names:
 - **Hàng Xanh:** Ngã Tư Hàng Xanh, its Bắc / Đông / Tây / Nam parts, Khu phố 62, 43, 34, 60, Chung Cư Saigonland, Chung cư Mỹ Đức, Khu du lịch Văn Thánh.
 - **Phú Nhuận:** Cầu Kiệu, Phú Nhuận and its Tây / Bắc parts, Thánh đường Cơ Đốc Phục lâm Phú Nhuận, Khu phố 17, Chung Cư Satra Eximland, Đình, Cao Ốc Tuổi Trẻ, Đức Nhuận, Trường Cao đẳng Kinh tế Đối ngoại, Thánh thất Phú Nhuận, Anh Văn Hội Việt Mỹ VUS, Tổ Đình Kim Sơn, and quarter parts.
 
-Road names on the map screen (see "Names" below):
-- **Hàng Xanh:** Bạch Đằng, Cầu vượt Hàng Xanh, Đinh Bộ Lĩnh, Ngã tư Hàng Xanh, Nguyễn Gia Trí, Đường nội bộ Khu du lịch Văn Thánh. Two big roads get no label (political names).
-- **Phú Nhuận:** Phan Đình Phùng, Phan Xích Long, Thích Quảng Đức, Trường Sa, Đường Nguyễn Đình Chiểu, Trần Khắc Chân, Lê Tự Tài, Cầm Bá Thước. Five long roads get no label (political names).
+Road names on the map screen and street signs (see "Names" below):
+- **Hàng Xanh:** Điện Biên Phủ, Xô Viết Nghệ Tĩnh, Bạch Đằng, Cầu vượt Hàng Xanh, Đinh Bộ Lĩnh, Ngã tư Hàng Xanh, Nguyễn Gia Trí, Đường nội bộ Khu du lịch Văn Thánh.
+- **Phú Nhuận:** Phan Đăng Lưu, Nguyễn Kiệm, Hoàng Văn Thụ, Phan Đình Phùng, Phan Xích Long, Thích Quảng Đức, Nguyễn Trọng Tuyển, Trường Sa, Đường Phùng Văn Cung, Đường Nguyễn Đình Chiểu, Trần Khắc Chân, Lê Tự Tài, Cầm Bá Thước.
+- **Cẩm Thanh:** Đường Võ Chí Công, Cầu Cửa Đại, Đồng Khởi, Đường Rừng Dừa Bảy Mẫu, Thôn Thanh Nhì. **Shirakawa-gō:** 国道156号.
 
 **Budget** (cap 190, measured in Node; Map v1 is 85 buildings, 178k tris, 6,509 compound children):
 
@@ -268,7 +287,11 @@ Road names on the map screen (see "Names" below):
 | Phú Nhuận | Churches / petrol station | (272, 201), (−300, −202) / (−282, −265) | Pink church with bell tower; canopy and pump islands |
 | Any | Out of bounds | walk past x = 500 | Warning and respawn, as on Map v1; bank fences run on into the border |
 
+| Phú Nhuận | Street signs | walk the main road from (−120, −125) to (60, 45) | Blue name blades at the corners and along the road, readable from both sides, off the carriageway, hidden past ~120 m |
+| Hàng Xanh | Street signs | (0, 30) | Corner poles round the junction, Điện Biên Phủ / Xô Viết Nghệ Tĩnh blades, diacritics intact |
+
 Not verified in a browser yet:
+- street signs: text orientation on both faces, atlas legibility, the hide distance;
 - terrain and pad transitions on real slopes;
 - the look of wide fenced grass where water should be;
 - creek beds;

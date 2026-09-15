@@ -217,6 +217,18 @@ export interface RoadLabel {
   readonly lines: readonly (readonly Vec2Tuple[])[];
 }
 
+/**
+ * A named building (real-world maps): labeled on the map screen and signed on its facade. Not a POI: it adds no spawns,
+ * loot tier or spacing rules.
+ */
+export interface MapLandmark {
+  readonly name: string;
+  /** `MapBuilding.id` it names; its entrance side (+Z) is the facade that gets the sign. */
+  readonly building: string;
+  /** Label anchor: the building's footprint center, m. */
+  readonly center: Vec2Tuple;
+}
+
 /** Gameplay limits. The playable square itself is `terrain.playableHalfExtent`, so terrain and bounds can't disagree. */
 export interface MapBounds {
   /** Players outside the playable square get this long before being pushed back or killed, s. */
@@ -248,4 +260,6 @@ export interface MapData {
   readonly spawns: readonly MapSpawn[];
   /** Road names the map screen draws along big roads (real-world maps; absent when none qualify). */
   readonly roadLabels?: readonly RoadLabel[];
+  /** Named buildings for map labels and facade signs (real-world maps; absent when none). */
+  readonly landmarks?: readonly MapLandmark[];
 }

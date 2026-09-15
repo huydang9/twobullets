@@ -20,6 +20,8 @@ const MAP_KEYS: readonly string[] = KEY_BINDINGS.map;
 /** Below this zoom only trunk, primary and secondary road names show, so the whole-map view stays readable. */
 const ALL_ROAD_NAMES_ZOOM = 2;
 const ZOOM_KEYS: readonly string[] = KEY_BINDINGS.mapZoom;
+/** Landmark building names (real-world maps), px. */
+const LANDMARK_FONT_PX = 12;
 
 /** The frame's data for one overlay pass, read once by MapHud and shared with the minimap. */
 export interface MapFrameData {
@@ -232,6 +234,12 @@ export class MapScreen {
       const name = poi.name.toUpperCase();
       poiBoxes.push({ x: proj.sx(poi.center[0]), y: proj.sy(poi.center[1]), halfW: ctx.measureText(name).width / 2 + 3, halfH: poiSize * 0.6, angle: 0 });
     }
+    const landmarks = this.map.landmarks ?? [];
+    ctx.font = markerFont(LANDMARK_FONT_PX, 600);
+    for (const landmark of landmarks) {
+      const width = ctx.measureText(landmark.name).width;
+      poiBoxes.push({ x: proj.sx(landmark.center[0]) + 7 + width / 2, y: proj.sy(landmark.center[1]), halfW: width / 2 + 9, halfH: LANDMARK_FONT_PX * 0.7, angle: 0 });
+    }
     this.drawRoadNames(poiBoxes, dpr);
 
     // POI names.
@@ -247,6 +255,25 @@ export class MapScreen {
       ctx.fillStyle = "rgba(250, 250, 244, 0.96)";
       ctx.fillText(name, x, y);
     }
+
+    // Landmark buildings: a small square and the name to its right.
+    ctx.font = markerFont(LANDMARK_FONT_PX, 600);
+    ctx.textAlign = "left";
+    for (const landmark of landmarks) {
+      const x = proj.sx(landmark.center[0]);
+      const y = proj.sy(landmark.center[1]);
+      if (x < -200 || x > size + 20 || y < -20 || y > size + 20) continue;
+      ctx.fillStyle = "rgba(10, 12, 14, 0.75)";
+      ctx.fillRect(x - 4, y - 4, 8, 8);
+      ctx.fillStyle = "rgba(96, 170, 255, 0.98)";
+      ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(10, 12, 14, 0.7)";
+      ctx.strokeText(landmark.name, x + 8, y);
+      ctx.fillStyle = "rgba(250, 250, 244, 0.96)";
+      ctx.fillText(landmark.name, x + 8, y);
+    }
+    ctx.textAlign = "center";
 
     // Grid labels along the top and left edges, at the centre of each visible cell.
     ctx.font = markerFont(12, 600);

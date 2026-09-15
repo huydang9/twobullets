@@ -21,6 +21,7 @@ import type { Environment } from "../environment";
 import type { PropLibraryOptions } from "../propAssets";
 import { PropColliders, PropInstances, PropVisuals } from "../props";
 import { TerrainMaterial, TerrainRenderer, createHorizonMesh } from "../terrain";
+import { StreetSigns } from "../streetSigns";
 import { GrassField } from "../vegetation";
 import { BuildingAcoustics } from "./buildingAcoustics";
 import type { MapOverlay } from "./MapOverlay";
@@ -82,6 +83,8 @@ export class MapRuntime {
     readonly props: PropInstances,
     readonly colliders: PropColliders,
     readonly grass: GrassField,
+    /** Street name signs and landmark boards (real-world maps; empty on Map v1). */
+    readonly streetSigns: StreetSigns,
     readonly spawns: MapSpawns,
     /** Resolves when terrain and building textures are loaded. */
     readonly ready: Promise<void>,
@@ -157,6 +160,7 @@ export class MapRuntime {
     });
     const buildingVisuals = new BuildingVisuals(scene, environment);
     const buildings = await step("buildings", 0.3, () => layout.buildings.map((b) => buildBuilding(scene, b.prefab, { position: b.position, yaw: b.yaw }, buildingVisuals)));
+    const streetSigns = await step("street signs", 0.55, () => StreetSigns.create(scene, environment, map, layout, terrain));
     const detail = detailRules(map);
     const propIds = [...new Set([...layout.props.map((set) => set.prop), ...detail.flatMap((rule) => rule.props.map((p) => p.prop))])];
     const visuals = await step("prop assets", 0.6, () => PropVisuals.load(scene, propIds, options.propAssets ?? {}));
@@ -175,10 +179,10 @@ export class MapRuntime {
           .filter(([key]) => key !== "total")
           .map(([key, ms]) => `${key} ${ms.toFixed(0)}`)
           .join(", ") +
-        ` · ${buildings.length} buildings, ${props.instanceCount} prop instances, ${colliderStats.bodies} prop bodies / ${colliderStats.shapes} shapes`,
+        ` · ${buildings.length} buildings, ${streetSigns.signs.length} street signs, ${props.instanceCount} prop instances, ${colliderStats.bodies} prop bodies / ${colliderStats.shapes} shapes`,
     );
     const ready = Promise.all([material.ready, buildingVisuals.whenLoaded()]).then(() => undefined);
-    return new MapRuntime(scene, map, world, physics, renderer, material, buildings, buildingVisuals, props, colliders, grass, spawns, ready, overlay, timings, yard, yardPlacement);
+    return new MapRuntime(scene, map, world, physics, renderer, material, buildings, buildingVisuals, props, colliders, grass, streetSigns, spawns, ready, overlay, timings, yard, yardPlacement);
   }
 
   /**
@@ -213,14 +217,16 @@ export class MapRuntime {
   updateView(camera: Vector3): void {
     this.props.update(camera);
     this.grass.update(camera);
+    this.streetSigns.update(camera);
   }
 
   stats() {
-    return { terrain: this.renderer.getStats(), buildings: this.buildingVisuals.stats(), props: this.props.stats(), colliders: this.colliders.stats(), grass: this.grass.instances };
+    return { terrain: this.renderer.getStats(), buildings: this.buildingVisuals.stats(), props: this.props.stats(), streetSigns: this.streetSigns.stats(), colliders: this.colliders.stats(), grass: this.grass.instances };
   }
 
   dispose(): void {
     this.grass.dispose();
+    this.streetSigns.dispose();
     this.props.dispose();
     this.colliders.dispose();
     this.buildings.forEach((b) => b.dispose());

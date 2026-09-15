@@ -411,9 +411,11 @@ const SPAWNS: readonly MapSpawn[] = [
   { position: [121.424, 183.458], yaw: 2.435 },
 ];
 
-/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */
+/** Road names for the map screen and street signs: big or long roads, real names (convert/roadLabels.ts). */
 const ROAD_LABELS: readonly RoadLabel[] = [
+  { name: "Đường Võ Chí Công", rank: 0, length: 1010, lines: [[[387.8, -22], [343.6, 85.9], [302.8, 208.5], [287.4, 270.7], [274.8, 347.3]], [[261.4, 346.2], [274.2, 271.2], [302.8, 159.9], [344.3, 51.6], [378.7, -26.4]], [[250.9, 492], [258.1, 376.6]], [[271.5, 377.5], [261.9, 492]]] },
   { name: "Cầu Cửa Đại", rank: 0, length: 565, lines: [[[492, -271.9], [387.8, -22]], [[378.7, -26.4], [492, -297.8]]] },
+  { name: "Đồng Khởi", rank: 2, length: 955, lines: [[[343.6, 85.9], [232.1, 36.2], [202.1, 16.1], [184.5, -11.6], [162.3, -85.4], [127.2, -120.6], [92.4, -137.8], [-22.1, -183.3], [-265.4, -212.4], [-412.1, -209.5], [-447.5, -203.1], [-492, -187.9]]] },
   { name: "Đường Rừng Dừa Bảy Mẫu", rank: 2, length: 563, lines: [[[201.7, 492], [160, -1.9], [160.3, -39.6], [168.5, -68.2]]] },
   { name: "Thôn Thanh Nhì", rank: 3, length: 340, lines: [[[492, 107.2], [395.8, 102.2], [343.6, 85.9]], [[337.3, 11.5], [222.7, -44.6], [181.5, -69.8], [168.5, -68.2]]] },
 ];

@@ -1,7 +1,8 @@
 /**
- * Political name filter for real-world maps: player-visible names (map, POI and landmark labels) never name political
- * figures, political events or dates, party or state organs, or their memorials. OSM names that match are not used;
- * the POI namer falls back to the next named thing nearby or a generic word.
+ * Political name filter for real-world maps: map, POI, area and landmark names never name political figures, political
+ * events or dates, party or state organs, or their memorials. OSM names that match are not used; the POI namer falls
+ * back to the next named thing nearby or a generic word. Road names (map labels and street signs) are exempt: they keep
+ * the real street name (`convert/roadLabels.ts`).
  *
  * Matching ignores case, diacritics and punctuation, and only matches whole words ("Công an" but not "Công ty An").
  * Historical kings, generals and scholars (Đinh Tiên Hoàng, Lê Văn Duyệt, Chu Văn An) are deliberately not listed.

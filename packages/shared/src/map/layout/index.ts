@@ -8,5 +8,6 @@ export * from "./placement";
 export * from "./mapLayout";
 export * from "./collision";
 export * from "./validate";
+export * from "./streetSigns";
 export { renderMapOverviewSvg, type OverviewOptions } from "./overview";
 export { buildMapWorld, loadMapWorld, serveMapWorld, type MapWorld, type MapWorldMessage, type MapWorldOptions, type MapWorldRequest, type MapWorldStage } from "./mapWorld";

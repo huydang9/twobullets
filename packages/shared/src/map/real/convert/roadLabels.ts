@@ -1,7 +1,7 @@
 import { distance, polylineLength } from "../../layout/geometry";
 import type { RoadLabel, Vec2Tuple } from "../../types";
 import { clipPolylineToSquare, simplifyPolyline } from "./geometry";
-import { isPoliticalName, normalizeName } from "./names";
+import { normalizeName } from "./names";
 import { ROAD_CLIP, roadClassOf } from "./roads";
 import type { LineFeature } from "./types";
 
@@ -18,15 +18,13 @@ const HOUSE_NUMBER = /\d+[a-z]?\s*\/\s*\d+/i;
 export interface RoadLabelReport {
   /** Labeled road names, in label priority order. */
   readonly labeled: readonly string[];
-  /** Roads long or big enough for a label that got none because their name is political. */
-  readonly political: readonly string[];
 }
 
 /**
  * Road names for the map screen: named OSM highways (the classes kept as roads, links and tunnels skipped), same-name
  * ways joined into chains, clipped to the road edge and simplified. A name qualifies by its best class and total length
- * (`ROAD_LABEL_MIN_LENGTH`). Political names (`isPoliticalName`) and alleys get no label. Labels only: no road geometry
- * changes.
+ * (`ROAD_LABEL_MIN_LENGTH`). Alleys get no label. Road names keep their real name even when it is political (street names
+ * are addresses; `isPoliticalName` filters POI, area and map names only). Labels only: no road geometry changes.
  */
 export function convertRoadLabels(lines: readonly LineFeature[], urban = false): { labels: RoadLabel[]; report: RoadLabelReport } {
   interface Group {
@@ -50,7 +48,6 @@ export function convertRoadLabels(lines: readonly LineFeature[], urban = false):
   }
 
   const labels: RoadLabel[] = [];
-  const political: { name: string; rank: number; length: number }[] = [];
   for (const group of groups.values()) {
     const name = [...group.spellings].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]![0];
     const chains: Vec2Tuple[][] = [];
@@ -62,13 +59,10 @@ export function convertRoadLabels(lines: readonly LineFeature[], urban = false):
     }
     const length = Math.round(chains.reduce((sum, chain) => sum + polylineLength(chain), 0));
     if (length < ROAD_LABEL_MIN_LENGTH[group.rank]) continue;
-    if (isPoliticalName(name)) political.push({ name, rank: group.rank, length });
-    else labels.push({ name, rank: group.rank, length, lines: chains });
+    labels.push({ name, rank: group.rank, length, lines: chains });
   }
-  const order = (a: { name: string; rank: number; length: number }, b: { name: string; rank: number; length: number }) => a.rank - b.rank || b.length - a.length || (a.name < b.name ? -1 : 1);
-  labels.sort(order);
-  political.sort(order);
-  return { labels, report: { labeled: labels.map((l) => l.name), political: political.map((p) => p.name) } };
+  labels.sort((a, b) => a.rank - b.rank || b.length - a.length || (a.name < b.name ? -1 : 1));
+  return { labels, report: { labeled: labels.map((l) => l.name) } };
 }
 
 /** Joins pieces that meet end to end (within 0.5 m), in input order. */

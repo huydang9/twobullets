@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Vec2Tuple } from "../../types";
+import { isPoliticalName } from "./names";
 import { convertRoadLabels, joinChains } from "./roadLabels";
 import type { LineFeature } from "./types";
 
@@ -49,15 +50,16 @@ describe("road labels", () => {
     expect(labels.every((l) => l.lines.every((line) => line.every(([x, z]) => Math.abs(x) <= 492 && Math.abs(z) <= 492)))).toBe(true);
   });
 
-  it("gives political and alley names no label and reports the political ones", () => {
+  it("labels roads by their real name, political ones included, but never alleys", () => {
     const { labels, report } = convertRoadLabels([
       way("Xô Viết Nghệ Tĩnh", "primary", [[-400, 0], [400, 0]]),
       way("Điện Biên Phủ", "primary", [[0, -400], [0, 400]]),
       way("Hẻm 181/7 Phan Xích Long", "residential", [[-400, 100], [400, 100]]),
       way("Phan Xích Long", "tertiary", [[-400, 200], [400, 200]]),
     ]);
-    expect(labels.map((l) => l.name)).toEqual(["Phan Xích Long"]);
-    expect(report.political).toEqual(["Xô Viết Nghệ Tĩnh", "Điện Biên Phủ"]);
-    expect(report.labeled).toEqual(["Phan Xích Long"]);
+    expect(labels.map((l) => l.name)).toEqual(["Xô Viết Nghệ Tĩnh", "Điện Biên Phủ", "Phan Xích Long"]);
+    expect(report.labeled).toEqual(["Xô Viết Nghệ Tĩnh", "Điện Biên Phủ", "Phan Xích Long"]);
+    // POI and map names still go through the filter.
+    expect(isPoliticalName("Xô Viết Nghệ Tĩnh")).toBe(true);
   });
 });

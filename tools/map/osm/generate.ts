@@ -124,6 +124,7 @@ console.info(
       spawns: r.spawns,
       roads: r.roads,
       roadLabels: r.roadLabels,
+      landmarks: r.landmarks,
       elevation: r.elevation,
       landuse: r.landuse,
       waterFenceMeters: r.waterFenceMeters,
@@ -138,7 +139,8 @@ console.info(
 );
 const reach = r.reachability;
 const unreachable = reach && [reach.pois, reach.spawns, reach.entrances].some((s) => s.split("/")[0] !== s.split("/")[1]);
-let failed = r.issues.length > 0 || Boolean(unreachable) || (reach !== null && reach.lootRatio < 0.97);
+let failed = r.issues.length > 0 || Boolean(unreachable) || (reach !== null && reach.lootRatio < 0.97) || r.landmarks.missing.length > 0;
+if (r.landmarks.missing.length > 0) console.error(`[osm] ${place.id}: landmark footprints with no building placed: ${r.landmarks.missing.join(", ")}`);
 if (failed) console.error(`[osm] ${place.id}: ${r.issues.length} validation issues, reachability ${JSON.stringify(reach)}`);
 
 if (!flag("no-build")) {

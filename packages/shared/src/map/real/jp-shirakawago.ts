@@ -476,7 +476,7 @@ const SPAWNS: readonly MapSpawn[] = [
   { position: [17.751, -118.372], yaw: 1.222 },
 ];
 
-/** Road names for the map screen: big or long roads, political names left out (convert/roadLabels.ts). */
+/** Road names for the map screen and street signs: big or long roads, real names (convert/roadLabels.ts). */
 const ROAD_LABELS: readonly RoadLabel[] = [
   { name: "国道156号", rank: 0, length: 337, lines: [[[-294.8, 234.1], [-415.5, 42.6], [-464.2, -23]], [[-44.3, 492], [-70.4, 479.8]]] },
 ];
