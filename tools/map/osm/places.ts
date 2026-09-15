@@ -83,6 +83,9 @@ export const PLACES: readonly PlaceConfig[] = [
     genericNames: ["Khu phố", "Bãi đất trống", "Công viên"],
     buildingCap: 190,
     urban: { openCenter: 40 },
+    // Estimated location (owner request): the footprint facing the side-alley junction across the service way
+    // 127299447, which OSM leaves unnamed. Placed on top of the cap as a 4-story row house.
+    landmarks: [{ osmId: 1044664010, name: "Aga Building", prefab: "tube_house_4", frontsWay: 127299447 }],
   },
   // <custom-places>
   // </custom-places>

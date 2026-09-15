@@ -5,7 +5,7 @@
 import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
 import type { ScatterRule } from "../layout/scatter";
-import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, RoadLabel, TerrainSpec, Vec2Tuple } from "../types";
+import type { FlattenRegion, MapData, MapLandmark, MapSpawn, PointOfInterest, RoadLabel, TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./vn-phandangluu.info";
 import type { RealMapModule } from "./types";
@@ -207,6 +207,7 @@ const PADS: readonly FlattenRegion[] = [
   { shape: "rect", center: [-250.866, -284.343], halfExtents: [3.9, 9.65], yaw: 1.143, falloff: 6, height: 19.85 },
   { shape: "rect", center: [-102.375, -61.658], halfExtents: [3.7, 8.515], yaw: -2.536, falloff: 6, height: 19.81 },
   { shape: "rect", center: [-321.074, -216.16], halfExtents: [3.6, 8.015], yaw: 2.781, falloff: 6, height: 20.44 },
+  { shape: "rect", center: [431.042, 365.206], halfExtents: [3.9, 9.65], yaw: -0.814, falloff: 6, height: 20.16 },
 ];
 
 /** Streams and ditches as dry creek beds. */
@@ -816,6 +817,7 @@ const BUILDINGS: readonly LayoutBuilding[] = [
   { id: "bld_846873761", prefab: "tube_house_4", position: [-251.184, 0, -284.488], yaw: 1.143, snapToTerrain: true },
   { id: "bld_9000000004266", prefab: "tube_house_shed", position: [-102.099, 0, -61.259], yaw: -2.536, snapToTerrain: true, poi: "poi_02" },
   { id: "bld_1042892683", prefab: "tube_house_2", position: [-321.245, 0, -215.706], yaw: 2.781, snapToTerrain: true, poi: "poi_03" },
+  { id: "bld_1044664010", prefab: "tube_house_4", position: [431.296, 0, 364.966], yaw: -0.814, snapToTerrain: true },
 ];
 
 /** Water outlines: fenced, not walkable. */
@@ -1077,6 +1079,11 @@ const ROAD_LABELS: readonly RoadLabel[] = [
   { name: "Cầm Bá Thước", rank: 3, length: 326, lines: [[[240.7, 60.8], [274.2, 81.1], [327.6, 125.6], [419, 216.7], [471.5, 275.2], [472.5, 284.9]]] },
 ];
 
+/** Named buildings: map-screen labels and facade signs (PlaceConfig.landmarks). */
+const LANDMARKS: readonly MapLandmark[] = [
+  { name: "Aga Building", building: "bld_1044664010", center: [431.296, 364.966] },
+];
+
 export const OPENINGS = fenceOpenings(FENCES);
 
 export const MAP: MapData = {
@@ -1091,6 +1098,7 @@ export const MAP: MapData = {
   scatters: SCATTERS,
   spawns: SPAWNS,
   roadLabels: ROAD_LABELS,
+  landmarks: LANDMARKS,
 };
 
 const MODULE: RealMapModule = {

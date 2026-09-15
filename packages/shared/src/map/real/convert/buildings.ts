@@ -404,9 +404,9 @@ export function placeBuildings(
   };
 }
 
-function placeOne(candidate: BuildingCandidate, prefab: BuildingPrefabId, space: PlacementSpace): PlacedBuilding | null {
+function placeOne(candidate: BuildingCandidate, prefab: BuildingPrefabId, space: PlacementSpace, front?: Vec2Tuple): PlacedBuilding | null {
   const [cx, cz] = candidate.rect.center;
-  const road = space.nearestPath(cx, cz, 70);
+  const road = front ?? space.nearestPath(cx, cz, 70);
   const toRoad: Vec2Tuple = road ? normalize(road[0] - cx, road[1] - cz) : [0, 0];
   const yaws = candidateYaws(prefab, candidate.rect)
     .map((yaw) => {
@@ -446,6 +446,16 @@ function placeOne(candidate: BuildingCandidate, prefab: BuildingPrefabId, space:
     }
   }
   return null;
+}
+
+/**
+ * A named landmark footprint the regular pass left out (cap, cell quota, rank): placed after it with `prefab`, around the
+ * buildings already standing, so nothing else moves. `front`: the street point its entrance faces (default the nearest road). Null when nothing near the footprint clears roads and neighbours.
+ */
+export function placeLandmark(candidate: BuildingCandidate, prefab: BuildingPrefabId, space: PlacementSpace, front?: Vec2Tuple): PlacedBuilding | null {
+  const placement = placeOne(candidate, prefab, space, front);
+  if (placement) space.addPlaced(placement.bounds);
+  return placement;
 }
 
 /** An urban row house at its frontage slot, packed against its neighbours; null when anything is in the way. */

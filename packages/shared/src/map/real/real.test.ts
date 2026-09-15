@@ -96,14 +96,32 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     for (const landmark of map.landmarks ?? []) expect(signs.some((s) => s.kind === "facade" && s.building === landmark.building), landmark.name).toBe(true);
   });
 
+  it("places every landmark on a building of its own, labeled and signed", () => {
+    for (const landmark of module.map.landmarks ?? []) {
+      const building = layout.buildings.find((b) => b.id === landmark.building);
+      expect(building, landmark.name).toBeDefined();
+      expect(distance(building!.position[0], building!.position[2], landmark.center[0], landmark.center[1])).toBeLessThan(0.01);
+    }
+    if (id === "vn-phandangluu") {
+      const aga = module.map.landmarks?.find((l) => l.name === "Aga Building");
+      expect(aga).toBeDefined();
+      const building = module.map.buildings.find((b) => b.id === aga!.building)!;
+      expect(building.id).toBe("bld_1044664010");
+      expect(building.prefab).toBe("tube_house_4");
+      // Estimated from the alley layout: within a few meters of the OSM footprint centroid (430.5, 366.4).
+      expect(distance(building.position[0], building.position[2], 430.5, 366.4)).toBeLessThan(4);
+    }
+  });
+
   it("validates with no issues", () => {
     expect(validateMapLayout(module.map, terrain, layout, module.validation)).toEqual([]);
   });
 
   it("stays within its building cap, has no Training Yard, 10+ POIs and two spawns per POI", () => {
     const { map, info } = module;
-    // Bridges are laid over crossings on top of the building cap.
-    expect(map.buildings.filter((b) => !(isBuildingPrefabId(b.prefab) && getBuildingPrefab(b.prefab).spansRoad)).length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
+    // Bridges and named landmarks are laid on top of the building cap.
+    const landmarkIds = new Set((map.landmarks ?? []).map((l) => l.building));
+    expect(map.buildings.filter((b) => !(isBuildingPrefabId(b.prefab) && getBuildingPrefab(b.prefab).spansRoad) && !landmarkIds.has(b.id)).length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
     expect(map.buildings.length).toBe(info.stats.buildings);
     expect(map.pois.some((p) => p.kind === "training")).toBe(false);
     expect(map.pois.length).toBeGreaterThanOrEqual(10);

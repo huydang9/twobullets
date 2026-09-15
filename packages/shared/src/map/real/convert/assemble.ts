@@ -11,7 +11,8 @@ import { buildTerrain, type Terrain } from "../../terrain/terrain";
 import { distanceToRect } from "../../layout/geometry";
 import type { FlattenRegion, MapData, MapLandmark, MapSpawn, PointOfInterest, PropPlacement, RoadLabel, TerrainSpec } from "../../types";
 import { findBridges, type BridgeSite } from "./bridges";
-import { buildingCandidates, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, type PlacedBuilding, type PlacementReport } from "./buildings";
+import { buildingCandidates, buildingId, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, placeLandmark, type PlacedBuilding, type PlacementReport } from "./buildings";
+import { isBuildingPrefabId } from "../../buildings/prefabs";
 import { realTerrainSpec, type ElevationReport } from "./elevation";
 import { convertLanduse, insideAny, trimRoadsAtWater, waterEdges, waterPolygons, type LanduseReport } from "./landuse";
 import { buildingPads } from "./pads";
@@ -154,7 +155,19 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     const space = new PlacementSpace(flattenPaths, water);
     const keptBridges = bridges.filter((b) => !excluded.has(b.id));
     for (const b of keptBridges) space.addPlaced(b.bounds);
-    const placed = placeBuildings(candidates, space, urban ? { cap, excluded, cellQuota: urbanDefaults(urban).cellQuota } : { cap, excluded });
+    const regular = placeBuildings(candidates, space, urban ? { cap, excluded, cellQuota: urbanDefaults(urban).cellQuota } : { cap, excluded });
+    const extra: PlacedBuilding[] = [];
+    for (const wanted of config.landmarks ?? []) {
+      if (regular.buildings.some((b) => b.osmId === wanted.osmId)) continue;
+      const footprint = footprints.find((c) => c.osmId === wanted.osmId);
+      if (!footprint || excluded.has(buildingId(wanted.osmId))) continue;
+      const prefab = wanted.prefab && isBuildingPrefabId(wanted.prefab) ? wanted.prefab : footprint.prefab;
+      const street = wanted.frontsWay !== undefined ? roads.find((r) => r.id.endsWith(`_${wanted.frontsWay}`)) : undefined;
+      const front = street ? nearestOnPolyline(street.points, footprint.rect.center) : undefined;
+      const building = placeLandmark(footprint, prefab, space, front);
+      if (building) extra.push(building);
+    }
+    const placed = extra.length > 0 ? { ...regular, buildings: [...regular.buildings, ...extra] } : regular;
     const poiResult = convertPois(placed.buildings, config, parsed.points, parsed.areas, parsed.buildings, water, isolated);
     const pads = buildingPads(placed.buildings, spec);
     const flatten: FlattenRegion[] = [...pads, ...creeks, ...roads.map(roadFlatten)];
@@ -235,6 +248,22 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     if (!changed) break;
   }
   return result!;
+}
+
+function nearestOnPolyline(points: readonly (readonly [number, number])[], [x, z]: readonly [number, number]): [number, number] {
+  let best: [number, number] = [points[0]![0], points[0]![1]];
+  let bestSq = Infinity;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [ax, az] = points[i]!;
+    const [bx, bz] = points[i + 1]!;
+    const lengthSq = (bx - ax) ** 2 + (bz - az) ** 2;
+    const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / lengthSq)) : 0;
+    const px = ax + (bx - ax) * t;
+    const pz = az + (bz - az) * t;
+    const dSq = (x - px) ** 2 + (z - pz) ** 2;
+    if (dSq < bestSq) [best, bestSq] = [[px, pz], dSq];
+  }
+  return best;
 }
 
 /**
