@@ -3,6 +3,7 @@ import { INSTANCE_STRIDE, type ScatterContext, type ScatterRule } from "@twobull
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import type { PropVisuals } from "../props";
+import { freezeStaticMaterial } from "../materialFreeze";
 import { enableDistanceFade } from "../props/lodFadePlugin";
 
 export interface GrassFieldOptions {
@@ -224,6 +225,7 @@ export class GrassField {
         if (OPTIMIZATIONS.grassDynamicBuffers) mesh.doNotSyncBoundingInfo = true;
         if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
         if (this.gpuFade) enableDistanceFade(mesh, this.radius - this.fade, this.radius);
+        freezeStaticMaterial(mesh.material);
         this.environment.skyFill.excludedMeshes.push(mesh);
       }
       this.buffers.set(key, (buffer = { meshes, data: new Float32Array(0), extent, uploaded: null }));

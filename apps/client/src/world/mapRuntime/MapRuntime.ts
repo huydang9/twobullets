@@ -159,7 +159,11 @@ export class MapRuntime {
       return { renderer, material };
     });
     const buildingVisuals = new BuildingVisuals(scene, environment);
-    const buildings = await step("buildings", 0.3, () => layout.buildings.map((b) => buildBuilding(scene, b.prefab, { position: b.position, yaw: b.yaw }, buildingVisuals)));
+    const buildings = await step("buildings", 0.3, () => {
+      const built = layout.buildings.map((b) => buildBuilding(scene, b.prefab, { position: b.position, yaw: b.yaw }, buildingVisuals));
+      buildingVisuals.flush();
+      return built;
+    });
     const streetSigns = await step("street signs", 0.55, () => StreetSigns.create(scene, environment, map, layout, terrain));
     const detail = detailRules(map);
     const propIds = [...new Set([...layout.props.map((set) => set.prop), ...detail.flatMap((rule) => rule.props.map((p) => p.prop))])];

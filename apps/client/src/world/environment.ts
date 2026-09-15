@@ -7,10 +7,13 @@ import {
   HemisphericLight,
   ImageProcessingConfiguration,
   Mesh,
+  RenderingGroup,
+  RenderingManager,
   Scene,
   ShadowGenerator,
   Vector3,
   type AbstractMesh,
+  type SubMesh,
 } from "@babylonjs/core";
 import type { SurfaceKind } from "@twobullets/shared";
 import type { BuiltLevel } from "@twobullets/sim";
@@ -132,6 +135,7 @@ export function createEnvironment(scene: Scene, options: EnvironmentOptions = {}
   const skybox = createSkybox(scene);
   const ibl = loadImageBasedLighting(scene, LOOK.sky);
   installPostEffects(scene, LOOK.post);
+  installMaterialSort(scene);
 
   const ready = Promise.all([materials.loaded, skybox.ready, ibl]).then(() => {
     skybox.mesh.material?.freeze();
@@ -200,6 +204,17 @@ function mergeByMaterial(level: BuiltLevel): { mesh: Mesh; kind: SurfaceKind | u
     for (const mesh of group) mesh.isVisible = false;
     return { mesh: merged, kind };
   });
+}
+
+/**
+ * Opaque and alpha-tested submeshes draw grouped by their own material. Babylon's default groups by the mesh's material,
+ * which for a merged building cell is its MultiMaterial, so equal looks from different cells would interleave and every
+ * draw would rebind its material. Sorting is stable, so ties keep dispatch order.
+ */
+function installMaterialSort(scene: Scene): void {
+  const compare = (a: SubMesh, b: SubMesh): number =>
+    OPTIMIZATIONS.sortBySubMeshMaterial ? (a.getMaterial()?.uniqueId ?? -1) - (b.getMaterial()?.uniqueId ?? -1) : RenderingGroup.PainterSortCompare(a, b);
+  for (let group = RenderingManager.MIN_RENDERINGGROUPS; group < RenderingManager.MAX_RENDERINGGROUPS; group++) scene.setRenderingOrder(group, compare, compare);
 }
 
 /** Same as createEnvironment, but resolves once all environment assets are loaded. */

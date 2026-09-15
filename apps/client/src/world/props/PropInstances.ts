@@ -2,6 +2,7 @@ import { Matrix, Vector3, type Mesh, type Scene } from "@babylonjs/core";
 import { CAMERA, INSTANCE_STRIDE, getMapProp, type MapPropDef, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
+import { freezeStaticMaterial } from "../materialFreeze";
 import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCulling";
 import { LodBands, lodZoom } from "./lodBands";
 import { LodCell, type InstanceBatch, type LodCellSpec, type LodStep } from "./LodCell";
@@ -311,6 +312,7 @@ export class PropInstances {
       // Instance matrices carry the placement; the batch itself stays at the origin.
       if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
       attachLodFade(mesh.material);
+      freezeStaticMaterial(mesh.material);
       if (batch.shadow) {
         this.environment.shadowGenerator.addShadowCaster(mesh, false);
         markStaticShadowCaster(mesh);

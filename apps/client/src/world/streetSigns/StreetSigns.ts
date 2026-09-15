@@ -1,6 +1,7 @@
 import { DynamicTexture, Mesh, PBRMaterial, Texture, VertexBuffer, VertexData, type Scene, type Vector3 } from "@babylonjs/core";
 import { planStreetSigns, type MapData, type MapLayout, type StreetSign, type Terrain } from "@twobullets/shared";
 import type { Environment } from "../environment";
+import { freezeStaticMaterial } from "../materialFreeze";
 
 /** Signs show within this camera distance and hide past `HIDE_DISTANCE` (hysteresis), m. */
 const SHOW_DISTANCE = 120;
@@ -114,6 +115,7 @@ export class StreetSigns {
     material.roughness = 0.55;
     material.backFaceCulling = false;
     mesh.material = material;
+    freezeStaticMaterial(material);
     environment.skyFill.excludedMeshes.push(mesh);
     mesh.setEnabled(false);
     return new StreetSigns(mesh, material, texture, signs, pivots, ranges, full, live);

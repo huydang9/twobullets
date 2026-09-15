@@ -48,6 +48,8 @@ Default variants (flag variants flip the flag from its current value, so the lab
 | shadows    | `shadowMap1536`       | 1536² vs 2048² shadow maps                                          |
 | shadows    | `shadowPcfLow`        | 1-tap vs 4-tap PCF                                                  |
 | shadows    | `shadowStaticCache`   | outer cascades reused while nothing relevant changed                |
+| shadows    | `dynamicShadowsNearOnly` | soldiers (dynamic casters) skip the far cascade                  |
+| draws      | `sortBySubMeshMaterial` | opaque/alpha-test draws grouped by submesh material               |
 | terrain    | `terrainWeightSkip`   | skip layer samples that can't survive the height blend              |
 | terrain    | `terrainBiplanarRock` | biplanar vs triplanar rock                                          |
 | terrain    | `terrainFarSimplify`  | albedo + macro only past 60–85 m                                    |
@@ -127,12 +129,40 @@ Optimization flags (`apps/client/src/perf/flags.ts`):
 | `terrainFarSimplify`       | on      | past 60–85 m: albedo and macro only, no normal/AO maps, no anti-tile grass sample         |
 | `smallPropShadowBand`      | on      | props up to 0.5 m tall cast shadows within 30 m (their category's band is 50 m)           |
 | `staticBatchMatrices`      | on      | thin-instance batches freeze their identity world matrices                                |
+| `buildingCellMerge`        | on      | load: buildings bake into one mesh per 100 m cell, one SubMesh per look (was thin instances per prefab per look per 250 m cell) |
+| `buildingShadowProxy`      | on      | load: each merged cell casts through a hidden proxy sharing its buffers, one draw per cascade |
+| `freezeStaticMaterials`    | on      | load: world materials are frozen; dirty marks (flag toggles, fog, image processing) still recompile |
+| `sortBySubMeshMaterial`    | on      | draws of one material run back to back (Babylon's default groups by the mesh's MultiMaterial) |
+| `dynamicShadowsNearOnly`   | off     | soldiers cast only into the two near cascades (≤ ~30 m); with `shadowStaticCache` the far cascade is then cacheable |
 | `mergeLevelBlocks`         | on      | arena and Training Yard blocks draw as one merged mesh per material                       |
 | `grassDynamicBuffers`      | on      | grass rewrites persistent GPU buffers and computes batch bounds directly                  |
 | `terrainLodHysteresis`     | on      | terrain chunks coarsen only ~18% past the switch distance                                 |
 | `skipPointerMovePicking`   | on      | no Babylon picking on mouse move                                                          |
 | `blockMaterialDirtyOnLoad` | on      | material dirty propagation is blocked while the world builds (load time)                  |
 | `dynamicResolution`        | off     | adaptive hardware scaling (also enabled by the graphics setting)                          |
+
+Load-time flags (marked "load") only take effect on reload, e.g. `?bots=1&map=vn-hangxanh&players=20&opt=buildingCellMerge:0`.
+
+## Headless render bench (CPU, no browser)
+
+`node --experimental-transform-types tools/bench/render/world.ts --map=vn-hangxanh [--frames=500] [--opt=...] [--dump=1]`
+builds the real map world (terrain, buildings, props as procedural stand-ins, grass, signs) and the sun cascades on a
+NullEngine, walks a street-level loop around the map centre and prints meshes, active meshes, draw calls and triangles
+(shadow passes separately) and the scene.render split. WebGL calls are no-ops, so its times understate a browser's per-draw
+cost; compare runs with each other. Soldiers, viewmodel and loot are not in it. `--cell=` sets the merged building cell
+size. `tools/bench/render/analyze.ts <map>` prints building draw and memory estimates per cell size.
+
+Render-side CPU round (2026-09-15), 500 frames, before = `--opt=buildingCellMerge:0,buildingShadowProxy:0,freezeStaticMaterials:0,sortBySubMeshMaterial:0`:
+
+| Map            | Meshes    | Active    | Draws/frame (shadow) | Triangles/frame (shadow) | scene.render |
+| -------------- | --------- | --------- | -------------------- | ------------------------ | ------------ |
+| Hàng Xanh      | 866 → 357 | 346 → 106 | 1008 (661) → 294 (45) | 2.33M (1.53M) → 1.90M (1.22M) | 4.32 → 0.94 ms |
+| Phan Đăng Lưu  | 823 → 341 | 303 → 99  | 907 (604) → 272 (45)  | 2.13M (1.46M) → 1.93M (1.35M) | 3.80 → 0.89 ms |
+| Map v1         | 837 → 702 | 235 → 175 | 409 (174) → 274 (55)  | 0.63M (0.18M) → 0.64M (0.19M) | 2.03 → 1.05 ms |
+
+With `shadowStaticCache:1,dynamicShadowsNearOnly:1` Hàng Xanh drops further to 221 draws (6 shadow) and 0.6M triangles
+while the view stays inside the cached cascades (the bench has no soldiers). Merged buildings on Hàng Xanh hold ~60 MB of
+GPU buffers and no CPU copy (thin-instance batches held ~27 MB on each side).
 
 ### Terrain texture fetches
 

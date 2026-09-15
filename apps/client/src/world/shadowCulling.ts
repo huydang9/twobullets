@@ -12,6 +12,12 @@ import {
 } from "@babylonjs/core";
 import { OPTIMIZATIONS } from "../perf/flags";
 
+/**
+ * Layer mask of meshes that only draw into shadow maps (shadow proxies). Cameras keep Babylon's default mask
+ * (0x0FFFFFFF) and shadow render lists skip the layer check, so these never reach a camera pass.
+ */
+export const SHADOW_ONLY_LAYER = 0x20000000;
+
 const staticCasters = new WeakSet<AbstractMesh>();
 let staticVersion = 0;
 
@@ -153,7 +159,7 @@ export class CascadeCasterCulling {
         cache.version === staticVersion &&
         cache.casters === renderList.length &&
         this.sliceInside(cache, layer) &&
-        !this.dynamicCasterTouches(cache.transform, renderList);
+        (this.staticOnly(layer) || !this.dynamicCasterTouches(cache.transform, renderList));
       this.skip[layer] = reuse;
       if (reuse) {
         cache.age++;
@@ -179,6 +185,7 @@ export class CascadeCasterCulling {
       return list;
     }
 
+    const staticOnly = this.staticOnly(layer);
     const cull = OPTIMIZATIONS.shadowCascadeCulling && matrix !== null;
     if (cull) Frustum.GetPlanesToRef(matrix, this.planes);
     list.length = 0;
@@ -188,15 +195,22 @@ export class CascadeCasterCulling {
       const mesh = renderList[i];
       if (!isDrawable(mesh)) continue;
       candidates++;
+      const isStatic = staticCasters.has(mesh);
+      if (staticOnly && !isStatic) continue;
       if (cull && !touchesAll(mesh.getBoundingInfo().boundingBox.vectorsWorld, this.testPlanes)) continue;
       list.push(mesh);
-      dynamic ||= !staticCasters.has(mesh);
+      dynamic ||= !isStatic;
     }
     cache.dynamic = dynamic;
     this.candidates = candidates;
     this.counts[layer] = list.length;
     // Disabled culling keeps Babylon's default path (one shared list for all layers).
-    return cull ? list : null;
+    return cull || staticOnly ? list : null;
+  }
+
+  /** `dynamicShadowsNearOnly`: the farthest of 3+ cascades draws static casters only. */
+  private staticOnly(layer: number): boolean {
+    return OPTIMIZATIONS.dynamicShadowsNearOnly && this.caches.length >= 3 && layer === this.caches.length - 1;
   }
 
   private beforeClear(state: EventState): void {

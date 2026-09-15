@@ -77,6 +77,8 @@ export function createBenchVariants(s: BenchSubsystems, select?: readonly string
     flag("shadowPcfLow", "shadows", ["PCF 1 tap", "PCF 4 taps"], refreshShadows),
     flag("shadowStaticCache", "shadows", ["static shadow cache on", "static shadow cache off"]),
     flag("shadowCascadeCulling", "shadows", ["cascade caster culling on", "cascade caster culling off"], undefined, false),
+    flag("dynamicShadowsNearOnly", "shadows", ["soldier shadows in near cascades only", "soldier shadows in every cascade"]),
+    flag("sortBySubMeshMaterial", "draws", ["opaque draws sorted by submesh material", "opaque draws sorted by mesh material"]),
     {
       id: "shadowMapsFrozen",
       group: "shadows",

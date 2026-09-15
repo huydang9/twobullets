@@ -16,6 +16,7 @@ import {
 import type { Terrain } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import { TEXTURE_SETS, type TextureSetId } from "../environmentManifest";
+import { freezeStaticMaterial } from "../materialFreeze";
 import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "../materials";
 
 /**
@@ -320,28 +321,41 @@ class TerrainSplatPlugin extends MaterialPluginBase {
   }
 
   override bindForSubMesh(ubo: UniformBuffer): void {
+    // Constant per material: computed once, so rebinds don't allocate.
+    const uniforms = (this.uniforms ??= this.computeUniforms());
+    for (let i = 0; i < uniforms.length; i++) {
+      const u = uniforms[i]!;
+      ubo.updateFloat4(u[0], u[1], u[2], u[3], u[4]);
+    }
+    for (let i = 0; i < SAMPLERS.length; i++) ubo.setTexture(SAMPLERS[i]!, this.textures[SAMPLERS[i]!]);
+  }
+
+  private uniforms: (readonly [string, number, number, number, number])[] | null = null;
+
+  private computeUniforms(): (readonly [string, number, number, number, number])[] {
     const macro = TEXTURE_SETS[LOOK.macro.set];
     const [mr, mg, mb] = macro.meanAlbedo;
     const grassTint = grassTintOf();
     const mean = (set: TextureSetId, tint: readonly number[] = [1, 1, 1]) => TEXTURE_SETS[set].meanAlbedo.map((c, i) => c * tint[i]!) as [number, number, number];
-    ubo.updateFloat4("tsMaskInfo", ...this.maskInfo);
-    ubo.updateFloat4("tsScale", 1 / LOOK.grass.meters, 1 / LOOK.dirt.meters, 1 / LOOK.rock.meters, 1 / LOOK.road.meters);
-    ubo.updateFloat4("tsScale2", LOOK.antiTileScale, 1 / LOOK.shoulder.meters, 0, 0);
-    ubo.updateFloat4("tsMacroScale", 1 / LOOK.macro.colorMeters, 1 / LOOK.macro.lumaMeters, 0, 0);
-    ubo.updateFloat4("tsMacroMean", mr, mg, mb, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb);
-    ubo.updateFloat4("tsMacroStrength", LOOK.macro.colorStrength, LOOK.macro.lumaStrength, 0, 0);
-    ubo.updateFloat4("tsGrassTint", ...grassTint, 0);
-    ubo.updateFloat4("tsShoulder", ...LOOK.shoulder.weight, 0, 0);
-    ubo.updateFloat4("tsLayerRoughness", TEXTURE_SETS[LOOK.grass.set].roughness, TEXTURE_SETS[LOOK.dirt.set].roughness, TEXTURE_SETS[LOOK.rock.set].roughness, TEXTURE_SETS[LOOK.road.set].roughness);
-    ubo.updateFloat4("tsBlend", LOOK.heightBlend.contrast, LOOK.heightBlend.depth, 0, 0);
-    ubo.updateFloat4("tsFade", LOOK.detailFade.start, LOOK.detailFade.end, 0, 0);
-    ubo.updateFloat4("tsDetail", LOOK.farDetail.start, LOOK.farDetail.end, 0, 0);
-    ubo.updateFloat4("tsGrassMean", ...mean(LOOK.grass.set, grassTint), 0);
-    ubo.updateFloat4("tsDirtMean", ...mean(LOOK.dirt.set), 0);
-    ubo.updateFloat4("tsRockMean", ...mean(LOOK.rock.set), 0);
-    ubo.updateFloat4("tsRoadMean", ...mean(LOOK.road.set), 0);
-    ubo.updateFloat4("tsShoulderMean", ...mean(LOOK.shoulder.set), 0);
-    for (const name of SAMPLERS) ubo.setTexture(name, this.textures[name]);
+    return [
+      ["tsMaskInfo", ...this.maskInfo],
+      ["tsScale", 1 / LOOK.grass.meters, 1 / LOOK.dirt.meters, 1 / LOOK.rock.meters, 1 / LOOK.road.meters],
+      ["tsScale2", LOOK.antiTileScale, 1 / LOOK.shoulder.meters, 0, 0],
+      ["tsMacroScale", 1 / LOOK.macro.colorMeters, 1 / LOOK.macro.lumaMeters, 0, 0],
+      ["tsMacroMean", mr, mg, mb, 0.2126 * mr + 0.7152 * mg + 0.0722 * mb],
+      ["tsMacroStrength", LOOK.macro.colorStrength, LOOK.macro.lumaStrength, 0, 0],
+      ["tsGrassTint", ...grassTint, 0],
+      ["tsShoulder", ...LOOK.shoulder.weight, 0, 0],
+      ["tsLayerRoughness", TEXTURE_SETS[LOOK.grass.set].roughness, TEXTURE_SETS[LOOK.dirt.set].roughness, TEXTURE_SETS[LOOK.rock.set].roughness, TEXTURE_SETS[LOOK.road.set].roughness],
+      ["tsBlend", LOOK.heightBlend.contrast, LOOK.heightBlend.depth, 0, 0],
+      ["tsFade", LOOK.detailFade.start, LOOK.detailFade.end, 0, 0],
+      ["tsDetail", LOOK.farDetail.start, LOOK.farDetail.end, 0, 0],
+      ["tsGrassMean", ...mean(LOOK.grass.set, grassTint), 0],
+      ["tsDirtMean", ...mean(LOOK.dirt.set), 0],
+      ["tsRockMean", ...mean(LOOK.rock.set), 0],
+      ["tsRoadMean", ...mean(LOOK.road.set), 0],
+      ["tsShoulderMean", ...mean(LOOK.shoulder.set), 0],
+    ];
   }
 
   override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
@@ -400,6 +414,7 @@ export class TerrainMaterial {
     // Mask texel centers sit on height samples: uv = ((xz - min) / spacing + 0.5) / resolution.
     const texel = 1 / (field.spacing * field.resolution);
     this.plugin = new TerrainSplatPlugin(material, textures, [field.minX, field.minZ, texel, 0.5 / field.resolution]);
+    freezeStaticMaterial(material);
 
     this.ready = Promise.all(Object.values(textures).filter((t) => t !== mask).map(waitForTexture)).then(() => undefined);
   }

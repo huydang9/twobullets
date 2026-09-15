@@ -13,6 +13,33 @@ export interface RenderOptimizations {
   smallPropShadowBand: boolean;
   /** Freeze the identity world matrices of thin-instance batches (props, grass, buildings). */
   staticBatchMatrices: boolean;
+  /**
+   * Buildings bake into one static mesh per 100 m world cell with one SubMesh per look, instead of thin-instanced
+   * meshes per prefab per look per 250 m cell (load time).
+   */
+  buildingCellMerge: boolean;
+  /**
+   * With buildingCellMerge: each cell casts shadows through a hidden proxy sharing its buffers, one draw per cascade,
+   * instead of one draw per look (load time).
+   */
+  buildingShadowProxy: boolean;
+  /**
+   * World materials (buildings, terrain, level blocks, props, grass, street signs) are frozen: Babylon skips their
+   * readiness checks and uniform uploads on rebinds. Dirty marks (flag toggles, fog, image processing) still recompile
+   * (load time).
+   */
+  freezeStaticMaterials: boolean;
+  /**
+   * Runtime. Opaque and alpha-tested submeshes sort by their own material (MultiMaterial parts included), so draws of one
+   * material run back to back and skip rebinding it.
+   */
+  sortBySubMeshMaterial: boolean;
+  /**
+   * Runtime. Dynamic casters (soldiers, anything not marked static) skip the farthest shadow cascade (past ~30 m with 3
+   * cascades): distant soldiers cast no shadow. With shadowStaticCache the far cascade then re-renders only when the view
+   * leaves its margin.
+   */
+  dynamicShadowsNearOnly: boolean;
   /** Static level blocks (the arena, the Training Yard) draw as one merged mesh per material instead of one per block. */
   mergeLevelBlocks: boolean;
   /** Grass rewrites a persistent dynamic GPU buffer instead of allocating a new one on every rebuild. */
@@ -61,6 +88,11 @@ const DEFAULTS: RenderOptimizations = {
   shadowCascadeCulling: true,
   smallPropShadowBand: true,
   staticBatchMatrices: true,
+  buildingCellMerge: true,
+  buildingShadowProxy: true,
+  freezeStaticMaterials: true,
+  sortBySubMeshMaterial: true,
+  dynamicShadowsNearOnly: false,
   mergeLevelBlocks: true,
   grassDynamicBuffers: true,
   terrainLodHysteresis: true,

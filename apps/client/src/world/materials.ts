@@ -1,6 +1,7 @@
 import { Color3, PBRMaterial, Texture, type BaseTexture, type Mesh, type Scene } from "@babylonjs/core";
 import type { SurfaceKind } from "@twobullets/shared";
 import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "./environmentManifest";
+import { freezeStaticMaterial } from "./materialFreeze";
 import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "./surfaceVariation";
 
 export const ENVIRONMENT_ASSET_ROOT = `${import.meta.env?.BASE_URL ?? "/"}assets/environment/`;
@@ -109,6 +110,7 @@ export class LevelMaterials {
       new SurfaceVariationPlugin(material, macro, TEXTURE_SETS[MACRO_SET].meanAlbedo, look.variation);
     }
 
+    freezeStaticMaterial(material);
     return material;
   }
 

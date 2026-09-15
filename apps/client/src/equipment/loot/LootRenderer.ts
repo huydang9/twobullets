@@ -36,6 +36,8 @@ interface Batch {
   readonly highlight: Mesh;
   readonly small: boolean;
   matrices: Float32Array;
+  /** The array the GPU buffer was created from; rebuilds that keep it update the buffer in place. */
+  uploaded: Float32Array | null;
   count: number;
   /** Loot id per instance index, for hiding the highlighted instance. */
   readonly lootIds: number[];
@@ -111,8 +113,15 @@ export class LootRenderer {
     for (const batch of this.batches.values()) {
       batch.mesh.setEnabled(batch.count > 0);
       if (batch.count === 0) continue;
-      batch.mesh.thinInstanceSetBuffer("matrix", batch.matrices, 16, false);
-      batch.mesh.thinInstanceCount = batch.count;
+      if (batch.uploaded !== batch.matrices) {
+        // New or grown array: a new dynamic GPU buffer. Otherwise the existing one is rewritten in place.
+        batch.mesh.thinInstanceSetBuffer("matrix", batch.matrices, 16, false);
+        batch.uploaded = batch.matrices;
+        batch.mesh.thinInstanceCount = batch.count;
+      } else {
+        batch.mesh.thinInstanceCount = batch.count;
+        batch.mesh.thinInstanceBufferUpdated("matrix");
+      }
       batch.mesh.thinInstanceRefreshBoundingInfo(false);
     }
     this.highlightedLootId = -1;
@@ -197,7 +206,7 @@ export class LootRenderer {
     highlight.setEnabled(false);
     this.options.skyFill?.excludedMeshes.push(highlight);
 
-    batch = { mesh, highlight, small: SMALL_CATEGORIES.has(ITEMS[itemId].category), matrices: new Float32Array(16 * 8), count: 0, lootIds: [] };
+    batch = { mesh, highlight, small: SMALL_CATEGORIES.has(ITEMS[itemId].category), matrices: new Float32Array(16 * 8), uploaded: null, count: 0, lootIds: [] };
     this.batches.set(itemId, batch);
     return batch;
   }

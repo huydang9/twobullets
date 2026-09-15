@@ -2,6 +2,7 @@ import { Color3, PBRMaterial, Texture, type Scene } from "@babylonjs/core";
 import type { BuildingMaterialId, BuildingPrefabId, FacadeColor } from "@twobullets/shared";
 import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "../environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "../materials";
+import { freezeStaticMaterial } from "../materialFreeze";
 import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "../surfaceVariation";
 import { BuildingShadePlugin, type BuildingShadeSettings } from "./buildingShadePlugin";
 
@@ -184,6 +185,7 @@ export class BuildingMaterials {
     const shade: BuildingShadeSettings = { ...DEFAULT_SHADE, minOcclusion: this.occlusionEnabled ? DEFAULT_SHADE.minOcclusion : 1, grimeStrength: look.grime ?? 0 };
     this.shade.push(shade);
     new BuildingShadePlugin(material, shade);
+    freezeStaticMaterial(material);
     return material;
   }
 
