@@ -274,7 +274,7 @@ export class OfflineMatch {
         { label: text.teamMode, options: TEAM_MODES, labels: TEAM_MODES.map((mode) => text.modeName(mode)), value: this.teamMode, onChange: (value) => this.setMatchSize(this.maxPlayers, value as TeamMode) },
       ],
       playLabel: text.start,
-      details: text.details({ players: this.maxPlayers, teams: teamCount, mode: this.teamMode, teammate: this.options.teammate, zoneScale: this.options.zoneScale, seed: this.seed }),
+      details: text.details({ mapName: this.deps.world.map.id === "v1" ? undefined : this.deps.world.map.name, players: this.maxPlayers, teams: teamCount, mode: this.teamMode, teammate: this.options.teammate, zoneScale: this.options.zoneScale, seed: this.seed }),
     });
   }
 

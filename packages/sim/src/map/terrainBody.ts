@@ -5,6 +5,7 @@ import { PhysicsMotionType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlug
 import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
 import { PhysicsShapeHeightField } from "@babylonjs/core/Physics/v2/physicsShape.js";
 import type { Scene } from "@babylonjs/core/scene.js";
+import { CollisionLayer } from "../collisionLayers";
 import { LEVEL_MATERIAL } from "../level/shapes";
 import type { Heightfield } from "@twobullets/shared/map/terrain/heightfield";
 
@@ -17,6 +18,13 @@ export interface TerrainShapeOptions {
   readonly friction?: number;
   /** Shape filter membership bits. Default: Havok's default (all bits), the same as level geometry. */
   readonly membershipMask?: number;
+  /**
+   * Shape filter collide bits. Default: everything except hitboxes. A hitbox trigger (an ANIMATED body) overlapping the
+   * heightfield hangs Havok's step in Node and throws "memory access out of bounds" in the browser, e.g. when a bot's
+   * shin capsules dip a few cm into the terrain at a real map's spawn. Queries still hit the terrain, since their filter
+   * is checked against its membership.
+   */
+  readonly collideMask?: number;
 }
 
 /**
@@ -45,6 +53,7 @@ export function createTerrainShape(scene: Scene, field: Heightfield, options: Te
   const shape = new PhysicsShapeHeightField(field.size, field.size, samples, samples, heightfieldToHavokOrder(field, stride), scene);
   shape.material = { friction: options.friction ?? LEVEL_MATERIAL.friction, restitution: LEVEL_MATERIAL.restitution };
   if (options.membershipMask !== undefined) shape.filterMembershipMask = options.membershipMask;
+  shape.filterCollideMask = options.collideMask ?? ~CollisionLayer.hitbox;
   return shape;
 }
 

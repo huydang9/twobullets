@@ -24,9 +24,9 @@ export const MATCH_STRINGS = {
     },
     modeName: (mode: TeamMode): string => t(`setup.mode.${mode}`),
     /** "Map v1 · 20 người chơi · 5 tổ đội · seed 1234". */
-    details: (p: { players: number; teams: number; mode: TeamMode; teammate: boolean; zoneScale: number; seed: number }): string =>
+    details: (p: { mapName?: string; players: number; teams: number; mode: TeamMode; teammate: boolean; zoneScale: number; seed: number }): string =>
       [
-        t("setup.details.map"),
+        p.mapName ?? t("setup.details.map"),
         t("setup.details.players", { count: p.players }),
         p.mode === "solo" ? t("setup.details.solo") : t(p.mode === "squad" ? "setup.details.squads" : "setup.details.duos", { count: p.teams }),
         p.teammate || p.mode === "solo" ? "" : t("setup.details.noTeammates"),
