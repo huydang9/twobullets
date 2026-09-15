@@ -1,0 +1,14 @@
+# Build the images on the server from a git checkout instead of pulling from a registry.
+# Copy to /opt/twobullets/compose.override.yml (docker compose merges it automatically, so backup.sh/keys.sh keep working)
+# with the repo cloned at /opt/twobullets/src, and set TB_REGISTRY=local, TB_TAG=<branch or tag> in .env.
+services:
+  web:
+    build:
+      context: ./src
+      dockerfile: infra/docker/web.Dockerfile
+  server:
+    build:
+      context: ./src
+      dockerfile: infra/docker/server-api.Dockerfile
+      args:
+        TB_BUILD: ${TB_TAG}

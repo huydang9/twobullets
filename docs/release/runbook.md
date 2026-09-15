@@ -36,6 +36,20 @@ curl -s https://play.<domain>/readyz      # {"ok":true,...}
 
 **Nightly backup:** add `30 3 * * * /opt/twobullets/backup.sh >> /opt/twobullets/backup.log 2>&1` to crontab.
 
+### Alternative: build on the server from the repo (no registry)
+
+```bash
+cd /opt/twobullets
+git clone https://github.com/huydang9/twobullets.git src
+cp src/infra/docker-compose.yml . && cp src/infra/compose.build.override.yml compose.override.yml
+cp src/infra/.env.example .env && chmod 600 .env   # TB_REGISTRY=local, TB_TAG=main (image tag label)
+cp src/infra/scripts/{backup,keys}.sh . && chmod +x backup.sh keys.sh
+docker compose build          # web build runs Vite: needs ~2–4 GB free RAM
+./keys.sh generate && docker compose up -d
+# update:  git -C src pull && docker compose build && docker compose up -d
+# rollback: git -C src checkout <good-tag> && docker compose build && docker compose up -d
+```
+
 ## Key `.env` settings
 
 | Var | Meaning |
