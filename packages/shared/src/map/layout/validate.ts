@@ -71,8 +71,8 @@ export function validateMapLayout(map: MapData, terrain: Terrain, layout: MapLay
 
   const roadGap = options.roadGap ?? 1;
   for (const b of buildings) {
-    // Against roads: sample each path near the building.
-    for (const path of paths) {
+    // Against roads: sample each path near the building. Bridges stand on the road they carry.
+    for (const path of getBuildingPrefab(b.prefab).spansRoad ? [] : paths) {
       const clearance = path.halfWidth + roadGap;
       if (distanceToPath(b.bounds, path.points, clearance) < clearance) issue("building-on-road", `${b.id} is within ${roadGap} m of a ${path.kind} road (flatten #${path.index})`);
     }

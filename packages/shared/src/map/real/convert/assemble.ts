@@ -8,7 +8,9 @@ import { mapPaths, roadFlatten, type RoadSpec } from "../../layout/roads";
 import { seedFromId, type ScatterRule } from "../../layout/scatter";
 import { validateMapLayout, type MapIssue, type ValidationOptions } from "../../layout/validate";
 import { buildTerrain, type Terrain } from "../../terrain/terrain";
+import { distanceToRect } from "../../layout/geometry";
 import type { FlattenRegion, MapData, MapSpawn, PointOfInterest, PropPlacement, TerrainSpec } from "../../types";
+import { findBridges, type BridgeSite } from "./bridges";
 import { buildingCandidates, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, type PlacedBuilding, type PlacementReport } from "./buildings";
 import { realTerrainSpec, type ElevationReport } from "./elevation";
 import { convertLanduse, insideAny, trimRoadsAtWater, waterEdges, waterPolygons, type LanduseReport } from "./landuse";
@@ -55,6 +57,8 @@ export interface ConvertReport {
   readonly droppedByValidation: number;
   readonly buildings: number;
   readonly buildingsByPrefab: Readonly<Record<string, number>>;
+  /** City maps: bridges laid over water and creek crossings (kept after validation). */
+  readonly bridges?: readonly { readonly id: string; readonly prefab: string; readonly road: string; readonly span: number; readonly at: readonly [number, number] }[];
   readonly pois: PoiReport & { readonly count: number };
   readonly spawns: number;
   readonly landuse: LanduseReport;
@@ -116,13 +120,14 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   const water = waterPolygons(parsed.areas);
   const roads = trimRoadsAtWater(converted.roads, water);
   const creeks = convertCreeks(parsed.lines, (x, z) => insideAny(water, x, z));
-  const edges = waterEdges(water, roads);
+  const bridges: readonly BridgeSite[] = urban ? findBridges(roads, water, parsed.lines) : [];
+  const edges = urban ? waterEdges(water, roads, (x, z) => bridges.some((b) => distanceToRect(b.bounds, x, z) === 0)) : waterEdges(water, roads);
   const fences = edges.fences;
   const props = fenceProps(fences);
   const openings = fenceOpenings(fences);
   const flattenPaths = mapPaths({ flatten: [...creeks, ...roads.map(roadFlatten)] });
   const isolated = water.length > 0 ? isolatedLand(config, spec, creeks, roads, props) : () => false;
-  const footprints = buildingCandidates(parsed.buildings, urban !== undefined).filter((c) => !isolated(c.centroid[0], c.centroid[1]));
+  const footprints = buildingCandidates(parsed.buildings, urban !== undefined, urban ? parsed.amenities : []).filter((c) => !isolated(c.centroid[0], c.centroid[1]));
   const candidates = urban ? [...rankFootprints(footprints, roads), ...frontageCandidates(roads, parsed.buildings, parsed.areas, urban).filter((c) => !isolated(c.centroid[0], c.centroid[1]))] : footprints;
   const cap = config.buildingCap ?? DEFAULT_BUILDING_CAP;
   log(`${config.id}: ${roads.length} roads (${roadReport.asphaltKm} km asphalt, ${roadReport.dirtKm} km dirt), ${creeks.length} creek beds, ${water.length} water areas (${edges.length} m of fence), ${candidates.length} building candidates${urban ? ` (${footprints.length} OSM footprints, ${candidates.length - footprints.length} frontage slots)` : ""}`);
@@ -134,6 +139,8 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const space = new PlacementSpace(flattenPaths, water);
+    const keptBridges = bridges.filter((b) => !excluded.has(b.id));
+    for (const b of keptBridges) space.addPlaced(b.bounds);
     const placed = placeBuildings(candidates, space, urban ? { cap, excluded, cellQuota: urbanDefaults(urban).cellQuota } : { cap, excluded });
     const poiResult = convertPois(placed.buildings, config, parsed.points, parsed.areas, parsed.buildings, water, isolated);
     const pads = buildingPads(placed.buildings, spec);
@@ -143,6 +150,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
       const poi = poiResult.membership.get(b.id);
       return { id: b.id, prefab: b.prefab, position: b.position, yaw: b.yaw, snapToTerrain: true, ...(poi ? { poi } : {}) };
     });
+    for (const b of keptBridges) buildings.push({ id: b.id, prefab: b.prefab, position: b.position, yaw: b.yaw, snapToTerrain: true });
     const { spawns, short } = pickSpawns(poiResult.pois, terrain, placed.buildings, props, space, blockedSpawns, isolated);
     const { scatters, report: landuse } = convertLanduse(parsed.areas, parsed.lines, roads, poiResult.pois, water, openings, config);
     const map: MapData = {
@@ -161,7 +169,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     const validation = realValidationOptions(openings, urban !== undefined);
     const issues = validateMapLayout(map, terrain, layout, validation);
     const before = excluded.size + blockedSpawns.size;
-    const unhandled = handleIssues(issues, placed.buildings, excluded, blockedSpawns);
+    const unhandled = handleIssues(issues, [...placed.buildings, ...keptBridges], excluded, blockedSpawns);
     log(`${config.id} pass ${iteration}: ${placed.buildings.length} buildings, ${poiResult.pois.length} POIs, ${spawns.length} spawns${short.length ? ` (short: ${short.join(", ")})` : ""}, ${issues.length} issues`);
 
     let reachability: ReachabilityReport | null = null;
@@ -188,6 +196,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
         droppedByValidation: excluded.size,
         buildings: buildings.length,
         buildingsByPrefab: byPrefab,
+        ...(urban ? { bridges: keptBridges.map((b) => ({ id: b.id, prefab: b.prefab, road: b.road, span: b.span, at: [b.position[0], b.position[2]] as const })) } : {}),
         pois: { ...poiResult.report, count: poiResult.pois.length },
         spawns: spawns.length,
         landuse,
@@ -237,7 +246,7 @@ const ID_PATTERN = /\b(bld_r?\d+)\b/g;
  * Turns validation issues into exclusions: the lower-priority building of an overlapping pair (placed later), any building
  * with a pad, entrance, road or prop problem, and spawns that fail. Returns issues it could not attribute.
  */
-function handleIssues(issues: readonly MapIssue[], placed: readonly PlacedBuilding[], excluded: Set<string>, blockedSpawns: Set<string>): MapIssue[] {
+function handleIssues(issues: readonly MapIssue[], placed: readonly { readonly id: string }[], excluded: Set<string>, blockedSpawns: Set<string>): MapIssue[] {
   const order = new Map(placed.map((b, i) => [b.id, i] as const));
   const unhandled: MapIssue[] = [];
   for (const issue of issues) {

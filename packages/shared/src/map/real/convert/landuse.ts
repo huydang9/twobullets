@@ -108,7 +108,7 @@ export interface WaterEdges {
  * roads cross, and roads running through water get railings on both shoulders. Edges on the map boundary are skipped
  * (the out-of-bounds rule covers them).
  */
-export function waterEdges(water: readonly Polygon[], roads: readonly RoadSpec[]): WaterEdges {
+export function waterEdges(water: readonly Polygon[], roads: readonly RoadSpec[], bridged: (x: number, z: number) => boolean = () => false): WaterEdges {
   const fences: FenceLine[] = [];
   let length = 0;
   const onBoundary = (a: Vec2Tuple, b: Vec2Tuple) => (Math.abs(a[0]) >= 499.9 && Math.abs(b[0]) >= 499.9 && a[0] * b[0] > 0) || (Math.abs(a[1]) >= 499.9 && Math.abs(b[1]) >= 499.9 && a[1] * b[1] > 0);
@@ -163,7 +163,8 @@ export function waterEdges(water: readonly Polygon[], roads: readonly RoadSpec[]
       let end = i;
       while (end + 1 < samples.length && wet[end + 1]) end++;
       const run = samples.slice(Math.max(0, i - 2), Math.min(samples.length, end + 3));
-      if (run.length >= 2) {
+      const middle = samples[Math.floor((i + end) / 2)]!;
+      if (run.length >= 2 && !bridged(middle[0], middle[1])) {
         for (const side of [1, -1] as const) {
           const line = simplifyPolyline(bandAlong(run, width / 2 + 1.2, width / 2 + 1.2, side).slice(0, run.length), 0.3);
           fences.push({ points: line.map((p): Vec2Tuple => [round3(p[0]), round3(p[1])]) });
@@ -264,6 +265,8 @@ export function convertLanduse(
   config: PlaceConfig,
 ): { scatters: ScatterRule[]; report: LanduseReport } {
   const tropical = config.climate === "tropical";
+  // City maps: street trees, parks and urban cover (parked cars, utility boxes, barrels) instead of village groves.
+  const urban = config.urban !== undefined;
   const forestPalette = tropical ? TROPICAL : CONIFERS;
   const openPalette = tropical ? TROPICAL : DECIDUOUS;
   const playable: Vec2Tuple[] = [[-SCATTER_CLIP, -SCATTER_CLIP], [SCATTER_CLIP, -SCATTER_CLIP], [SCATTER_CLIP, SCATTER_CLIP], [-SCATTER_CLIP, SCATTER_CLIP]];
@@ -295,7 +298,7 @@ export function convertLanduse(
     const id = `wood_${i + 1}`;
     add({ id: `${id}_oaks`, props: [{ prop: "tree_oak_fungi", weight: 1 }], area, density: 0.04, mask: { wavelength: 80, threshold: 0.32 }, edgeFade: 20, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: holes(wood), minDistance: 14, scaleRange: [0.9, 1.1] });
   });
-  add({ id: "field_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: playable, density: 0.012, maxSlopeDegrees: 14, excludeSurfaces: ["road", "dirt"], exclude: [...poiCores, ...woodRings], minDistance: 55, scaleRange: [0.85, 1.15] });
+  if (!urban) add({ id: "field_oaks", props: [{ prop: "tree_oak_large", weight: 1 }], area: playable, density: 0.012, maxSlopeDegrees: 14, excludeSurfaces: ["road", "dirt"], exclude: [...poiCores, ...woodRings], minDistance: 55, scaleRange: [0.85, 1.15] });
   woods.forEach((wood, i) => {
     const area = woodRings[i];
     if (!area) return;
@@ -314,7 +317,7 @@ export function convertLanduse(
     add({ id: `orchard_${i + 1}`, props: [{ prop: "tree_broadleaf_a", weight: 2 }, { prop: "tree_broadleaf_b", weight: 1 }], area: areaRing(o), density: 0.9, maxSlopeDegrees: 20, excludeSurfaces: ["road"], clearance: 1.5, scaleRange: [0.7, 0.9] });
   });
   residential.forEach((r, i) => {
-    add({ id: `gardens_${i + 1}`, props: [{ prop: "tree_broadleaf_b", weight: 1 }, { prop: "bush_c", weight: 2 }, { prop: "bush_a", weight: 2 }], area: areaRing(r), density: 0.5, avoidPads: false, clearance: 2.5, excludeSurfaces: ["road"], scaleRange: [0.7, 1.1] });
+    add({ id: `gardens_${i + 1}`, props: [{ prop: "tree_broadleaf_b", weight: 1 }, { prop: "bush_c", weight: 2 }, { prop: "bush_a", weight: 2 }], area: areaRing(r), density: urban ? 0.12 : 0.5, avoidPads: false, clearance: 2.5, excludeSurfaces: ["road"], scaleRange: [0.7, 1.1] });
   });
   // Tree rows: a 5 m band along each row.
   lines
@@ -333,9 +336,30 @@ export function convertLanduse(
 
   // Groves between settlements and tree lines along roads outside them break long sightlines (Map v1's feedback: no
   // big blank fields).
-  add({ id: "groves", props: openPalette, area: playable, density: 1.3, mask: { wavelength: 100, threshold: 0.58, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...poiCores, ...woodRings], scaleRange: [0.8, 1.3] });
+  if (urban) {
+    areas
+      .filter((a) => ["park", "garden", "playground"].includes(a.tags.leisure ?? "") || ["grass", "village_green"].includes(a.tags.landuse ?? "") || a.tags.place === "square")
+      .filter((a) => a.area >= 150)
+      .sort((a, b) => b.area - a.area || a.id - b.id)
+      .slice(0, 16)
+      .forEach((park, i) => {
+        const area = areaRing(park, 1);
+        add({ id: `park_${i + 1}_trees`, props: TROPICAL, area, density: 0.45, clearance: 2, maxSlopeDegrees: 30, excludeSurfaces: ["road"], scaleRange: [0.9, 1.3] });
+        add({ id: `park_${i + 1}_bushes`, props: BUSHES, area, density: 0.8, maxSlopeDegrees: 30, excludeSurfaces: ["road"], scaleRange: [0.8, 1.3] });
+      });
+    // Street trees in the gaps along streets (houses and their pads keep them out of the frontage).
+    roads
+      .filter((road) => (road.width ?? 5) >= 5.5 && polylineLength(road.points) >= 40)
+      .forEach((road) => {
+        for (const side of [1, -1] as const) {
+          const inner = (road.width ?? 5) / 2 + 3;
+          add({ id: `${road.id}_street_trees_${side > 0 ? "r" : "l"}`, props: TROPICAL, area: roundRing(bandAlong(road.points, inner, inner + 4, side)), density: 2.4, clearance: 0.8, minDistance: 7, maxSlopeDegrees: 30, scaleRange: [0.85, 1.2] });
+        }
+      });
+  }
+  if (!urban) add({ id: "groves", props: openPalette, area: playable, density: 1.3, mask: { wavelength: 100, threshold: 0.58, softness: 0.05 }, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...poiCores, ...woodRings], scaleRange: [0.8, 1.3] });
   roads
-    .filter((road) => polylineLength(road.points) >= 60)
+    .filter((road) => !urban && polylineLength(road.points) >= 60)
     .forEach((road) => {
       for (const side of [1, -1] as const) {
         const inner = (road.width ?? 5) / 2 + 2.5;
@@ -344,7 +368,24 @@ export function convertLanduse(
     });
 
   // Map-wide cover (Map v1's layers).
-  add({
+  if (urban) {
+    add({
+      id: "urban_cover",
+      props: [
+        { prop: "car_covered", weight: 3 },
+        { prop: "utility_box", weight: 2 },
+        { prop: "barrel_rusty", weight: 1.5 },
+        { prop: "road_barrier", weight: 1 },
+        { prop: "bush_c", weight: 1 },
+      ],
+      area: playable,
+      density: 0.035,
+      cluster: { count: [1, 3], radius: 5, anchor: { props: [{ prop: "car_wreck", weight: 1 }, { prop: "pipe_stack", weight: 1 }], chance: 0.15, scaleRange: [0.95, 1.05] } },
+      maxSlopeDegrees: 20,
+      excludeSurfaces: ["road"],
+      scaleRange: [0.95, 1.05],
+    });
+  } else add({
     id: "field_cover",
     props: [
       { prop: "rock_boulder_b", weight: 1 },
@@ -367,8 +408,8 @@ export function convertLanduse(
   add({ id: "slope_boulders", props: [{ prop: "rock_boulder_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 18, maxSlopeDegrees: 35, exclude: poiCores, minDistance: 25, scaleRange: [0.9, 1.6] });
   add({ id: "slope_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 25, maxSlopeDegrees: 45, exclude: poiCores, minDistance: 40, faceDownhill: true, scaleRange: [0.9, 1.2] });
   add({ id: "slope_rocks", props: [{ prop: "rock_small", weight: 4 }, { prop: "rock_moss_b", weight: 1 }, { prop: "rock_boulder_a", weight: 1 }], area: playable, density: 0.6, minSlopeDegrees: 17, maxSlopeDegrees: 60, scaleRange: [0.7, 1.4] });
-  add({ id: "cover_fill", props: [{ prop: "rock_boulder_large", weight: 1 }], area: playable, density: 0.06, bareRadius: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...woodRings, ...poiCores], scaleRange: [0.9, 1.3] });
-  add({ id: "meadow_bushes", props: BUSHES, area: playable, density: 0.12, mask: { wavelength: 70, threshold: 0.45 }, maxSlopeDegrees: 30, excludeSurfaces: ["road", "rock"], scaleRange: [0.7, 1.3] });
+  add({ id: "cover_fill", props: [{ prop: urban ? "car_covered" : "rock_boulder_large", weight: 1 }], area: playable, density: 0.06, bareRadius: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...woodRings, ...poiCores], scaleRange: [0.9, 1.3] });
+  add({ id: "meadow_bushes", props: BUSHES, area: playable, density: urban ? 0.05 : 0.12, mask: { wavelength: 70, threshold: 0.45 }, maxSlopeDegrees: 30, excludeSurfaces: ["road", "rock"], scaleRange: [0.7, 1.3] });
   // Grass (client-side detail around the viewer): water zones only, fence gaps don't matter for it.
   rules.push({ id: "grass", props: [{ prop: "grass_clump_short", weight: 3 }, { prop: "grass_clump_medium", weight: 2 }, { prop: "grass_clump_tall", weight: 1 }], area: playable, density: 30, mask: { wavelength: 28, threshold: 0.42, softness: 0.2 }, maxSlopeDegrees: 35, excludeSurfaces: ["road", "dirt", "rock"], exclude: waterZones, scaleRange: [0.7, 1.3], detail: true });
 

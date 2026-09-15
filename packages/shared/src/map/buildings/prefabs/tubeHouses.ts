@@ -19,6 +19,12 @@ export interface TubeHouseSpec {
   readonly depth: number;
   readonly stories: 2 | 3 | 4;
   readonly roof: "parapet" | "terrace" | "gable";
+  /** Upper-floor window beside the balcony door (default true; too tight on narrow houses). */
+  readonly upperWindow?: boolean;
+  /** Terracotta plant boxes along the balconies, clear of the balcony door. */
+  readonly planters?: boolean;
+  /** Corrugated lean-to shed over the back of a roof terrace. */
+  readonly roofShed?: boolean;
 }
 
 const WALL = { exterior: "plaster", interior: "plasterInterior", frame: "darkSteel" } as const;
@@ -67,7 +73,7 @@ export function tubeHouse(spec: TubeHouseSpec): BuildingPrefab {
       story === 0
         ? [{ kind: "door", at: 0, width: shopDoor, head: 2.6 } as const]
         : [
-            { kind: "window", at: -hw + 1.05 } as const,
+            ...(spec.upperWindow === false ? [] : [{ kind: "window", at: -hw + 1.05 } as const]),
             { kind: "door", u: balconyDoor } as const,
           ];
     b.shell({ ...WALL, x: [-hw, hw], z: [-hd, hd], y: [y0, y0 + H], openings: { "+z": front, "-z": [{ kind: "window", at: 0.4, ...SMALL_WINDOW }] } });
@@ -109,7 +115,13 @@ export function tubeHouse(spec: TubeHouseSpec): BuildingPrefab {
     if (story > 0) {
       b.slab({ x: [-hw, hw], z: [hd, hd + BALCONY_DEPTH], y: [y0 - KIT.slabThickness, y0], top: "concrete", bottom: "plaster", side: "plaster" });
       b.railing([[-hw + 0.035, hd + 0.035], [-hw + 0.035, hd + BALCONY_DEPTH - 0.035], [hw - 0.035, hd + BALCONY_DEPTH - 0.035], [hw - 0.035, hd + 0.035]], y0, "darkSteel");
-      b.room(`balcony${story}`, y0, [-hw + 0.1, hw - 0.1], [hd + 0.05, hd + BALCONY_DEPTH - 0.1], false);
+      // Wide balconies stay under 4 m² as rooms: too shallow for a loot spot, so they must not count as sizeable.
+      b.room(`balcony${story}`, y0, [-hw + 0.1, spec.width > 5 ? -hw + 4.7 : hw - 0.1], [hd + 0.05, hd + BALCONY_DEPTH - 0.1], false);
+      if (spec.planters) {
+        for (const x of [[-hw + 0.1, balconyDoor[0] - 0.1], [balconyDoor[1] + 0.1, hw - 0.1]] as const) {
+          if (x[1] - x[0] > 0.3) b.box(x, [y0, y0 + 0.45], [hd + 0.55, hd + 0.9], "roofMetal", "prop");
+        }
+      }
     }
   }
 
@@ -135,6 +147,15 @@ export function tubeHouse(spec: TubeHouseSpec): BuildingPrefab {
     raisedFloor(b, top, terrace, [doorApron], [tum.x[1], tumDoor]);
     b.room("terrace", top, terrace.x, terrace.z, false);
     b.room("stairHead", top, [tum.x[0] + t, tum.x[1] - t], [tum.z[0] + t, STAIR_BACK]);
+    if (spec.roofShed) {
+      // Lean-to on thin posts (under the nav support width) over the back of the terrace, falling toward the back.
+      const shedFront = hd - 2.4;
+      const shedY = top + 2.4;
+      b.wedge([tum.x[1] + 0.05, hw], [shedY, shedY + 0.4], [-hd, shedFront], "+z", "corrugated", "corrugated", "roof");
+      for (const px of [tum.x[1] + 0.15, ix[1] - 0.15]) {
+        for (const pz of [iz[0] + 0.15, shedFront - 0.15]) b.box([px - 0.05, px + 0.05], [top + RAISED, shedY], [pz - 0.05, pz + 0.05], "darkSteel", "structure");
+      }
+    }
   } else {
     const rise = hw * Math.tan((55 * Math.PI) / 180);
     const zr: Range = [-hd - 0.3, hd + 0.3];
@@ -199,4 +220,12 @@ export const TUBE_HOUSES: readonly TubeHouseSpec[] = [
   { id: "tube_house_2", name: "Tube house (2 stories)", width: 4.2, depth: 12, stories: 2, roof: "parapet" },
   { id: "tube_house_3", name: "Tube house (3 stories, roof terrace)", width: 4.5, depth: 14, stories: 3, roof: "terrace" },
   { id: "tube_house_4", name: "Tube house (4 stories, gable roof)", width: 4.8, depth: 15, stories: 4, roof: "gable" },
+];
+
+/** City variants: narrow and wide frontages, balcony plant boxes, a roof terrace with a tin shed. */
+export const TUBE_HOUSE_VARIANTS: readonly TubeHouseSpec[] = [
+  { id: "tube_house_narrow", name: "Tube house (narrow, 3 stories)", width: 3.8, depth: 12, stories: 3, roof: "parapet", upperWindow: false },
+  { id: "tube_house_wide", name: "Tube house (wide, 3 stories)", width: 6.2, depth: 14, stories: 3, roof: "parapet" },
+  { id: "tube_house_planters", name: "Tube house (3 stories, plant boxes)", width: 4.6, depth: 13, stories: 3, roof: "parapet", planters: true },
+  { id: "tube_house_shed", name: "Tube house (2 stories, roof shed)", width: 4.4, depth: 13, stories: 2, roof: "terrace", roofShed: true },
 ];

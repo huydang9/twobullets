@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildPrefabLayer } from "../../bots/nav/prefabLayer";
 import { MOVEMENT } from "../../constants";
 import { buildPrefabGeometry } from "./geometry";
 import { KIT, subtractRects } from "./kit";
@@ -63,6 +64,18 @@ describe.each(prefabs)("%s", (id, prefab) => {
     }
   });
 
+  it("fits a standing capsule over the middle of every tread", () => {
+    const structure = new PartBvh(prefab.parts.filter((p) => p.role !== "stairs" && p.role !== "railing"));
+    const r = MOVEMENT.capsuleRadius;
+    for (const flight of prefab.stairs) {
+      for (const t of flight.treads) {
+        const [cx, cz] = [(t.min[0] + t.max[0]) / 2, (t.min[2] + t.max[2]) / 2];
+        const y = t.max[1];
+        expect(structure.overlapsBox([cx - r, y + MOVEMENT.maxStepHeight + 0.01, cz - r], [cx + r, y + MOVEMENT.standHeight + SKIN, cz + r]), `tread at y=${y} [${t.min}]`).toBe(false);
+      }
+    }
+  });
+
   it("has doorways a standing player fits through", () => {
     const passage = 2 * (MOVEMENT.capsuleRadius + SKIN);
     const crouchOnly = (min: Vec3Tuple, max: Vec3Tuple) => prefab.crouchPassages.some((c) => boxesOverlap(c.min, c.max, min, max));
@@ -121,6 +134,10 @@ describe.each(prefabs)("%s", (id, prefab) => {
       const r = MOVEMENT.capsuleRadius;
       expect(bvh.overlapsBox([x - r, y + 0.01, z - r], [x + r, y + MOVEMENT.standHeight, z + r]), `entrance ${[x, y, z]}`).toBe(false);
     }
+  });
+
+  it("keeps within the nav grid's walkable levels per column", () => {
+    expect(buildPrefabLayer(prefab, 0.25, 0.3).overflowColumns).toBe(0);
   });
 
   it("generates deterministic geometry with baked visibility in range", () => {

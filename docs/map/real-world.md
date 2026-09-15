@@ -127,50 +127,76 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
 
 **What urban mode does:**
 - **Roads:** alleys (hẻm) and unclassified ways are paved; service ways are 3.5 m.
-- **Buildings:**
-  - OSM footprints map to `tube_house_2/3/4` (by `building:levels`, else a seeded mix) or to flat-roofed blocks. No barns, containers or ruins.
-  - OSM has few of the real tube houses, so `convert/urban.ts` lays **frontage rows** along every mapped street, on both sides:
-    - fronts at the road gap, neighbours 0.16 m apart (validation `buildingGap` 0.1);
-    - a 3 m walk-through every 5–7 houses;
-    - none on parks, pitches, school, market or hospital grounds, water or mapped footprints;
-    - none within 40 m of the center, so the junction stays open.
-  - Main roads get taller houses, alleys lower ones.
-  - Rows and footprints share one ranking: distance from the center × street class (1 main, 1.35 residential, 1.7 alley). Whole rows are placed in street order, with at most 10 buildings per 100 m cell.
-  - Frontage ids are `bld_9000000000000+n`, from road order, so exclusions never renumber them.
-- **POI names:** markets, schools, churches, pagodas and hospitals name POIs. Numbered quarters ("Khu phố 12") come after them.
+- **Buildings from OSM footprints** (`urbanPrefabFor`, city set in `docs/map/buildings.md`). Tags on the footprint, or on an amenity/shop node inside it (`ParsedOsm.amenities`), pick the prefab:
+
+  | Tags | Prefab |
+  |---|---|
+  | `place_of_worship`, church/temple/shrine buildings | `church` (christian, church/chapel/cathedral), else `pagoda`; under 90 m² a row house |
+  | `marketplace` / `fuel` | `market_hall` (≥ 200 m², else `shop_kiosk`) / `petrol_station` |
+  | school, college, university, kindergarten | `school` from 300 m², else `boarding_house` |
+  | cafe, restaurant, fast food, bar | `cafe_terrace` up to 260 m², else `shophouse_french` |
+  | bank, post office, townhall, police, civic | `office_tower` from 700 m², else `shophouse_french` |
+  | apartments, hotel, dormitory, names starting "Chung cư" | `highrise_apartment` (≥ 8 levels or ≥ 1,100 m²), `apartment_block` (≥ 280 m²), `boarding_house` |
+  | office, commercial / shop, retail | `office_tower` (≥ 500 m² or 6 levels), `shophouse_french`, `shop_kiosk`, `market_hall` |
+  | industrial, sheds | `warehouse` (≥ 700 m²), `workshop`, `shop_kiosk` |
+  | construction / house, villa ≥ 160 m² | `construction_site` / `villa` |
+  | untagged | by width and area: row houses up to 6.5 m wide (narrow under 4 m, wide or mezzanine from 5.8 m), then shophouses, cafés, workshops, villas, apartment blocks, towers, in a mix seeded by the OSM id |
+
+  - Limits per map: 3 high-rises, 4 office towers, 6 apartment blocks, 3 schools, 2 markets, 2 churches, 3 pagodas, 2 petrol stations, 3 construction sites, 6 villas, 6 workshops, 6 boarding houses. Extras fall back one step (tower → apartment block → boarding house → shophouse).
+  - Landmarks (named, towers, apartment blocks, schools, places of worship, markets, petrol stations) rank first. Other real footprints rank ahead of generated frontage: rank × 0.02 / 0.3 / 0.5 for row houses.
+- **Frontage rows** fill the streets OSM doesn't map:
+  - fronts at the road gap, neighbours 0.16 m apart, a 3 m walk-through every 5–7 houses;
+  - none on parks, pitches, school, market or hospital grounds, water or mapped footprints, or within 40 m of the center.
+  - Each street class has a weighted mix of the tube-house variants, `shophouse_french`, `cafe_terrace` and `shop_kiosk`: main roads get taller shophouses, alleys lower ones. A slot never repeats the prefab next door.
+  - Facade colours come from the placement position (`facadeColor`), so neighbours differ in prefab and usually in colour.
+  - Frontage ids are `bld_9000000000000+n`, from road order.
+- **Bridges** (`convert/bridges.ts`):
+  - A bridge prefab is laid along a road where it crosses a water area, or where an OSM `bridge=*` highway crosses a waterway line.
+  - Placement: centered on the crossing, 2 m of bank plus a 4 m ramp beyond the water at each end. The road must run within 0.8 m of the bridge axis over its whole length.
+  - Size: a lane bridge for roads up to 3.9 m, a road bridge up to 8.6 m, lengths 16/80 and 24/40 m.
+  - The shoulder railings of that crossing are dropped (the bridge parapets replace them). Bank fences keep their gap, which the bridge body closes.
+  - Houses keep off the bridge rect. Bridges are map buildings (ids `bld_8000000000000+n`) without POI, pad or loot, and validation and reachability can exclude them.
+- **Land use:** no village groves or field oaks. Instead:
+  - park and grass rules (trees and bushes in `leisure=park/garden/playground`, `landuse=grass`, squares);
+  - street trees along roads ≥ 5.5 m wide (they land in the walk-throughs and open lots, since houses and pads keep them out);
+  - `urban_cover` clusters (covered cars, utility boxes, barrels, road barriers, the odd car wreck or pipe stack);
+  - fewer garden trees and meadow bushes.
+- **POI names:** markets, schools, churches, pagodas, apartment blocks and hospitals name POIs. Numbered quarters ("Khu phố 12") come after them.
 
 | | Ngã Tư Hàng Xanh (`vn-hangxanh`) | Phan Đăng Lưu (`vn-phandangluu`) |
 |---|---|---|
 | Center | junction node 2899907852 "Ngã tư Hàng Xanh" (10.80144, 106.71132) | Phan Đăng Lưu inside Phường Đức Nhuận, checked with Overpass `is_in` (10.80134, 106.68246) |
 | Snapshot | 2026-09-15T05:23Z | 2026-09-15T05:34Z |
-| Buildings (cap) | 190 (190): 66 / 77 / 45 tube houses (2/3/4 stories), 1 warehouse, 1 barracks | 170 (170): 81 / 61 / 22 tube houses, 3 two-story, 2 barracks, 1 warehouse |
-| Candidates | 427 OSM footprints + 7,325 frontage slots | 318 OSM footprints + 8,589 frontage slots |
-| POIs | 10 (4 settlements + 6 landmarks), 20 spawns | 10 (4 + 6), 20 spawns |
+| Buildings (cap) | 190 (190) + 2 bridges, 24 types | 190 (190), 23 types |
+| Row houses | 113: 23 mezzanine, 20 narrow, 17 ×3, 15 planters, 15 wide, 10 ×4, 8 ×2, 5 shed | 118: 26 narrow, 18 planters, 17 ×3, 13 ×2, 12 mezzanine, 12 wide, 12 shed, 8 ×4 |
+| Shops and houses | 21 French shophouses, 13 kiosks, 9 cafés, 6 workshops, 6 boarding houses, 5 villas | 23 French shophouses, 14 cafés, 6 workshops, 5 kiosks, 4 villas, 1 boarding house |
+| Landmarks | 6 apartment blocks, 4 office towers, 2 high-rises (Chung cư Mỹ Đức), Nhà Thờ Hàng Xanh, Chùa Phước Viên, 1 school, 1 market, 1 construction site | 4 apartment blocks, 3 high-rises, 3 office towers, 2 churches, 2 schools, 1 pagoda, 1 market, 1 petrol station, 2 construction sites |
+| Bridges | Cầu Sơn (`bridge_road_24`, 9 m of water, at 24, 466); service bridge over Rạch Văn Thánh (`bridge_lane_80`, 65 m, at 381, −302) | none: Cầu Kiệu and the Nhiêu Lộc–Thị Nghè canal lie outside the square; the only mapped bridge is a 3 m alley bridge over a ditch at a T junction |
+| Candidates | 427 OSM footprints + 6,643 frontage slots | 318 OSM footprints + 7,986 frontage slots |
+| POIs | 17, 34 spawns | 16, 32 spawns |
 | Roads | 316, 31.0 km paved | 389, 35.8 km paved |
-| Water | Rạch Văn Thánh, Rạch Cầu Bông, Rạch Bà Láng, Hồ Văn Thánh: 2.7 ha, 2.5 km fence | Kênh Thị Nghè corner: 0.4 ha, 197 m fence |
-| Validation / reachability | 0 issues; 10/10, 20/20, 195/195, loot 100 % | 0 issues; 10/10, 20/20, 180/180, loot 100 % |
-| Loot, 10 players (3 seeds) | 312 piles, 613 items | 308 piles, 586 items |
-| Bot match (seed 1, duo, real brains) | last team, 8.1 min, 9 kills / 6 knocks / 1 revive, 14 stuck incidents (longest 10 s), tick p50/p99 0.42/1.34 ms | last team, 10.8 min, 8 / 6 / 1, 5 stuck (10 s), 0.39/1.26 ms |
+| Water | Rạch Văn Thánh, Rạch Cầu Bông, Rạch Bà Láng, Hồ Văn Thánh: 2.7 ha, 2.3 km fence | Kênh Thị Nghè corner: 0.4 ha, 197 m fence |
+| Prop instances | 2,456 | 1,500 |
+| Validation / reachability | 0 issues, 1 pass; 17/17, 34/34, 201/201, loot 100 % | 0 issues, 1 pass; 16/16, 32/32, 197/197, loot 100 % |
+| Loot (seeds 11–13) | 257–268 piles, 472–512 items | 246–256 piles, 453–488 items |
+| Bot match (seed 1, duo, real brains) | last team, 8.7 min, 8 kills / 5 knocks / 1 revive, 11 stuck incidents (longest 10 s), tick p50/p99 0.39/1.55 ms | last team, 8.9 min, 8 / 7 / 3, 10 stuck (20 s), 0.40/1.46 ms |
 
 POI names:
-- **Hàng Xanh:** Ngã Tư Hàng Xanh, Chùa Phước Viên, Khu phố 43, Ngã Tư Hàng Xanh (Đông), Rạch Văn Thánh, Bãi đất trống, Khu phố 34, Bãi đất trống (Bắc), Khu phố 40, Khu phố 10.
-- **Phan Đăng Lưu:** Phan Đăng Lưu, Trung Tâm Ngoại Ngữ Dương Minh, Cầu Kiệu, Phan Đăng Lưu (Bắc), Khu phố 24, Đình, Chùa Hải Đức, Đức Nhuận, Bãi đất trống, Khu phố 18.
+- **Hàng Xanh:** Ngã Tư Hàng Xanh, its Bắc / Đông / Tây / Nam parts, Khu phố 62, 43, 34, 60, Trường Đại học Công nghệ TP.HCM, Chung cư Mỹ Đức, Khu du lịch Văn Thánh.
+- **Phan Đăng Lưu:** Cầu Kiệu, Phan Đăng Lưu, Thánh đường Cơ Đốc Phục lâm Phú Nhuận, Ủy ban nhân dân phường Cầu Kiệu, Chung Cư Satra Eximland, Đình, Cao Ốc Tuổi Trẻ, Đức Nhuận, Trường Cao đẳng Kinh tế Đối ngoại, Thánh thất Phú Nhuận, Anh Văn Hội Việt Mỹ VUS, Tổ Đình Kim Sơn, and quarter parts.
 
-**Budget per cap** (Hàng Xanh, measured in Node; Map v1 is 85 buildings, 178k tris, 6,509 compound children):
+**Budget** (cap 190, measured in Node; Map v1 is 85 buildings, 178k tris, 6,509 compound children):
 
-| Cap | Tris, all buildings | Tris within 200 m of center | Compound children | Nav build | Loot piles / items |
+| Map | Tris, all buildings | Tris within 200 m of center | Compound children | Geometry + AO bake (types used) | Nav build |
 |---|---|---|---|---|---|
-| 150 | 0.88 M | 0.78 M | 30.5k | 640 ms | 245 / 468 |
-| 190 (chosen) | 1.11 M | 0.85 M | 38.4k | 646 ms | 312 / 613 |
-| 250 | 1.46 M | 0.91 M | 50.6k | 656 ms | 402 / 775 |
-| 300 | 1.75 M | 0.91 M | 60.6k | 518 ms | 476 / 915 |
+| Hàng Xanh | 1.06 M | 0.67 M | 36.1k | 2.7 s (24 types) | 636 ms |
+| Phan Đăng Lưu | 1.04 M | 0.64 M | 35.3k | 2.8 s (23 types) | 637 ms |
 
-- **The binding limit is loot:** the equipment test caps are under 320 piles and under 700 items. Phan Đăng Lưu reaches it at 170.
-- **Main thread:**
-  - geometry and AO bake about 580–700 ms once for the 5–6 prefab types used (the tube houses are about 380 ms of it);
-  - Havok building bodies about 35 ms;
-  - terrain bake 2.47 / 2.50 MB.
-- Thin instances are culled per prefab per 250 m cell, so a street view at the center draws most of the 0.85 M triangles, before shadows. That needs a `?bench=` run in a real browser.
+- **Triangles** stay under 1.2 M, so no far LOD was needed. The tallest prefabs are cheap per height because their upper floors are closed bodies.
+- **Loot** is well under the equipment caps (320 piles, 700 items). Phan Đăng Lưu's cap went up from 170 to 190.
+- **Main thread:** the per-prefab geometry and AO bake is now about 2.7 s for 23–24 prefab types (0.6–0.7 s before). This is the main load-time cost, a candidate for a worker or a precomputed bake. Havok building bodies take about 35 ms.
+- **Stuck incidents** in the bot matches are all inside buildings: tube-house upper floors round the stair core and partition door (the original `tube_house_3/4` too), plus door pinches. None are in alleys.
+- **Browser checks:** a `?bench=` run in a real browser is still needed.
 
 ## Runtime
 
@@ -222,6 +248,15 @@ POI names:
 | Shirakawa-gō | Ogimachi (荻町) | (−73, −17) | Two-story houses and barns on terraces, 0.3× valley slopes |
 | Shirakawa-gō | Deai-bashi footbridge | (−143, −50) | 3 m bridge over the fenced river, railings on both sides |
 | Shirakawa-gō | East slope | (200, 117) | 長瀬家 cluster, conifer woods up the valley side |
+| Hàng Xanh | Junction | (0, 30) | Frontage mix, pastel facades, French shophouses and cafés round the open center |
+| Hàng Xanh | Cầu Sơn | (24, 450) | Road bridge: ramps, parapets, bank fences meeting its sides |
+| Hàng Xanh | Rạch Văn Thánh bridge | (355, −285) → (409, −320) | 80 m lane bridge across the fenced water; bots cross it |
+| Hàng Xanh | Chung cư Mỹ Đức | (276, −287) and (224, −355) | Two high-rises on their real footprints, podium stair up to the terrace |
+| Hàng Xanh | Chùa Phước Viên / market | (69, −59) / (−44, −62) | Pagoda gate, courtyard and roof; open market hall next to the junction |
+| Hàng Xanh | Nhà Thờ Hàng Xanh | (−292, 226) | Church nave, bell tower and spire |
+| Phan Đăng Lưu | Center high-rise | (6, −65) | 16-floor tower right off the main street, shop podium, facade bands |
+| Phan Đăng Lưu | North landmarks | (−269, 365), (−218, 378), (−128, 324) | Market hall, office tower, high-rise |
+| Phan Đăng Lưu | Churches / petrol station | (272, 201), (−300, −202) / (−282, −265) | Pink church with bell tower; canopy and pump islands |
 | Any | Out of bounds | walk past x = 500 | Warning and respawn, as on Map v1; bank fences run on into the border |
 
 Not verified in a browser yet:

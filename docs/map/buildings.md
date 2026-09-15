@@ -57,6 +57,38 @@ Triangles and draw calls are per prefab, after hidden-face removal and AO griddi
 | `tube_house_3` | 4.5 × 15.0 × 12.8 | Same plan over 3 stories, balconies, roof terrace reached through a stair head under a steep roof | 6,522 | 6 slots | 223 | 10 / 7 |
 | `tube_house_4` | 4.8 × 16.3 × 15.4 | 4 stories, balconies, steep gable roof (no roof deck) | 8,066 | 6 slots | 274 | 11 / 8 |
 
+**Vietnamese city set** (sizes W × D × H; draws are material slots before look merging; all 0 nav-overflow columns):
+
+| id | Size (m) | Content | Tris | Slots | Shapes | Rooms / loot spots |
+|---|---|---|---|---|---|---|
+| `tube_house_narrow` | 3.8 × 13.0 × 10.7 | Nhà ống, 3 stories, parapet roof, balcony door only | 5,392 | 6 | 180 | 8 / 6 |
+| `tube_house_wide` | 6.2 × 15.0 × 10.7 | Nhà ống, 3 stories, 6 m frontage | 6,394 | 6 | 204 | 8 / 6 |
+| `tube_house_planters` | 4.6 × 14.0 × 10.7 | 3 stories, terracotta plant boxes on the balconies | 6,126 | 7 | 207 | 8 / 6 |
+| `tube_house_shed` | 4.4 × 14.0 × 10.6 | 2 stories, roof terrace with a corrugated lean-to shed | 4,640 | 7 | 153 | 7 / 5 |
+| `tube_house_mezzanine` | 5.0 × 16.0 × 9.2 | 4.5 m shop story with a gác lửng over its back half, one upper story, parapet | 4,694 | 8 | 145 | 6 / 5 |
+| `shophouse_french` | 10.3 × 12.7 × 7.7 | Nhà phố Pháp: arcade under the upper floor, shuttered windows, cornice, parapet | 4,180 | 7 | 155 | 5 / 5 |
+| `cafe_terrace` | 7.0 × 13.6 × 7.6 | Quán cà phê: tiled terrace, tables, planters, awning, upstairs room and balcony | 3,466 | 8 | 132 | 3 / 3 |
+| `villa` | 18.0 × 20.1 × 9.7 | Biệt thự: 2 stories, tiled gable roof, porch balcony, walled garden with a gate | 5,080 | 8 | 222 | 5 / 5 |
+| `boarding_house` | 18.8 × 7.7 × 7.5 | Nhà trọ: 8 rooms off an open corridor, stair in the corridor, tin roof | 6,950 | 5 | 293 | 8 / 8 |
+| `apartment_block` | 24.0 × 8.3 × 17.8 | Chung cư cũ: 5 stories; 9 flats on 3 floors off a front gallery, stair well; closed top floors | 10,028 | 6 | 385 | 9 / 9 |
+| `pagoda` | 16.0 × 21.4 × 8.8 | Chùa: courtyard behind a tam quan gate, hall on a plinth, two-pitch tiled roof with horn ends | 3,584 | 6 | 85 | 2 / 3 |
+| `church` | 11.0 × 20.6 × 20.2 | Nhà thờ: nave with pews and tall windows, bell tower with belfry and spire | 4,122 | 8 | 137 | 1 / 2 |
+| `school` | 24.1 × 20.1 × 7.6 | Trường học: L plan, 10 classrooms on 2 floors off galleries, stair up the gallery | 13,110 | 6 | 532 | 10 / 10 |
+| `market_hall` | 20.8 × 15.2 × 7.2 | Chợ: open-sided, columns, stall counters, low corrugated roof | 2,794 | 5 | 45 | 1 / 3 |
+| `shop_kiosk` | 8.4 × 11.4 × 4.7 | Cửa hàng tiện lợi: glass shopfront, sign band, awning, shelves, counter | 1,986 | 8 | 87 | 1 / 2 |
+| `petrol_station` | 13.0 × 15.7 × 7.3 | Trạm xăng: canopy on columns over two pump islands, shop | 2,328 | 8 | 49 | 2 / 2 |
+| `workshop` | 12.8 × 16.6 × 7.0 | Xưởng: roll-up door opening, corner office, benches, low tin gable | 2,750 | 7 | 105 | 2 / 4 |
+| `office_tower` | 20.2 × 18.1 × 33.8 | 8 floors: lobby and first floor enterable, 6 closed floors behind a banded curtain wall with fins | 12,908 | 6 | 381 | 4 / 5 |
+| `highrise_apartment` | 30.1 × 24.1 × 52.8 | 16 floors on a shop podium (3 shops, hall, stair to the roof terrace); closed tower | 17,836 | 5 | 381 | 5 / 6 |
+| `construction_site` | 16.1 × 13.1 × 10.6 | Concrete frame, 3 slab levels with stairs, front scaffolding with plank decks, rebar | 5,322 | 5 | 103 | 4 / 4 |
+| `bridge_lane_16`, `_80` | 5.7 × 16 / 80 × 8.1 | Lane bridge: 3.6 m roadway, sidewalks, parapets, lamp posts, ramps both ends | 748 / 3,668 | 4 | 21 / 37 | – |
+| `bridge_road_24`, `_40` | 10.5 × 24 / 40 × 8.1 | Road bridge: 7.6 m roadway, 1.2 m sidewalks | 1,232 / 2,116 | 4 | 21 / 25 | – |
+
+The city set (`prefabs/vnHouses.ts`, `vnCivic.ts`, `vnCommercial.ts`, `bridges.ts`, helpers in `vnCommon.ts`) follows the tube-house rules:
+- **Loot:** `lootRoom` tiles every room with the 0.12 m raised floor, leaving bare floor round doors (`doorAprons`), under props standing on the slab and round 1–3 kept loot spots. A kept hole is ±0.41 m, so tile edges never sit on a nav cell center.
+- **Nav:** a prefab column keeps at most 4 walkable levels. So the office tower and high-rise have 2–3 enterable levels and a solid body above. Their facade layers (bands, glass, fins, the apartment block's upper parapets) are 0.1 m thick, under the nav grid's 0.12 m support width. Tests assert 0 overflow columns and a standing capsule's headroom over every tread.
+- **Bridges** set `BuildingPrefab.spansRoad` (additive): layout validation skips their road clearance. The deck body reaches 1.2 m below the floor, so nothing crawls under it, and it closes the gap the bank fences leave for the road.
+
 **Tube houses** (`prefabs/tubeHouses.ts`, one parametric builder) are row houses for the city maps (`docs/map/real-world.md`, urban mode):
 - Party walls have no windows, so neighbours can stand 0.12 m apart; the entrance faces the street (+Z).
 - One straight flight per story, stacked in a 1.1 m stair core on the west wall. Upper floors wall the core off and put a railing across it where no flight continues.
@@ -81,7 +113,13 @@ The shared data names **material slots**. The client maps slots to **looks** (`B
 | `roofAsphalt` | `asphalt_02` | Flat bitumen roofs |
 | `paintedSteel` | `rusty_metal_02` ×(0.34, 0.37, 0.27) | Military frames, tower steel, mezzanine, racks, bunks |
 | `darkSteel` | `rusty_metal_02` ×0.2 | Available, currently unused |
-| `containerRed` / `containerBlue` | `corrugated_iron_02` tinted | Containers |
+| `containerRed` / `containerBlue` | `corrugated_iron_02` tinted | Containers; café awning, petrol canopy fascia |
+
+**City looks** (client only; the shared slots are unchanged):
+- **Facade pastels:** `plasterYellow`, `plasterMint`, `plasterPink`, `plasterSky`, `plasterWhite` (`white_plaster_02` tints).
+- **Towers:** `glass` (dark `painted_plaster_wall`).
+- **Per prefab:** pagoda and school yellow; church pink; petrol station and high-rise white; office tower and workshop `concreteWall`, with `glass` for `darkSteel`; construction bricks.
+- **Facade colours per placement:** `facadeColor(prefabId, x, z)` (`buildings/palette.ts`) hashes the placement's world XZ to one of 6 colours (default plaster or a pastel) for the city houses (`PALETTED`). `BuildingVisuals` batches each prefab per cell per look, and a colour swaps only the exterior plaster group, so each colour adds one draw per prefab per cell.
 
 Each look also gets the world-space luma breakup of `SurfaceVariationPlugin` (so repeated instances differ) and `BuildingShadePlugin`, which:
 - darkens wall albedo near the ground floor (grime keyed to the prefab-local height, not world Y, so it works on terrain);

@@ -98,6 +98,8 @@ export interface BuildingPrefab {
   readonly entrances: readonly Vec3Tuple[];
   /** Local AABB of all parts. `footprint` is its XZ projection, which terrain should flatten. */
   readonly bounds: { readonly min: Vec3Tuple; readonly max: Vec3Tuple };
+  /** Bridges stand on the road they carry: layout validation skips their road clearance. */
+  readonly spansRoad?: boolean;
 }
 
 /** Where a prefab goes in the world. `yaw` turns local +Z toward world (sin yaw, 0, cos yaw), like LevelBlock.rotationY. */

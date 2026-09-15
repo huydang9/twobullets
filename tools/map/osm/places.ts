@@ -79,7 +79,7 @@ export const PLACES: readonly PlaceConfig[] = [
     localName: "Phan Đăng Lưu",
     directionWords: ["Bắc", "Nam", "Đông", "Tây"],
     genericNames: ["Khu phố", "Bãi đất trống", "Công viên"],
-    buildingCap: 170,
+    buildingCap: 190,
     urban: { openCenter: 40 },
   },
   // <custom-places>

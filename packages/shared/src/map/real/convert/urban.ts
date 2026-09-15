@@ -76,7 +76,7 @@ export function frontageCandidates(roads: readonly RoadSpec[], footprints: reado
         // Outward normal on this side; houses face back along it.
         const nx = -dz * side;
         const nz = dx * side;
-        const yaw = round3(Math.atan2(-nx, -nz));
+        const yaw = round3(Math.atan2(-nx, -nz)) || 0;
         let along = SEGMENT_MARGIN;
         let inRow = 0;
         let row: BuildingCandidate[] = [];
@@ -87,8 +87,10 @@ export function frontageCandidates(roads: readonly RoadSpec[], footprints: reado
           row = [];
         };
         let rowLength = options.rowLength - 1 + (hash2(roadIndex, i * 2 + (side > 0 ? 1 : 0), 0x70b3) % 3);
+        let previous: BuildingPrefabId | null = null;
         for (let k = 0; ; k++) {
-          const prefab = variant(roadIndex, i, side, k, road.width ?? 5);
+          const prefab = variant(roadIndex, i, side, k, road.width ?? 5, previous);
+          previous = prefab;
           const def = getBuildingPrefab(prefab);
           const width = def.bounds.max[0] - def.bounds.min[0];
           if (along + width > length - SEGMENT_MARGIN) break;
@@ -128,7 +130,7 @@ export function frontageCandidates(roads: readonly RoadSpec[], footprints: reado
           const area = width * (def.bounds.max[2] - def.bounds.min[2]);
           row.push({
             osmId: id,
-            tags: { building: "house", "building:levels": prefab.slice(-1) },
+            tags: { building: "house", "building:levels": String(STORIES[prefab] ?? 2) },
             area,
             rect: { center: rect.center, axis: [dx, dz], halfLength: rect.halfExtents[1], halfWidth: rect.halfExtents[0] },
             centroid: rect.center,
@@ -144,11 +146,40 @@ export function frontageCandidates(roads: readonly RoadSpec[], footprints: reado
   return out;
 }
 
-/** House mix by street: taller shophouses on main roads, low houses down the alleys. */
-function variant(roadIndex: number, segment: number, side: number, k: number, width: number): BuildingPrefabId {
-  const r = (hash2(roadIndex * 4 + (side > 0 ? 1 : 0), segment * 1024 + k, 0x7b11) >>> 0) / 4294967296;
-  const [two, three] = width >= 7 ? [0.25, 0.7] : width >= 5.5 ? [0.45, 0.88] : [0.7, 0.97];
-  return r < two ? "tube_house_2" : r < three ? "tube_house_3" : "tube_house_4";
+/** City prefabs placed before everything else when OSM maps their footprint. */
+const LANDMARKS = new Set<BuildingPrefabId>(["highrise_apartment", "office_tower", "apartment_block", "church", "pagoda", "school", "market_hall", "petrol_station"]);
+
+/** Stories of the frontage prefabs, recorded as `building:levels` on their candidates. */
+const STORIES: Partial<Record<BuildingPrefabId, number>> = {
+  tube_house_2: 2,
+  tube_house_3: 3,
+  tube_house_4: 4,
+  tube_house_narrow: 3,
+  tube_house_wide: 3,
+  tube_house_planters: 3,
+  tube_house_shed: 2,
+  tube_house_mezzanine: 2,
+  shophouse_french: 2,
+  cafe_terrace: 2,
+  shop_kiosk: 1,
+};
+
+/** Frontage mix by street class, [prefab, weight]: taller shophouses on main roads, low houses down the alleys. */
+const FRONTAGE_MIX: readonly (readonly (readonly [BuildingPrefabId, number])[])[] = [
+  [["tube_house_3", 22], ["tube_house_4", 18], ["tube_house_planters", 14], ["tube_house_wide", 10], ["tube_house_mezzanine", 10], ["shophouse_french", 8], ["cafe_terrace", 6], ["shop_kiosk", 4], ["tube_house_narrow", 4], ["tube_house_2", 4]],
+  [["tube_house_2", 18], ["tube_house_3", 18], ["tube_house_planters", 12], ["tube_house_narrow", 12], ["tube_house_shed", 12], ["tube_house_mezzanine", 8], ["tube_house_wide", 6], ["cafe_terrace", 6], ["shop_kiosk", 5], ["tube_house_4", 3]],
+  [["tube_house_2", 28], ["tube_house_narrow", 22], ["tube_house_shed", 20], ["tube_house_3", 16], ["tube_house_planters", 8], ["shop_kiosk", 6]],
+];
+
+/** A seeded pick from the street's mix that never repeats the house next door. */
+function variant(roadIndex: number, segment: number, side: number, k: number, width: number, previous: BuildingPrefabId | null): BuildingPrefabId {
+  const mix = FRONTAGE_MIX[width >= 7 ? 0 : width >= 5.5 ? 1 : 2]!;
+  const total = mix.reduce((sum, [, w]) => sum + w, 0);
+  let r = ((hash2(roadIndex * 4 + (side > 0 ? 1 : 0), segment * 1024 + k, 0x7b11) >>> 0) / 4294967296) * total;
+  let index = 0;
+  while (index < mix.length - 1 && r >= mix[index]![1]) r -= mix[index++]![1];
+  if (mix[index]![0] === previous) index = (index + 1) % mix.length;
+  return mix[index]![0];
 }
 
 /** Ranks OSM footprints like frontage slots (a small bonus: real buildings first at equal distance). */
@@ -167,7 +198,9 @@ export function rankFootprints(candidates: readonly BuildingCandidate[], roads: 
         }
       }
     }
-    return { ...c, rank: round3(distance(c.centroid[0], c.centroid[1], 0, 0) * weight * 0.9) };
+    // Real footprints go ahead of generated frontage; landmarks (named, or towers, schools, places of worship…) first.
+    const factor = LANDMARKS.has(c.prefab) || c.tags.name ? 0.02 : c.prefab.startsWith("tube_house") ? 0.5 : 0.3;
+    return { ...c, rank: round3(distance(c.centroid[0], c.centroid[1], 0, 0) * weight * factor) };
   });
 }
 

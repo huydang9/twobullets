@@ -6,7 +6,7 @@ import { distance, distanceToRect, offsetPoint, pointInPolygon, polygonEdgeDista
 import type { MapPath } from "../../layout/roads";
 import type { Vec2Tuple } from "../../types";
 import { centroid, minAreaRect, type MinRect } from "./geometry";
-import type { AreaFeature, OsmTags, Polygon } from "./types";
+import type { AreaFeature, OsmTags, PointFeature, Polygon } from "./types";
 
 /** Buildings stay this far inside the playable edge (the border foothills start 40 m in), m. */
 export const BUILDING_EDGE = 445;
@@ -21,7 +21,43 @@ export const DEFAULT_BUILDING_CAP = 90;
 /** Gap between neighbouring row houses in a city frontage row, m (urban validation keeps 0.1). */
 export const ROW_GAP = 0.12;
 /** At most this many of each expensive or odd prefab per map. */
-const PREFAB_LIMITS: Partial<Record<BuildingPrefabId, number>> = { warehouse: 4, barracks: 5, watchtower: 4, container_open: 6, container_open_blue: 6, container_closed: 4 };
+const PREFAB_LIMITS: Partial<Record<BuildingPrefabId, number>> = {
+  warehouse: 4,
+  barracks: 5,
+  watchtower: 4,
+  container_open: 6,
+  container_open_blue: 6,
+  container_closed: 4,
+  // City landmarks stay rare, and the tall ones keep triangles and loot in budget.
+  highrise_apartment: 3,
+  office_tower: 4,
+  apartment_block: 6,
+  school: 3,
+  market_hall: 2,
+  church: 2,
+  pagoda: 3,
+  petrol_station: 2,
+  construction_site: 3,
+  villa: 6,
+  workshop: 6,
+  boarding_house: 6,
+};
+/** What a city prefab becomes once its limit is reached. */
+const URBAN_FALLBACK: Partial<Record<BuildingPrefabId, BuildingPrefabId>> = {
+  highrise_apartment: "office_tower",
+  office_tower: "apartment_block",
+  apartment_block: "boarding_house",
+  school: "apartment_block",
+  market_hall: "workshop",
+  church: "shophouse_french",
+  pagoda: "shophouse_french",
+  petrol_station: "shop_kiosk",
+  construction_site: "workshop",
+  villa: "shophouse_french",
+  workshop: "shophouse_french",
+  boarding_house: "shophouse_french",
+  warehouse: "workshop",
+};
 
 const RELIGIOUS = new Set(["church", "chapel", "cathedral", "shrine", "temple", "mosque", "bell_tower", "wayside_shrine", "religious", "monastery"]);
 const SMALL_SHEDS = new Set(["garage", "garages", "shed", "hut", "cabin", "kiosk", "storage_tank", "boathouse"]);
@@ -99,33 +135,79 @@ export function tubeHouseFor(osmId: number, levels: number, salt = 0): BuildingP
   return r < 0.45 ? "tube_house_2" : r < 0.85 ? "tube_house_3" : "tube_house_4";
 }
 
+const EATERIES = new Set(["cafe", "restaurant", "fast_food", "bar", "ice_cream", "food_court", "pub"]);
+const SCHOOLS = new Set(["school", "college", "university", "kindergarten", "prep_school"]);
+const CIVIC = new Set(["bank", "post_office", "townhall", "theatre", "police", "courthouse", "library", "community_centre"]);
+const HOMES = new Set(["house", "detached", "villa", "semidetached_house", "terrace"]);
+const FLATS = new Set(["apartments", "residential", "dormitory", "hotel"]);
+
+/** A city row house for a narrow footprint: by frontage width, then `building:levels`, then a seeded mix. */
+export function cityTubeHouse(osmId: number, width: number, levels: number): BuildingPrefabId {
+  const r = unitHash(osmId, 13);
+  if (width < 4) return "tube_house_narrow";
+  if (width >= 5.8) return r < 0.6 ? "tube_house_wide" : "tube_house_mezzanine";
+  if (levels >= 4) return r < 0.6 ? "tube_house_4" : "tube_house_planters";
+  if (levels >= 3) return r < 0.5 ? "tube_house_3" : "tube_house_planters";
+  if (levels >= 1 && levels < 3) return r < 0.6 ? "tube_house_2" : "tube_house_shed";
+  return r < 0.2 ? "tube_house_2" : r < 0.4 ? "tube_house_3" : r < 0.55 ? "tube_house_planters" : r < 0.7 ? "tube_house_shed" : r < 0.85 ? "tube_house_4" : "tube_house_mezzanine";
+}
+
 /**
- * City mapping (`PlaceConfig.urban`): narrow houses and small shops become tube houses, big footprints become flat-roofed
- * blocks (barracks, warehouses) or two-story houses. No barns, containers or ruins in a city street.
+ * City mapping (`PlaceConfig.urban`): OSM tags on the footprint, or on an amenity node inside it (`poi`), pick the
+ * Vietnamese landmark prefabs (chùa, nhà thờ, trường, chợ, trạm xăng, quán cà phê, ngân hàng…). Untagged footprints go
+ * by size and shape: row houses when narrow, then shophouses, villas, workshops, apartment blocks and towers, in a
+ * mix seeded by the OSM id. No barns, containers or ruins in a city street.
  */
-export function urbanPrefabFor(osmId: number, tags: OsmTags, area: number, rect: MinRect): BuildingPrefabId | null {
+export function urbanPrefabFor(osmId: number, tags: OsmTags, area: number, rect: MinRect, poi: OsmTags = {}): BuildingPrefabId | null {
   const kind = tags.building ?? "yes";
-  if (SKIPPED.has(kind) || tags["building:part"] || tags.location === "underground") return null;
+  if ((SKIPPED.has(kind) && kind !== "construction") || tags["building:part"] || tags.location === "underground") return null;
   if (area < 20) return null;
   const length = rect.halfLength * 2;
   const width = rect.halfWidth * 2;
   const levels = Number.parseFloat(tags["building:levels"] ?? "");
-  const big = (): BuildingPrefabId => (area >= 600 && width >= 14 ? "warehouse" : area >= 170 && length / width >= 1.5 ? "barracks" : "house_two_story");
-  if (RELIGIOUS.has(kind) || tags.amenity === "place_of_worship" || INDUSTRIAL.has(kind) || INSTITUTIONAL.has(kind)) return area >= 110 ? big() : tubeHouseFor(osmId, levels);
-  if (SMALL_SHEDS.has(kind) || FARM.has(kind)) return tubeHouseFor(osmId, 2);
-  if (width <= 9 || area < 150) return tubeHouseFor(osmId, Number.isFinite(levels) ? levels : 0);
-  return big();
+  const amenity = tags.amenity ?? poi.amenity ?? "";
+  const religion = tags.religion ?? poi.religion ?? "";
+  const shop = tags.shop ?? poi.shop;
+  const r = unitHash(osmId, 11);
+
+  if (kind === "construction") return area >= 120 ? "construction_site" : null;
+  if (amenity === "place_of_worship" || RELIGIOUS.has(kind)) {
+    if (area < 90) return cityTubeHouse(osmId, width, levels);
+    return religion === "christian" || kind === "church" || kind === "chapel" || kind === "cathedral" ? "church" : "pagoda";
+  }
+  if (amenity === "marketplace") return area >= 200 ? "market_hall" : "shop_kiosk";
+  if (amenity === "fuel") return "petrol_station";
+  if (SCHOOLS.has(amenity) || SCHOOLS.has(kind)) return area >= 300 ? "school" : "boarding_house";
+  if (amenity === "hospital" || amenity === "clinic" || kind === "hospital") return area >= 450 ? "apartment_block" : "shophouse_french";
+  if (EATERIES.has(amenity)) return area <= 260 ? "cafe_terrace" : "shophouse_french";
+  if (CIVIC.has(amenity) || kind === "civic" || kind === "government" || kind === "public") return area >= 700 ? "office_tower" : "shophouse_french";
+  if (FLATS.has(kind) || /^chung cư/i.test(tags.name ?? "")) return levels >= 8 || area >= 1100 ? "highrise_apartment" : area >= 280 ? "apartment_block" : width <= 6.5 ? cityTubeHouse(osmId, width, levels) : "boarding_house";
+  if (kind === "office" || kind === "commercial") return area >= 500 || levels >= 6 ? "office_tower" : area >= 120 ? "shophouse_french" : "shop_kiosk";
+  if (shop || kind === "retail" || kind === "supermarket" || kind === "kiosk") return area < 130 ? "shop_kiosk" : area < 400 ? "shophouse_french" : "market_hall";
+  if (INDUSTRIAL.has(kind) || SMALL_SHEDS.has(kind) || FARM.has(kind)) return area >= 700 && width >= 14 ? "warehouse" : area >= 90 ? "workshop" : "shop_kiosk";
+  if (HOMES.has(kind) && area >= 160 && width >= 9) return "villa";
+
+  if (levels >= 10) return "highrise_apartment";
+  if (levels >= 6) return "office_tower";
+  if (width <= 6.5 && area < 220) return cityTubeHouse(osmId, width, levels);
+  if (area < 60) return "shop_kiosk";
+  if (area >= 1400 && width >= 22) return r < 0.5 ? "highrise_apartment" : "office_tower";
+  if (area >= 600 && width >= 14) return r < 0.4 ? "apartment_block" : r < 0.65 ? "office_tower" : r < 0.85 ? "school" : "market_hall";
+  if (area >= 300) return length / width >= 1.8 ? (r < 0.5 ? "apartment_block" : "boarding_house") : r < 0.35 ? "villa" : r < 0.7 ? "shophouse_french" : "workshop";
+  if (area >= 110 && width >= 7) return r < 0.35 ? "shophouse_french" : r < 0.55 ? "cafe_terrace" : r < 0.75 ? "workshop" : r < 0.92 ? "villa" : "construction_site";
+  return cityTubeHouse(osmId, width, levels);
 }
 
-/** Footprints inside the building edge that map to a prefab. */
-export function buildingCandidates(features: readonly AreaFeature[], urban = false): BuildingCandidate[] {
+/** Footprints inside the building edge that map to a prefab. City mode also reads amenity nodes standing inside them. */
+export function buildingCandidates(features: readonly AreaFeature[], urban = false, amenities: readonly PointFeature[] = []): BuildingCandidate[] {
   const out: BuildingCandidate[] = [];
   for (const feature of features) {
     const c = centroid(feature.outer);
     if (Math.abs(c[0]) > BUILDING_EDGE || Math.abs(c[1]) > BUILDING_EDGE) continue;
     const rect = minAreaRect(feature.outer);
     if (urban) {
-      const prefab = urbanPrefabFor(feature.id, feature.tags, feature.area, rect);
+      const inside = amenities.find((a) => Math.abs(a.at[0] - c[0]) < 60 && Math.abs(a.at[1] - c[1]) < 60 && pointInPolygon(feature.outer, a.at[0], a.at[1]));
+      const prefab = urbanPrefabFor(feature.id, feature.tags, feature.area, rect, inside?.tags);
       if (prefab) out.push({ osmId: feature.id, tags: feature.tags, area: feature.area, rect, centroid: c, prefab });
       continue;
     }
@@ -148,7 +230,8 @@ function normalizeYaw(yaw: number): number {
   let y = yaw;
   while (y > Math.PI) y -= 2 * Math.PI;
   while (y <= -Math.PI) y += 2 * Math.PI;
-  return Math.round(y * 1000) / 1000;
+  // `|| 0` drops -0, which the generated module would print as 0 (a different layout checksum).
+  return Math.round(y * 1000) / 1000 || 0;
 }
 
 export function prefabRect(prefab: BuildingPrefabId, position: Vec2Tuple, yaw: number, margin = 0): OrientedRect {
@@ -295,7 +378,7 @@ export function placeBuildings(
     let prefab = candidate.prefab;
     const limit = PREFAB_LIMITS[prefab];
     if (limit !== undefined && (perPrefab.get(prefab) ?? 0) >= limit) {
-      prefab = prefab === "warehouse" || prefab === "barracks" ? (options.cellQuota !== undefined ? "house_two_story" : "barn") : prefab === "watchtower" ? "house_small" : prefab.startsWith("container") ? "container_closed" : prefab;
+      prefab = options.cellQuota !== undefined && URBAN_FALLBACK[prefab] ? URBAN_FALLBACK[prefab]! : prefab === "warehouse" || prefab === "barracks" ? (options.cellQuota !== undefined ? "house_two_story" : "barn") : prefab === "watchtower" ? "house_small" : prefab.startsWith("container") ? "container_closed" : prefab;
       if ((perPrefab.get(prefab) ?? 0) >= (PREFAB_LIMITS[prefab] ?? Infinity)) continue;
     }
     let cell = "";

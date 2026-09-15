@@ -1,11 +1,11 @@
 import { Matrix, Mesh, Quaternion, Vector3, VertexData, type Scene } from "@babylonjs/core";
-import { buildPrefabGeometry, type BuildingPlacement, type BuildingPrefab, type PrefabGeometry } from "@twobullets/shared";
+import { buildPrefabGeometry, facadeColor, type BuildingPlacement, type BuildingPrefab, type FacadeColor, type PrefabGeometry } from "@twobullets/shared";
 import type { BuildingVisualHandle, BuildingVisualHost } from "@twobullets/sim";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCulling";
 import { BUILDING_SHADE_ATTRIBUTE } from "./buildingShadePlugin";
-import { BuildingMaterials, lookOf, type BuildingLookId } from "./BuildingMaterials";
+import { BuildingMaterials, facadeLook, lookOf, type BuildingLookId } from "./BuildingMaterials";
 
 export interface BuildingVisualsOptions {
   /**
@@ -55,10 +55,10 @@ export class BuildingVisuals implements BuildingVisualHost {
     const [x, , z] = placement.position;
     const key = `${prefab.id}@${Math.floor(x / this.cellSize)},${Math.floor(z / this.cellSize)}`;
     let batch = this.batches.get(key);
-    if (!batch) this.batches.set(key, (batch = this.createBatch(key, prefab)));
+    if (!batch) this.batches.set(key, (batch = new Batch(key, prefab, this.scene, this.materials, this.environment)));
     const matrix = Matrix.Compose(Vector3.OneReadOnly, Quaternion.RotationAxis(Vector3.Up(), placement.yaw), new Vector3(...placement.position));
-    const instance = batch.add(matrix);
-    return { meshes: batch.meshes, remove: () => batch.remove(instance) };
+    const instance = batch.add(matrix, facadeColor(prefab.id, x, z));
+    return { meshes: instance.meshes, remove: () => batch.remove(instance.id) };
   }
 
   /** Resolves when all materials in use have their textures. */
@@ -80,7 +80,7 @@ export class BuildingVisuals implements BuildingVisualHost {
       if (batch.count === 0) continue;
       prefabs.add(batch.prefabId);
       instances += batch.count;
-      drawCalls += batch.meshes.length;
+      drawCalls += batch.drawCalls;
       triangles += batch.triangles * batch.count;
     }
     return { prefabs: prefabs.size, batches: this.batches.size, instances, drawCalls, triangles };
@@ -91,84 +91,125 @@ export class BuildingVisuals implements BuildingVisualHost {
     this.batches.clear();
     this.materials.dispose();
   }
-
-  private createBatch(key: string, prefab: BuildingPrefab): Batch {
-    const geometry = getPrefabGeometry(prefab);
-    const byLook = new Map<BuildingLookId, MeshGroup[]>();
-    for (const group of geometry.groups) {
-      const look = lookOf(prefab.id, group.material);
-      byLook.set(look, [...(byLook.get(look) ?? []), group]);
-    }
-    const meshes = [...byLook].map(([look, groups]) => {
-      const mesh = new Mesh(`building_${key}_${look}`, this.scene);
-      applyGroups(mesh, groups);
-      mesh.material = this.materials.get(look);
-      mesh.isPickable = false;
-      mesh.receiveShadows = true;
-      if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
-      this.environment.shadowGenerator.addShadowCaster(mesh);
-      markStaticShadowCaster(mesh);
-      // PBR is lit by the IBL; the hemispheric fill is for non-PBR meshes only.
-      this.environment.skyFill.excludedMeshes.push(mesh);
-      return mesh;
-    });
-    return new Batch(prefab.id, meshes, geometry.triangles);
-  }
 }
 
+/**
+ * All placements of one prefab in one world cell. One mesh per look, drawn with thin instances; a placement's facade
+ * colour swaps the look of its exterior plaster group only, so colours add one draw each and share everything else.
+ */
 class Batch {
-  private readonly matrices = new Map<number, Float32Array>();
+  private readonly groups: Map<BuildingLookId, MeshGroup[]>;
+  /** Keyed by the prefab's own look and the look it is drawn with (they differ for recoloured facades). */
+  private readonly meshes = new Map<string, InstancedMesh>();
+  private readonly instances = new Set<number>();
   private nextId = 0;
   private visible = true;
+  readonly prefabId: string;
+  readonly triangles: number;
 
   constructor(
-    readonly prefabId: string,
-    readonly meshes: readonly Mesh[],
-    readonly triangles: number,
-  ) {}
-
-  get count(): number {
-    return this.matrices.size;
+    private readonly key: string,
+    prefab: BuildingPrefab,
+    private readonly scene: Scene,
+    private readonly materials: BuildingMaterials,
+    private readonly environment: Pick<Environment, "shadowGenerator" | "skyFill">,
+  ) {
+    const geometry = getPrefabGeometry(prefab);
+    this.prefabId = prefab.id;
+    this.triangles = geometry.triangles;
+    this.groups = new Map();
+    for (const group of geometry.groups) {
+      const look = lookOf(prefab.id, group.material);
+      this.groups.set(look, [...(this.groups.get(look) ?? []), group]);
+    }
   }
 
-  add(matrix: Matrix): number {
+  get count(): number {
+    return this.instances.size;
+  }
+
+  get drawCalls(): number {
+    let n = 0;
+    for (const m of this.meshes.values()) if (m.matrices.size > 0) n++;
+    return n;
+  }
+
+  add(matrix: Matrix, color: FacadeColor | null): { id: number; meshes: Mesh[] } {
     const id = this.nextId++;
-    this.matrices.set(id, new Float32Array(matrix.asArray()));
+    const looks = [...this.groups.keys()].map((look) => facadeLook(look, color));
+    const data = new Float32Array(matrix.asArray());
+    this.instances.add(id);
+    const meshes: Mesh[] = [];
+    [...this.groups.keys()].forEach((base, i) => {
+      const entry = this.mesh(base, looks[i]!);
+      entry.matrices.set(id, data);
+      entry.dirty = true;
+      meshes.push(entry.mesh);
+    });
     this.sync();
-    return id;
+    return { id, meshes };
   }
 
   remove(id: number): void {
-    if (this.matrices.delete(id)) this.sync();
+    if (!this.instances.delete(id)) return;
+    for (const entry of this.meshes.values()) if (entry.matrices.delete(id)) entry.dirty = true;
+    this.sync();
   }
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    for (const mesh of this.meshes) mesh.setEnabled(visible && this.count > 0);
+    for (const entry of this.meshes.values()) entry.mesh.setEnabled(visible && entry.matrices.size > 0);
     invalidateStaticShadows();
   }
 
   dispose(): void {
-    this.meshes.forEach((m) => m.dispose());
+    this.meshes.forEach((m) => m.mesh.dispose());
   }
 
-  /** Static buffer: buildings are placed at load and rarely change afterwards. */
+  private mesh(base: BuildingLookId, look: BuildingLookId): InstancedMesh {
+    const key = `${base}>${look}`;
+    let entry = this.meshes.get(key);
+    if (entry) return entry;
+    const mesh = new Mesh(`building_${this.key}_${look}`, this.scene);
+    applyGroups(mesh, this.groups.get(base)!);
+    mesh.material = this.materials.get(look);
+    mesh.isPickable = false;
+    mesh.receiveShadows = true;
+    if (OPTIMIZATIONS.staticBatchMatrices) mesh.freezeWorldMatrix();
+    this.environment.shadowGenerator.addShadowCaster(mesh);
+    markStaticShadowCaster(mesh);
+    // PBR is lit by the IBL; the hemispheric fill is for non-PBR meshes only.
+    this.environment.skyFill.excludedMeshes.push(mesh);
+    entry = { mesh, matrices: new Map(), dirty: true };
+    this.meshes.set(key, entry);
+    return entry;
+  }
+
+  /** Static buffers: buildings are placed at load and rarely change afterwards. */
   private sync(): void {
-    const buffer = new Float32Array(this.matrices.size * 16);
-    let offset = 0;
-    for (const m of this.matrices.values()) {
-      buffer.set(m, offset);
-      offset += 16;
-    }
     invalidateStaticShadows();
-    for (const mesh of this.meshes) {
+    for (const entry of this.meshes.values()) {
+      if (!entry.dirty) continue;
+      entry.dirty = false;
+      const buffer = new Float32Array(entry.matrices.size * 16);
+      let offset = 0;
+      for (const m of entry.matrices.values()) {
+        buffer.set(m, offset);
+        offset += 16;
+      }
       // With zero thin instances Babylon would draw the source mesh itself at the origin.
-      mesh.setEnabled(this.visible && buffer.length > 0);
+      entry.mesh.setEnabled(this.visible && buffer.length > 0);
       if (buffer.length === 0) continue;
       // Also refreshes the bounding info over all instances.
-      mesh.thinInstanceSetBuffer("matrix", buffer, 16, true);
+      entry.mesh.thinInstanceSetBuffer("matrix", buffer, 16, true);
     }
   }
+}
+
+interface InstancedMesh {
+  readonly mesh: Mesh;
+  readonly matrices: Map<number, Float32Array>;
+  dirty: boolean;
 }
 
 type MeshGroup = PrefabGeometry["groups"][number];

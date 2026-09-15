@@ -15,6 +15,7 @@ import { BAKE as VN_HANGXANH_BAKE } from "./vn-hangxanh.bake";
 import { BAKE as VN_PHANDANGLUU_BAKE } from "./vn-phandangluu.bake";
 import { COLLIDER_STRIDE, propColliderGroups } from "../layout/collision";
 import { getPrefabCollision } from "../buildings/placement";
+import { getBuildingPrefab, isBuildingPrefabId } from "../buildings/prefabs";
 
 /** Recorded by tools/map/build.ts --map <id>; regenerate the map (tools/map/osm/generate.ts) after converter changes. */
 const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: string; layoutChecksum: string }>> = {
@@ -25,7 +26,7 @@ const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: stri
   "vn-phandangluu": VN_PHANDANGLUU_BAKE,
 };
 /** Building caps: villages keep the default 90; the Saigon street maps (urban mode) set their own. */
-const BUILDING_CAPS: Readonly<Record<string, number>> = { "vn-hangxanh": 190, "vn-phandangluu": 170 };
+const BUILDING_CAPS: Readonly<Record<string, number>> = { "vn-hangxanh": 190, "vn-phandangluu": 190 };
 
 describe("real-world map registry", () => {
   it("lists the presets, Holašovice first, then the custom places", () => {
@@ -61,7 +62,8 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
 
   it("stays within its building cap, has no Training Yard, 10+ POIs and two spawns per POI", () => {
     const { map, info } = module;
-    expect(map.buildings.length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
+    // Bridges are laid over crossings on top of the building cap.
+    expect(map.buildings.filter((b) => !(isBuildingPrefabId(b.prefab) && getBuildingPrefab(b.prefab).spansRoad)).length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
     expect(map.buildings.length).toBe(info.stats.buildings);
     expect(map.pois.some((p) => p.kind === "training")).toBe(false);
     expect(map.pois.length).toBeGreaterThanOrEqual(10);

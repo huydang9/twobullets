@@ -4,4 +4,4 @@
 // Elevation: AWS Terrain Tiles (terrarium), see apps/client/public/assets/map/credits.json.
 import type { RealMapInfo } from "./types";
 
-export const INFO: RealMapInfo = { id: "vn-hangxanh", name: "Ngã Tư Hàng Xanh", country: "Vietnam", countryCode: "vn", lat: 10.80144, lon: 106.71132, osmTimestamp: "2026-09-15T05:23:48Z", bakeUrl: "assets/map/vn-hangxanh.terrain.bin", previewUrl: "assets/map/vn-hangxanh.preview.svg", elevation: { mode: "flat", scale: 0, realMin: null, realMax: null, relief: 0 }, stats: { pois: 10, buildings: 190, buildingCandidates: 7752, spawns: 20, roadsKm: 30.97, waterHa: 2.7 }, credits: ["osm"] };
+export const INFO: RealMapInfo = { id: "vn-hangxanh", name: "Ngã Tư Hàng Xanh", country: "Vietnam", countryCode: "vn", lat: 10.80144, lon: 106.71132, osmTimestamp: "2026-09-15T05:23:48Z", bakeUrl: "assets/map/vn-hangxanh.terrain.bin", previewUrl: "assets/map/vn-hangxanh.preview.svg", elevation: { mode: "flat", scale: 0, realMin: null, realMax: null, relief: 0 }, stats: { pois: 17, buildings: 192, buildingCandidates: 7070, spawns: 34, roadsKm: 30.97, waterHa: 2.7 }, credits: ["osm"] };

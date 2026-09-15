@@ -14,6 +14,8 @@ export interface ParsedOsm {
   readonly lines: readonly LineFeature[];
   /** Named nodes: places, amenities, attractions. */
   readonly points: readonly PointFeature[];
+  /** Amenity, shop and place-of-worship nodes, named or not (city mode tags the footprints they stand in). */
+  readonly amenities: readonly PointFeature[];
   /** OSM snapshot time from the Overpass header, if present. */
   readonly timestamp: string | null;
 }
@@ -78,6 +80,7 @@ export function parseOsm(doc: OsmDocument, projection: Projection, clipHalf: num
   const areas: AreaFeature[] = [];
   const lines: LineFeature[] = [];
   const points: PointFeature[] = [];
+  const amenities: PointFeature[] = [];
 
   // Deterministic order regardless of the server's output order.
   const elements = [...doc.elements].sort((a, b) => (a.type === b.type ? a.id - b.id : a.type < b.type ? -1 : 1));
@@ -85,6 +88,7 @@ export function parseOsm(doc: OsmDocument, projection: Projection, clipHalf: num
     const tags = element.tags ?? {};
     if (element.type === "node") {
       if (tags.name || tags.place) points.push({ id: element.id, tags, at: projection.project(element.lat, element.lon) });
+      if (tags.amenity || tags.shop || tags.religion) amenities.push({ id: element.id, tags, at: projection.project(element.lat, element.lon) });
       continue;
     }
     if (element.type === "way") {
@@ -111,5 +115,5 @@ export function parseOsm(doc: OsmDocument, projection: Projection, clipHalf: num
     if (tags.building) buildings.push(...areaFeatures(-element.id, tags, outers, inners, null));
     else if (isAreaTagged(tags)) areas.push(...areaFeatures(-element.id, tags, outers, inners, clipHalf));
   }
-  return { buildings, areas, lines, points, timestamp: doc.osm3s?.timestamp_osm_base ?? null };
+  return { buildings, areas, lines, points, amenities, timestamp: doc.osm3s?.timestamp_osm_base ?? null };
 }

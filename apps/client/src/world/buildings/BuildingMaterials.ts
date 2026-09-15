@@ -1,5 +1,5 @@
 import { Color3, PBRMaterial, Texture, type Scene } from "@babylonjs/core";
-import type { BuildingMaterialId, BuildingPrefabId } from "@twobullets/shared";
+import type { BuildingMaterialId, BuildingPrefabId, FacadeColor } from "@twobullets/shared";
 import { TEXTURE_SETS, type TextureSetId, type Vec3 } from "../environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT, waitForTexture } from "../materials";
 import { SurfaceVariationPlugin, type SurfaceVariationSettings } from "../surfaceVariation";
@@ -22,6 +22,14 @@ const LOOKS = {
   // Walls. Real painted render and whitewash sit around 0.5-0.6 albedo; the scans are photographed darker.
   plaster: { set: "white_plaster_02", albedo: [0.5, 0.48, 0.43], grime: 0.4, breakup: 0.3 },
   plasterInterior: { set: "painted_plaster_wall", albedo: [0.56, 0.54, 0.5], grime: 0.15, breakup: 0.15 },
+  // Saigon facade pastels (city houses pick one per placement, see FACADE_COLORS).
+  plasterYellow: { set: "white_plaster_02", albedo: [0.62, 0.49, 0.24], grime: 0.45, breakup: 0.3 },
+  plasterMint: { set: "white_plaster_02", albedo: [0.4, 0.55, 0.46], grime: 0.45, breakup: 0.3 },
+  plasterPink: { set: "white_plaster_02", albedo: [0.62, 0.41, 0.41], grime: 0.45, breakup: 0.3 },
+  plasterSky: { set: "white_plaster_02", albedo: [0.39, 0.5, 0.6], grime: 0.45, breakup: 0.3 },
+  plasterWhite: { set: "white_plaster_02", albedo: [0.62, 0.61, 0.57], grime: 0.45, breakup: 0.3 },
+  // Tinted curtain-wall glass stand-in on towers (solid: their upper floors are closed).
+  glass: { set: "painted_plaster_wall", albedo: [0.04, 0.055, 0.07], breakup: 0.1 },
   plasterDamaged: { set: "damaged_plaster", albedo: [0.36, 0.3, 0.24], grime: 0.45, breakup: 0.35 },
   brick: { set: "red_brick_03", albedo: [0.19, 0.11, 0.085], grime: 0.3, breakup: 0.25 },
   brickWhitewashed: { set: "whitewashed_brick", albedo: [0.46, 0.44, 0.4], grime: 0.4, breakup: 0.3 },
@@ -72,7 +80,33 @@ const PREFAB_LOOKS: Partial<Record<BuildingPrefabId, Partial<Record<BuildingMate
   guard_booth: { plaster: "brickWhitewashed" },
   radar_station: { plaster: "concreteWall" },
   watchtower: { corrugated: "boxProfile" },
+  pagoda: { plaster: "plasterYellow", woodTrim: "planks" },
+  church: { plaster: "plasterPink" },
+  school: { plaster: "plasterYellow" },
+  petrol_station: { plaster: "plasterWhite" },
+  workshop: { plaster: "concreteWall" },
+  office_tower: { plaster: "concreteWall", darkSteel: "glass" },
+  highrise_apartment: { plaster: "plasterWhite", darkSteel: "glass" },
+  construction_site: { roofMetal: "brick" },
+  bridge_lane_16: { plaster: "concreteWall" },
+  bridge_lane_80: { plaster: "concreteWall" },
+  bridge_road_24: { plaster: "concreteWall" },
+  bridge_road_40: { plaster: "concreteWall" },
 };
+
+const FACADE_LOOKS: Readonly<Record<FacadeColor, BuildingLookId | null>> = {
+  plaster: null,
+  yellow: "plasterYellow",
+  mint: "plasterMint",
+  pink: "plasterPink",
+  sky: "plasterSky",
+  white: "plasterWhite",
+};
+
+/** A placement's facade colour applied to a look: only the default exterior plaster changes. */
+export function facadeLook(look: BuildingLookId, color: FacadeColor | null): BuildingLookId {
+  return color && look === "plaster" ? (FACADE_LOOKS[color] ?? look) : look;
+}
 
 /** Look for a material slot of a given prefab. */
 export function lookOf(prefabId: string, slot: BuildingMaterialId): BuildingLookId {
