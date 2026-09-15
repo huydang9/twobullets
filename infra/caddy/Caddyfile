@@ -1,14 +1,11 @@
-# Front door on the single host: automatic HTTPS (Let's Encrypt), the client files, the API, and match WebSockets.
-#   https://{$TB_SITE_ADDRESS}/                    client (apps/client/dist)
-#   https://{$TB_SITE_ADDRESS}/v1/*                server-api (REST + /v1/ws push)
-#   https://{$TB_SITE_ADDRESS}/.well-known/jwks.json
-#   wss://{$TB_SITE_ADDRESS}/gs/<port>/m/<matchId> a match process on <port> (7400–7499) inside the `server` container
-# TB_SITE_ADDRESS is a bare domain in production (play.example.com → HTTPS) or http://localhost:8080 for the local smoke.
-# Game traffic is WSS on TCP 443 from day one (ADR 0002 §1), with Caddy doing TLS instead of HAProxy on this MVP.
+# App container behind the host's reverse proxy (nginx does TLS). Plain HTTP on :8080 inside the container:
+#   /                              client (apps/client/dist)
+#   /v1/*, /.well-known/jwks.json  server-api (REST + /v1/ws push)
+#   /gs/<port>/m/<matchId>         a match WebSocket on <port> (7400–7499) inside the `server` container
 
 {
-	email {$TB_ACME_EMAIL:admin@localhost}
 	admin off
+	auto_https off
 	servers {
 		timeouts {
 			read_header 10s
@@ -17,14 +14,13 @@
 	}
 }
 
-{$TB_SITE_ADDRESS} {
+:8080 {
 	log {
 		output stdout
 		format json
 	}
 
 	header {
-		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server

@@ -1,125 +1,64 @@
 # Release runbook
 
-Single Ubuntu 24.04 VPS (SG) running Docker Compose with two containers:
-- `web`: Caddy (TLS, static client, `/v1` API and match WebSocket proxy)
-- `server`: server-api, which forks one `server-match --mode=agent` process per match on ports 7400–7419
+One VPS, Docker Compose, built from this repo. The app listens on `127.0.0.1:8081`; the host's nginx handles TLS and proxies to it (WebSockets included).
 
-Server directory: `/opt/twobullets`. Images come from `ghcr.io/<owner>/twobullets-{server-api,web}`. The deploy files are untested (not built on a machine with Docker yet).
+- `web`: Caddy, serving the client plus `/v1` API and `/gs/<port>` match WebSockets, over plain HTTP.
+- `server`: server-api, which forks one match process per match (ports 7400–7409, internal only).
 
 ## First deploy
 
 **Prerequisites:**
-- Docker installed.
-- Ports 80/tcp, 443/tcp and 443/udp open.
-- DNS `A` record for `play.<domain>` → VPS IP (Cloudflare proxy **off**; WebSockets go straight to Caddy).
-- Clock in sync (token expiry depends on it).
+- Docker and nginx are installed.
+- DNS `A` record `twobullets.huydang.me` points to the VPS (Cloudflare proxy off).
+- About 3 GB of free RAM for the build (the Vite build is heavy). Add swap on small hosts.
 
 ```bash
-# laptop: build and push images (release workflow on tag)
-git tag v0.1.0 && git push origin v0.1.0
-scp infra/docker-compose.yml infra/.env.example infra/scripts/{backup,keys}.sh <vps>:/opt/twobullets/
+git clone https://github.com/huydang9/twobullets.git && cd twobullets/infra
+cp .env.example .env && chmod 600 .env && $EDITOR .env     # TB_METRICS_TOKEN=$(openssl rand -hex 24), TB_INVITE_CODE
+docker compose up -d --build
+scripts/keys.sh generate && docker compose restart server
+curl -s http://127.0.0.1:8081/readyz                        # {"ok":true,...}
 
-# vps
-cd /opt/twobullets && mv .env.example .env && chmod 600 .env
-$EDITOR .env          # TB_REGISTRY, TB_TAG, TB_DOMAIN, TB_ACME_EMAIL, TB_INVITE_CODE, TB_METRICS_TOKEN
-docker login ghcr.io  # only if the packages are private (read:packages token)
-docker compose pull
-./keys.sh generate    # JWT signing keys in the tb_data volume
-docker compose up -d && echo v0.1.0 >> .deploy-history
-curl -s https://play.<domain>/readyz      # {"ok":true,...}
+cp nginx/twobullets.conf /etc/nginx/sites-available/
+ln -s /etc/nginx/sites-available/twobullets.conf /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d twobullets.huydang.me
 ```
 
-**Smoke test:**
-1. Log in with the invite code.
-2. Create a lobby (Map v1, bots on) and start a match.
-3. Reload mid-match and check **Vào lại trận** (rejoin).
+Then open https://twobullets.huydang.me, log in, create a room with bots, and start a match.
 
-**Nightly backup:** add `30 3 * * * /opt/twobullets/backup.sh >> /opt/twobullets/backup.log 2>&1` to crontab.
-
-### Alternative: build on the server from the repo (no registry)
+## Update
 
 ```bash
-cd /opt/twobullets
-git clone https://github.com/huydang9/twobullets.git src
-cp src/infra/docker-compose.yml . && cp src/infra/compose.build.override.yml docker-compose.override.yml
-cp src/infra/.env.example .env && chmod 600 .env   # TB_REGISTRY=local, TB_TAG=main (image tag label)
-cp src/infra/scripts/{backup,keys}.sh . && chmod +x backup.sh keys.sh
-docker compose build          # web build runs Vite: needs ~2–4 GB free RAM
-./keys.sh generate && docker compose up -d
-# update:  git -C src pull && docker compose build && docker compose up -d
-# rollback: git -C src checkout <good-tag> && docker compose build && docker compose up -d
+cd twobullets && git pull && cd infra && docker compose up -d --build
 ```
 
-## Key `.env` settings
+The restart ends any running matches and clears lobbies. Accounts and results survive in the `tb_data` volume.
 
-| Var | Meaning |
-|---|---|
-| `TB_TAG` | Image tag; `web` and `server` must run the same one, or clients get HTTP 426 "reload" |
-| `TB_INVITE_CODE` | Required at guest login; empty means open |
-| `TB_MAX_MATCHES` | Concurrent matches (~0.3 vCPU and ~250 MB per 20-player match); 4–6 on 4 vCPU / 8 GB |
-| `TB_MATCH_PORT_MIN/MAX` | Must stay inside 7400–7499 (Caddyfile) and the compose `expose` range |
-| `TB_SERVER_MEMORY_LIMIT` | Cap for the API plus all match processes |
-| `TB_MATCH_READY_TIMEOUT_MS` | Raise on a slow VPS if allocation times out |
-| `TB_CORS_ORIGINS` | Only if the client is served from another origin |
-
-## Update / rollback
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-TB_DEPLOY_SSH=deploy@play.<domain> infra/scripts/deploy.sh v0.2.0     # refuses while a match runs unless --force
-TB_DEPLOY_SSH=deploy@play.<domain> infra/scripts/deploy.sh rollback    # previous tag in .deploy-history
-```
-
-A restart ends running matches and clears lobbies and queues (they are in memory). Accounts and results persist in SQLite.
+To roll back: `git checkout <good-commit> && docker compose up -d --build`.
 
 ## Operate
 
-```bash
-docker compose logs -f --tail=200 server     # API + "[match m_…]" lines
-docker compose logs -f web                   # Caddy, ACME
-docker stats --no-stream
-docker compose exec -T server node -e "fetch('http://127.0.0.1:8080/metrics',{headers:{authorization:'Bearer '+process.env.TB_METRICS_TOKEN}}).then(r=>r.text()).then(console.log)" | grep '^tb_'
-```
-
-Metrics to watch:
-- `tb_matches_live`
-- `tb_match_tick_work_p99_ms_max` (keep under ~8 ms)
-- `tb_allocation_failures_total`
-- `tb_allocator_slots`
-
-For uptime monitoring, point a monitor at `/readyz`.
-
-**Backups:**
-- `backup.sh` does a `VACUUM INTO` of `/data/twobullets.sqlite` into `backups/`, gzipped, and keeps 14 days.
-- To restore:
-  1. `docker compose stop server`.
-  2. Copy the unzipped file to `/data/twobullets.sqlite` in the `tb_data` volume (remove the `-wal`/`-shm` files, owner `node`).
-  3. `docker compose up -d server`.
-
-**Signing keys:**
-- **Routine rotation:** `./keys.sh rotate` (reloads the API and pushes JWKS to matches), then `./keys.sh prune` after 13 h.
-- **On a leak:**
-  1. Rotate.
-  2. Prune immediately with `--min-age-hours=0`.
-  3. Send `docker compose kill -s HUP server`.
-  4. Also change `TB_INVITE_CODE` and `TB_METRICS_TOKEN`.
+| Task | Command |
+|---|---|
+| Logs | `docker compose logs -f --tail=200 server` (API and `[match …]` lines), `docker compose logs -f web` |
+| Status | `docker compose ps`, `docker stats --no-stream` |
+| Backup (cron) | `30 3 * * * /path/to/twobullets/infra/scripts/backup.sh` → `infra/backups/`, 14 days |
+| Rotate keys | `scripts/keys.sh rotate`, then `scripts/keys.sh prune` after 13 h |
 
 ## Troubleshooting
 
-| Symptom | Look at |
+| Symptom | Check |
 |---|---|
-| TLS or site down | DNS points at this IP, proxy off; ports 80/443 open; `docker compose logs web \| grep -i acme` |
-| "Servers busy" | `tb_allocator_slots`, `docker stats`; raise `TB_MAX_MATCHES` or use a bigger host |
-| Start/queue fails (`internal`) | `logs server \| grep 'allocation failed'` and the `[match …]` lines; `TB_MATCH_READY_TIMEOUT_MS` |
-| Rubber-banding | `tb_match_tick_work_p99_ms_max`, CPU steal (`top` `st`); fewer matches per host or dedicated vCPU |
-| Mass disconnect | `docker compose ps` restarts, `dmesg \| grep -i oom`; tune `TB_MAX_MATCHES` or `TB_SERVER_MEMORY_LIMIT` |
-| Reload loop (426) | `web` and `server` tags differ |
+| 502 from nginx | `docker compose ps`; `curl 127.0.0.1:8081/readyz` |
+| Stuck on "Đang vào trận…" | `docker compose logs server \| grep -i 'allocation\|match'`; raise `TB_MATCH_READY_TIMEOUT_MS` on a slow host |
+| WebSocket drops | Check that the nginx site has the `Upgrade`/`Connection` headers and `proxy_read_timeout 1h` |
+| Out of memory | `dmesg \| grep -i oom`; lower `TB_MAX_MATCHES` or `TB_SERVER_MEMORY_LIMIT`, add swap |
+| "Reload the page" loop | Rebuild both containers from the same commit (`up -d --build`) |
 
-## Known MVP gaps (before inviting players)
+## Known MVP gaps
 
 - No landing or glide.
-- No loot or networked equipment: everyone has a rifle and pistol.
-- Teammate health and revive progress aren't replicated.
-- Reconnect lands on the menu with rejoin.
-
-See `plan.md` for milestones B3/B5/B7/B8.
+- No loot online: everyone has a rifle and pistol.
+- Teammates' health and revive progress aren't shown.
+- Reconnect lands on the menu with "Vào lại trận".

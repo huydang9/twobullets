@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Consistent SQLite backup, run ON the server (cron: 30 3 * * * /opt/twobullets/backup.sh >> /opt/twobullets/backup.log 2>&1).
+# Consistent SQLite backup, run ON the server (cron: 30 3 * * * <repo>/infra/scripts/backup.sh).
 # Uses `VACUUM INTO` through Node's built-in sqlite inside the running container, so it is safe while players play.
 # Keeps 14 daily copies in $DIR/backups. Copy them off the server too (see docs/release/runbook.md "Backups").
 set -euo pipefail
 
-DIR="${TB_DEPLOY_DIR:-/opt/twobullets}"
+DIR="${TB_DEPLOY_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 KEEP_DAYS="${TB_BACKUP_KEEP_DAYS:-14}"
 cd "$DIR"
 mkdir -p backups
