@@ -186,6 +186,40 @@ export function deadTintFactor(step: number): number {
   return 1 - ((1 - DEAD.tintFactor) * Math.min(step, DEAD.tintSteps)) / DEAD.tintSteps;
 }
 
+/**
+ * Animation level of detail: how often a soldier's pose is sampled and written to its bones. Blend weights and clip
+ * clocks still advance every frame, so a lower rate shows the same motion in coarser steps. Distances are what the
+ * camera sees: world metres divided by the zoom magnification.
+ */
+export const ANIMATION_LOD = {
+  /** Every frame up to this distance, m. */
+  fullRateDistance: 40,
+  /** Rate beyond `fullRateDistance`, Hz. */
+  midHz: 15,
+  farDistance: 100,
+  farHz: 8,
+  /**
+   * Outside the view frustum, Hz; within `offscreenNearDistance` a little faster, as the body's shadow can still fall
+   * into view.
+   */
+  offscreenHz: 5,
+  offscreenNearDistance: 20,
+  offscreenNearHz: 15,
+  /** Knocked and holding still: only the slow sway moves. */
+  crawlHoldHz: 15,
+  /** Sphere around the body tested against the frustum: center height above the feet and radius, m (a lying body fits). */
+  cullCenterHeight: 0.9,
+  cullRadius: 1.6,
+} as const;
+
+/** Seconds between pose updates (0 = every frame) for a soldier at view `distance`, inside the frustum or not. */
+export function animationLodInterval(distance: number, inView: boolean): number {
+  const lod = ANIMATION_LOD;
+  if (!inView) return 1 / (distance <= lod.offscreenNearDistance ? lod.offscreenNearHz : lod.offscreenHz);
+  if (distance <= lod.fullRateDistance) return 0;
+  return 1 / (distance <= lod.farDistance ? lod.midHz : lod.farHz);
+}
+
 /** jump_up opens with a 0.27 s squat we skip, since the jump has already left the ground. */
 export const JUMP_UP_START = 0.27;
 /** jump_down holds the air pose for 0.33 s before the landing impact. */

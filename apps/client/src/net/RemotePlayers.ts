@@ -43,7 +43,11 @@ const CRAWL_TURN_SPEED = 0.3;
 const LYING_TURN_RATE = 3;
 const TAU = Math.PI * 2;
 
-/** Pauses or resumes a soldier's started clips in place (the animator's started/stopped bookkeeping is unchanged). */
+/**
+ * Pauses or resumes a soldier's started Babylon clips in place (the animator's started/stopped bookkeeping is unchanged).
+ * Only the Babylon-group fallback needs it: baked clips (`BakedSoldierClips`) advance only in `soldier.update`, which a
+ * hidden slot doesn't call.
+ */
 function setAnimationsPaused(soldier: SoldierCharacter, paused: boolean): void {
   for (const group of soldier.model.animations.values()) {
     if (!group.isStarted) continue;

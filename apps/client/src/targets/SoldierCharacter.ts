@@ -1,5 +1,5 @@
-import { TransformNode, Vector3, type AbstractMesh, type Material, type Mesh, type Scene } from "@babylonjs/core";
-import type { HitZone } from "@twobullets/shared";
+import { Camera, Frustum, Matrix, Plane, Quaternion, TransformNode, Vector3, type AbstractMesh, type Material, type Mesh, type Scene } from "@babylonjs/core";
+import { CAMERA, type HitZone } from "@twobullets/shared";
 import type { CharacterInstance } from "../assets";
 import type { Damageable, HitboxRegistry } from "../combat/hitboxes";
 import type { BloodBody } from "../fx/BloodEffects";
@@ -7,7 +7,7 @@ import type { Environment } from "../world/environment";
 import { SoldierAnimator, createSoldierMotion, type AirState, type DownState, type SoldierMotion, type SoldierPose } from "./SoldierAnimator";
 import { SoldierHitboxes } from "./SoldierHitboxes";
 import type { SoldierResources } from "./SoldierResources";
-import { deadTintStep, soldierScale, type ActionName } from "./soldierRig";
+import { ANIMATION_LOD, animationLodInterval, deadTintStep, soldierScale, type ActionName } from "./soldierRig";
 
 export interface SoldierCharacterOptions {
   /** Node names and collider ids are prefixed with it (`${name}/${part}`). */
@@ -18,6 +18,25 @@ export interface SoldierCharacterOptions {
 
 const FORWARD = new Vector3(0, 0, 1);
 const direction = new Vector3();
+/** Unzoomed half field of view tangents: CAMERA.fovDegrees is horizontal at 16:9. */
+const HORIZONTAL_HALF_TAN = Math.tan((CAMERA.fovDegrees * Math.PI) / 360);
+const VERTICAL_HALF_TAN = HORIZONTAL_HALF_TAN / (16 / 9);
+
+/** Gameplay camera frustum, computed once per render interval for every soldier's level of detail. */
+const view = { scene: null as Scene | null, renderId: -1, camera: null as Camera | null, planes: [0, 1, 2, 3, 4, 5].map(() => new Plane(0, 0, 0, 0)), matrix: new Matrix() };
+
+function viewPlanes(scene: Scene, camera: Camera): readonly Plane[] {
+  const renderId = scene.getRenderId();
+  if (view.scene !== scene || view.renderId !== renderId || view.camera !== camera) {
+    view.scene = scene;
+    view.renderId = renderId;
+    view.camera = camera;
+    // The owner moved the camera after the last render: the view matrix is recomputed here if needed.
+    camera.getViewMatrix().multiplyToRef(camera.getProjectionMatrix(), view.matrix);
+    Frustum.GetPlanesToRef(view.matrix, view.planes);
+  }
+  return view.planes;
+}
 
 /**
  * Animated third-person SWAT soldier: the reusable body for target dummies now and remote players later.
@@ -44,9 +63,15 @@ export class SoldierCharacter implements BloodBody {
   private readonly skin: { readonly mesh: AbstractMesh; readonly material: Material | null }[];
   private deadTime = 0;
   private tintStep = 0;
+  private readonly scene: Scene;
+  /** Root placement the hitboxes were last marked for. */
+  private readonly placedPosition = new Vector3(NaN, NaN, NaN);
+  private readonly placedRotation = new Quaternion(NaN, NaN, NaN, NaN);
+  private readonly placedEuler = new Vector3(NaN, NaN, NaN);
 
   constructor(scene: Scene, resources: SoldierResources, environment: Environment, options: SoldierCharacterOptions) {
     const { name, damage } = options;
+    this.scene = scene;
     this.root = new TransformNode(`${name}_root`, scene);
     this.model = resources.assets.instantiateCharacter("swat");
     const scale = soldierScale(this.model.asset);
@@ -182,7 +207,9 @@ export class SoldierCharacter implements BloodBody {
   }
 
   update(dt: number): void {
+    this.animator.poseInterval = this.animationInterval();
     this.animator.update(dt);
+    if (this.hitboxes && (this.animator.posed || this.rootMoved())) this.hitboxes.markDirty();
     if (this.animator.dead) {
       this.deadTime += dt;
       const step = deadTintStep(this.deadTime);
@@ -193,6 +220,59 @@ export class SoldierCharacter implements BloodBody {
       this.rifleShown = show;
       this.rifle.setEnabled(show);
     }
+  }
+
+  /**
+   * Animation level of detail (`ANIMATION_LOD`) from the gameplay camera: distance over zoom, and its view frustum.
+   * Call after the owner placed the root and the camera.
+   */
+  private animationInterval(): number {
+    const camera = this.scene.activeCameras?.[0] ?? this.scene.activeCamera;
+    if (!camera) return 0;
+    const lod = ANIMATION_LOD;
+    // First: refreshes the view matrix, and with it the camera's global position.
+    const planes = viewPlanes(this.scene, camera);
+    const p = this.root.position;
+    const c = camera.globalPosition;
+    const cx = p.x;
+    const cy = p.y + lod.cullCenterHeight;
+    const cz = p.z;
+    const dx = cx - c.x;
+    const dy = cy - c.y;
+    const dz = cz - c.z;
+    const reference = camera.fovMode === Camera.FOVMODE_HORIZONTAL_FIXED ? HORIZONTAL_HALF_TAN : VERTICAL_HALF_TAN;
+    const magnification = Math.max(1, reference / Math.tan(Math.max(1e-3, camera.fov) / 2));
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz) / magnification;
+    let inView = true;
+    for (let i = 0; i < planes.length; i++) {
+      const plane = planes[i]!;
+      if (plane.normal.x * cx + plane.normal.y * cy + plane.normal.z * cz + plane.d <= -lod.cullRadius) {
+        inView = false;
+        break;
+      }
+    }
+    const interval = animationLodInterval(distance, inView);
+    return this.animator.pose === "crawlHold" ? Math.max(interval, 1 / lod.crawlHoldHz) : interval;
+  }
+
+  private rootMoved(): boolean {
+    const p = this.root.position;
+    const q = this.root.rotationQuaternion;
+    const last = this.placedPosition;
+    const lastRotation = this.placedRotation;
+    const e = this.root.rotation;
+    const euler = this.placedEuler;
+    const moved =
+      p.x !== last.x ||
+      p.y !== last.y ||
+      p.z !== last.z ||
+      (q ? q.x !== lastRotation.x || q.y !== lastRotation.y || q.z !== lastRotation.z || q.w !== lastRotation.w : e.x !== euler.x || e.y !== euler.y || e.z !== euler.z);
+    if (moved) {
+      last.copyFrom(p);
+      if (q) lastRotation.copyFrom(q);
+      else euler.copyFrom(e);
+    }
+    return moved;
   }
 
   /** Swaps the body onto the shared darkened material step (0 = own materials). */

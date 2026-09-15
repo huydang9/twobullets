@@ -1,5 +1,6 @@
-import { AnimationGroupMask, AnimationGroupMaskMode, type AnimationGroup } from "@babylonjs/core";
+import { AnimationGroupMask, AnimationGroupMaskMode, type Nullable } from "@babylonjs/core";
 import type { CharacterClipName, CharacterInstance } from "../assets";
+import { BakedPoseMixer } from "./BakedSoldierClips";
 import { ACTIONS, ACTIVITIES, DEAD, DOWNED, HANDS_BUSY_ACTIONS, JUMP_DOWN_START, JUMP_UP_START, crawlRestAhead, crawlSwayTime, type ActionName, type SoldierActivity } from "./soldierRig";
 
 /** Movement input for the animator, written by the owner every frame (local player sim or network snapshot). */
@@ -72,9 +73,25 @@ const LOCOMOTION = {
   run: { fwd: "run_fwd", back: "run_back", left: "run_left", right: "run_right" },
 } as const;
 
+/** The AnimationGroup members the animator drives: Babylon's own groups, or the baked ones (`BakedSoldierClips`). */
+export interface SoldierClipGroup {
+  readonly from: number;
+  readonly to: number;
+  readonly isStarted: boolean;
+  speedRatio: number;
+  weight: number;
+  mask: Nullable<AnimationGroupMask>;
+  readonly targetedAnimations: readonly { readonly target: unknown; readonly animation: { readonly framePerSecond: number } }[];
+  readonly animatables: readonly { weight: number }[];
+  start(loop?: boolean, speedRatio?: number, from?: number, to?: number): unknown;
+  stop(skipOnAnimationEnd?: boolean): unknown;
+  goToFrame(frame: number): unknown;
+  getCurrentFrame(): number;
+}
+
 interface Channel {
   readonly name: CharacterClipName;
-  readonly group: AnimationGroup;
+  readonly group: SoldierClipGroup;
   /** Upper-body layer factor per targeted animation (same order as `group.animatables`). */
   readonly upper: Float32Array;
   readonly fps: number;
@@ -83,6 +100,8 @@ interface Channel {
   readonly rootSpeed: number;
   /** Phase-locked locomotion cycle. */
   readonly cyclic: boolean;
+  /** death_front / death_back. */
+  readonly deathClip: boolean;
   /** Full-body posture clip (downed graph, activities): fades at POSTURE_RATE. */
   readonly posture: boolean;
   /** Played on demand and held on its last frame instead of looping. */
@@ -116,8 +135,22 @@ interface Channel {
  * Per bone the weights always sum to 1, so Babylon's weighted blend never mixes in a stale rest pose.
  * Groups only run while they carry weight. Locomotion cycles share one frequency and join in phase; one-shots
  * are started on demand, frozen on their last frame, and stopped once faded out.
+ *
+ * A real character's clips play as baked groups: `update` advances their clocks and poses the bones itself (every
+ * `poseInterval` seconds, and only when something changed), so Babylon's animation pass has nothing to do for soldiers.
  */
 export class SoldierAnimator {
+  /** Plays real characters' clips as baked groups (false: Babylon AnimationGroups, for comparisons). */
+  static bakedClips = true;
+  /**
+   * Seconds between pose evaluations (level of detail, set by the owner before `update`); 0 poses every update. The
+   * clocks and blend weights still advance every update, so a lower rate only samples the same motion less often.
+   */
+  poseInterval = 0;
+  /** Whether the last `update` wrote a new pose onto the bones. */
+  posed = false;
+  private poseClock = 0;
+  private readonly mixer: BakedPoseMixer | null;
   private readonly channels: Channel[] = [];
   private readonly byName = new Map<CharacterClipName, Channel>();
   private readonly idle: Channel;
@@ -161,7 +194,11 @@ export class SoldierAnimator {
     upperWeights: ReadonlyMap<string, number>,
     upperMask: AnimationGroupMask,
   ) {
-    for (const [name, group] of character.animations) {
+    this.mixer = SoldierAnimator.bakedClips ? BakedPoseMixer.create(character) : null;
+    const groups: ReadonlyMap<CharacterClipName, SoldierClipGroup> = this.mixer?.groups ?? character.animations;
+    // Different clock phases spread the level-of-detail poses of many soldiers over different frames.
+    this.poseClock = (instances++ * 0.618034) % 1;
+    for (const [name, group] of groups) {
       const clip = character.asset.clips[name];
       const oneShot = !clip.loop;
       const targets = group.targetedAnimations;
@@ -173,8 +210,9 @@ export class SoldierAnimator {
         upper,
         fps: targets[0]?.animation.framePerSecond ?? 60,
         duration: clip.duration,
-        rootSpeed: clip.rootMotion ? Math.hypot(clip.rootMotion[0], clip.rootMotion[2]) : 0,
+        rootSpeed: clip.rootMotion ? Math.sqrt(clip.rootMotion[0] * clip.rootMotion[0] + clip.rootMotion[2] * clip.rootMotion[2]) : 0,
         cyclic: clip.loop && clip.rootMotion !== undefined,
+        deathClip: name === "death_front" || name === "death_back",
         posture: POSTURE_CLIPS.has(name),
         oneShot,
         base: 0,
@@ -211,6 +249,7 @@ export class SoldierAnimator {
 
     this.idle.base = 1;
     this.apply(0);
+    this.mixer?.evaluate();
   }
 
   get dead(): boolean {
@@ -375,8 +414,32 @@ export class SoldierAnimator {
     this.updateTargets();
     this.smooth(dt);
     this.apply(dt);
+    this.writePose(dt);
     // Counts renders: a seek made now or before the next update is evaluated by the render after that update.
     this.frameCount++;
+  }
+
+  /** Baked clips: the clock step Babylon's animation pass would make, then the pose when its level of detail is due. */
+  private writePose(dt: number): void {
+    const mixer = this.mixer;
+    this.posed = false;
+    if (!mixer) {
+      this.posed = true;
+      return;
+    }
+    mixer.advance(dt);
+    const interval = this.poseInterval;
+    this.poseClock += dt;
+    if (this.poseClock < interval) return;
+    // Keeps the remainder (the phase); at full rate the clock just wraps.
+    this.poseClock = interval > 0 ? this.poseClock - interval : this.poseClock % 1;
+    if (this.poseClock >= interval && interval > 0) this.poseClock %= interval;
+    this.posed = mixer.evaluate();
+  }
+
+  private speed(): number {
+    const { velocityX: vx, velocityZ: vz } = this.motion;
+    return Math.sqrt(vx * vx + vz * vz);
   }
 
   private channel(name: CharacterClipName): Channel {
@@ -414,7 +477,7 @@ export class SoldierAnimator {
   private updateDowned(dt: number): void {
     this.downTime += dt;
     const { downed } = this.motion;
-    const speed = Math.hypot(this.motion.velocityX, this.motion.velocityZ);
+    const speed = this.speed();
     this.crawlTimer = speed > DOWNED.crawlStartSpeed ? DOWNED.crawlHold : Math.max(0, this.crawlTimer - dt);
     if (this.dead) return;
     switch (this.down) {
@@ -496,7 +559,7 @@ export class SoldierAnimator {
         if (grounded) this.setAir("landing");
         break;
       case "landing": {
-        const moving = Math.hypot(this.motion.velocityX, this.motion.velocityZ) > 1;
+        const moving = this.speed() > 1;
         if (!grounded) this.setAir("rising");
         else if (this.airTime >= (moving ? LANDING_HOLD_MOVING : LANDING_HOLD)) this.setAir("ground");
         break;
@@ -553,7 +616,7 @@ export class SoldierAnimator {
     if (activity !== null && this.canAct) {
       const spec = ACTIVITIES[activity];
       const channel = this.channel(spec.clip);
-      const moving = spec.kneeling ? 0 : Math.min(1, Math.hypot(this.motion.velocityX, this.motion.velocityZ) / ACTIVITY_WALK_SPEED);
+      const moving = spec.kneeling ? 0 : Math.min(1, this.speed() / ACTIVITY_WALK_SPEED);
       channel.fullTarget += 1 - moving;
       channel.overlayTarget = moving;
     }
@@ -573,7 +636,7 @@ export class SoldierAnimator {
 
   private updateLocomotionTargets(): void {
     const { velocityX: vx, velocityZ: vz, crouched, sprinting } = this.motion;
-    const speed = Math.hypot(vx, vz);
+    const speed = this.speed();
     if (speed > DIRECTION_MIN_SPEED) {
       const sum = Math.abs(vx) + Math.abs(vz);
       this.dirFwd = Math.max(vz, 0) / sum;
@@ -636,8 +699,7 @@ export class SoldierAnimator {
     for (const c of this.channels) {
       c.base = approach(c.base, c.baseTarget, kBase);
       c.overlay = approach(c.overlay, c.overlayTarget, kOverlay);
-      const deathClip = c.name === "death_front" || c.name === "death_back";
-      c.full = approach(c.full, c.fullTarget, deathClip || this.dead ? kDeath : c.posture ? kPosture : kAir);
+      c.full = approach(c.full, c.fullTarget, c.deathClip || this.dead ? kDeath : c.posture ? kPosture : kAir);
     }
   }
 
@@ -673,7 +735,7 @@ export class SoldierAnimator {
     let frequency = 1;
     let reference: Channel | null = null;
     if (cycleWeight > EPSILON) {
-      const speed = Math.hypot(this.motion.velocityX, this.motion.velocityZ);
+      const speed = this.speed();
       const authored = cycleSpeed / cycleWeight;
       const playback = Math.min(MAX_PLAYBACK, Math.max(MIN_PLAYBACK, authored > 0 ? speed / authored : 1));
       frequency = (playback * cycleRate) / cycleWeight;
@@ -748,6 +810,8 @@ export class SoldierAnimator {
     this.seek(c, c.endFrame);
   }
 }
+
+let instances = 0;
 
 /** Clips layered on the upper body only (masked, so their legs are never evaluated). */
 const UPPER_BODY_CLIPS: ReadonlySet<CharacterClipName> = new Set<CharacterClipName>(["fire", "reload", "hit", "throw_stand", "throw_crouch", "pick_up"]);

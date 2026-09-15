@@ -40,7 +40,8 @@ const axisZ = new Vector3();
 /**
  * Havok trigger shapes that follow the skeleton. After animations are evaluated and before the physics step (same
  * render), each shape is placed along its bone; ANIMATED bodies pick the new transform up in that step, so bullet
- * rays in the next frame's ticks test exactly the pose that was rendered.
+ * rays in the next frame's ticks test exactly the pose that was rendered. Frames the owner didn't mark dirty (no new
+ * pose, root unmoved) skip the placement: the shapes are already there.
  */
 export class SoldierHitboxes {
   readonly parts: readonly SoldierHitboxPart[];
@@ -50,6 +51,8 @@ export class SoldierHitboxes {
   private readonly chain: Node[];
   private readonly observer: Observer<Scene>;
   private active = true;
+  /** The pose or placement changed since the shapes were last placed (`markDirty`). */
+  private dirty = true;
 
   constructor(
     scene: Scene,
@@ -84,7 +87,9 @@ export class SoldierHitboxes {
       this.items.push({ ...part, body });
     }
     this.parts = this.items;
-    this.observer = scene.onAfterAnimationsObservable.add(() => this.update());
+    this.observer = scene.onAfterAnimationsObservable.add(() => {
+      if (this.dirty) this.update();
+    });
   }
 
   get enabled(): boolean {
@@ -99,7 +104,14 @@ export class SoldierHitboxes {
     if (enabled) this.update();
   }
 
+  /** The skeleton was posed or the body moved this frame: place the shapes again after the animations. */
+  markDirty(): void {
+    this.dirty = true;
+  }
+
+  /** Places the shapes now (the after-animations pass only does it when marked dirty). */
   update(): void {
+    this.dirty = false;
     // Kept fresh while disabled too: attachments like blood wounds follow these bones on a dead body.
     this.refreshWorldMatrices();
     if (!this.active) return;
@@ -119,7 +131,11 @@ export class SoldierHitboxes {
   }
 
   private refreshWorldMatrices(): void {
-    for (const node of this.chain) node.computeWorldMatrix(true);
+    // Parents first, each computed once: a forced compute would recompute every ancestor again for every node. Dirtying
+    // the root makes the lazy computes below redo the whole chain even if one ran earlier this render.
+    const chain = this.chain;
+    chain[0]?.markAsDirty();
+    for (let i = 0; i < chain.length; i++) chain[i]!.computeWorldMatrix();
   }
 }
 
