@@ -11,9 +11,9 @@ import {
   countItem,
   createEquipmentWorld,
   createGroundLoot,
-  createOfflineInventory,
   createInventory,
   createPlayerEquipment,
+  createStartingInventory,
   createTestLoot,
   cookProgress,
   deriveEquipmentModifiers,
@@ -57,6 +57,7 @@ import {
   type LootBuilding,
   type LootItem,
   type MoveState,
+  type OutdoorLootWorld,
   type PlayerEquipmentEvent,
   type PlayerEquipmentState,
   type PointOfInterest,
@@ -141,14 +142,15 @@ export interface EquipmentTarget extends Damageable {
 export interface EquipmentOptions {
   /** Match seed for loot and effect shapes. */
   readonly seed?: number;
-  /** Map mode: spawns ground loot in these buildings. */
-  readonly map?: { readonly pois: readonly PointOfInterest[]; readonly buildings: readonly LootBuilding[] };
+  /** Map mode: spawns ground loot in these buildings, and along roads and on POI pads with `outdoor`. */
+  readonly map?: { readonly pois: readonly PointOfInterest[]; readonly buildings: readonly LootBuilding[]; readonly outdoor?: OutdoorLootWorld };
   /** Ground loot outside map mode. Default: a test pile in front of every arena spawn; `[]` for none. */
   readonly loot?: readonly LootItem[];
   /** Called every tick for the current targets. */
   readonly targets?: () => readonly EquipmentTarget[];
   /** Teammates the local player can revive (DEV teammate, squad bots later). */
   readonly teammates?: () => readonly ReviveTarget[];
+  /** Starting inventory (default: the match starting kit). */
   readonly inventory?: InventoryState;
 }
 
@@ -236,11 +238,11 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     private readonly options: EquipmentOptions = {},
   ) {
     const seed = options.seed ?? DEFAULT_SEED;
-    this.state = createPlayerEquipment(options.inventory ?? createOfflineInventory());
+    this.state = createPlayerEquipment(options.inventory ?? createStartingInventory());
     this.world = createEquipmentWorld(seed);
     this.raycaster = new WorldRaycaster(scene);
     this.inputQueue = new EquipmentInputQueue(input);
-    const loot = options.map ? generateLoot(seed, options.map.pois, options.map.buildings).items : (options.loot ?? createTestLoot(ARENA_LEVEL.spawnPoints));
+    const loot = options.map ? generateLoot(seed, options.map.pois, options.map.buildings, options.map.outdoor).items : (options.loot ?? createTestLoot(ARENA_LEVEL.spawnPoints));
     this.groundLoot = createGroundLoot(loot);
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
   }
@@ -406,7 +408,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     return items.length;
   }
 
-  resetLoadout(inventory: InventoryState = createOfflineInventory()): void {
+  resetLoadout(inventory: InventoryState = createStartingInventory()): void {
     this.cancelTeammateRevive();
     this.state = createPlayerEquipment(inventory);
     this.reviverId = null;

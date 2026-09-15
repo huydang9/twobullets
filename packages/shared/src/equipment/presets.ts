@@ -1,4 +1,5 @@
 import type { SpawnPoint } from "../level/types";
+import { WEAPONS } from "../weapons/weapons";
 import { createArmorPiece } from "./armor";
 import { createInventory, type InventoryState, type ItemInstance } from "./inventory";
 import type { LootItem } from "./loot";
@@ -31,6 +32,39 @@ export function createOfflineInventory(): InventoryState {
       { itemId: "medkit", quantity: 1 },
       { itemId: "energy_drink", quantity: 2 },
       { itemId: "painkiller", quantity: 1 },
+    ],
+  });
+}
+
+/** Starting kit amounts: two spare magazines per gun and a level 1 backpack to carry them and what gets looted. */
+export const STARTING_KIT = {
+  rifleReserve: 60,
+  pistolReserve: 24,
+  frags: 1,
+  smokes: 1,
+  backpack: 1,
+} as const;
+
+/**
+ * What every player and bot starts a match with (offline practice, plain offline, respawns): the AR-4 and the P-9
+ * with loaded magazines and two spare magazines each, one frag and one smoke, in a level 1 backpack (weight 65.6 of 200).
+ * `throwables: false` leaves the grenades out and the backpack off (networked play: the server doesn't simulate
+ * throwables yet, and its kit is separate).
+ */
+export function createStartingInventory(options: { readonly throwables?: boolean } = {}): InventoryState {
+  const throwables = options.throwables ?? true;
+  return createInventory({
+    weapons: [{ weaponId: "rifle", magazine: WEAPONS.rifle.magazineSize }, null, { weaponId: "pistol", magazine: WEAPONS.pistol.magazineSize }],
+    backpack: throwables ? STARTING_KIT.backpack : 0,
+    stacks: [
+      { itemId: "ammo_556", quantity: STARTING_KIT.rifleReserve },
+      { itemId: "ammo_9mm", quantity: STARTING_KIT.pistolReserve },
+      ...(throwables
+        ? [
+            { itemId: "frag", quantity: STARTING_KIT.frags },
+            { itemId: "smoke", quantity: STARTING_KIT.smokes },
+          ] as const
+        : []),
     ],
   });
 }

@@ -157,6 +157,8 @@ const DT = TICK_SECONDS;
 const PICKUP_SLACK = 0.4;
 /** Max |Δy| between reviver and downed feet, m. */
 const REVIVE_HEIGHT = 1.2;
+/** Bots weigh at most the nearest 48 items per loot scan (brain LOOT_CAPACITY); the query keeps a few more. */
+const BOT_LOOT_QUERY_LIMIT = 64;
 /** Death piles use loot pile ids above generated ones. */
 export const DEATH_PILE_ID_BASE = 1_000_000;
 const NOISE_POOL = 128;
@@ -400,7 +402,7 @@ export class MatchSim implements MatchView {
   private readonly combatInput = createCombatInput();
   private readonly weaponContext = createWeaponContext();
   private readonly damageResult: MutableDamageResult = { dealt: 0, remainingHealth: 0, knocked: false, killed: false, armorAbsorbed: 0, armorSlot: null, armorDestroyed: false };
-  private readonly queryLoot = (center: Vec3, radius: number, out: LootItem[]): number => queryGroundLootInto(this.ports.groundLoot, center, radius, out);
+  private readonly queryLoot = (center: Vec3, radius: number, out: LootItem[]): number => queryGroundLootInto(this.ports.groundLoot, center, radius, out, BOT_LOOT_QUERY_LIMIT);
   private readonly actorOnSegmentBound = (from: Vec3, to: Vec3, excludeSlot: number): number => this.actorOnSegment(from, to, excludeSlot);
 
   constructor(options: MatchSimOptions) {

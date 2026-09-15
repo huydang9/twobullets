@@ -3,6 +3,7 @@ import {
   botProfile,
   createBotBrain,
   createBrMatchConfig,
+  createStartingInventory,
   type BotBrainFactory,
   type BotDifficulty,
   type BrMatchConfig,
@@ -57,6 +58,8 @@ export function createOfflineMatchSim(input: OfflineMatchSimInput): MatchSim {
     spawns: input.spawns,
     killY: input.killY,
     profile: input.profile ?? false,
+    // Bots start with the human's kit (OfflineMatch resets the human's loadout to the same inventory).
+    inventoryFor: () => createStartingInventory(),
     ports: {
       raycastWorld: input.raycastWorld,
       nav: input.nav,

@@ -222,7 +222,7 @@ export interface EquipmentPlayerControl {
   canBeKnocked: boolean;
   /** Starts (id) or stops (null) a revive on the downed local player; progresses each tick via stepRevive. */
   setReviver(reviverId: number | null): void;
-  /** Fresh kit: inventory (default: the offline preset), idle throw/use state and full vitals. */
+  /** Fresh kit: inventory (default: the match starting kit), idle throw/use state and full vitals. */
   resetLoadout(inventory?: InventoryState): void;
 }
 

@@ -2,9 +2,10 @@ import { Observable } from "@babylonjs/core";
 import { CONSUMABLE_COUNT, CONSUMABLE_IDS_BY_CODE, consumableCode, consumableIdOfCode } from "@twobullets/protocol/codes";
 import type { OwnerItemsBlock } from "@twobullets/protocol/messages/snapshot";
 import type { ArmorPiece } from "@twobullets/shared/equipment/armor";
-import { countItem, type InventoryStack, type InventoryState } from "@twobullets/shared/equipment/inventory";
+import { countItem, createInventory, type InventoryStack, type InventoryState } from "@twobullets/shared/equipment/inventory";
 import type { UseRejectReason } from "@twobullets/shared/equipment/itemUse";
 import { ITEM_IDS, ITEMS, itemCode, type ArmorLevel, type ConsumableItemId } from "@twobullets/shared/equipment/items";
+import { createOfflineInventory, createStartingInventory } from "@twobullets/shared/equipment/presets";
 import { consumableBlock, VITALS, type Vitals } from "@twobullets/shared/equipment/vitals";
 import { PlayerActionType, type PlayerAction } from "@twobullets/shared/input";
 import type { EquipmentView, ItemUseView, UseEvent, VitalsViewEvent } from "../equipment/types";
@@ -18,6 +19,18 @@ export const USE_PENDING_MS = 1000;
 const CANCEL_HOLD_MS = 1000;
 /** The boost hotkey takes the first carried of these (EquipmentSystem's USE_ACTIONS). */
 const BOOSTS: readonly ConsumableItemId[] = ["energy_drink", "painkiller"];
+
+/**
+ * The local equipment's inventory in networked play, mirroring what the server gives: the starting kit's AR-4 and P-9
+ * (NET_WEAPON_LOADOUT) and the offline kit's heals, boosts and backpack (server `createNetConsumables`). No grenades:
+ * the server doesn't simulate throwables yet, so a local throw would hurt nobody and its smoke would hide nothing.
+ */
+export function createNetLocalInventory(): InventoryState {
+  const kit = createOfflineInventory();
+  const starting = createStartingInventory({ throwables: false });
+  const consumables = kit.stacks.filter((s) => ITEMS[s.itemId].category === "heal" || ITEMS[s.itemId].category === "boost");
+  return createInventory({ weapons: starting.weapons, backpack: kit.backpack, stacks: [...starting.stacks, ...consumables] });
+}
 
 /**
  * The equipment HUD's view in networked play: the offline equipment view with the server's owner vitals (health,

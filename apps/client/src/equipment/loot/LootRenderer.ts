@@ -1,5 +1,5 @@
 import { Color3, Matrix, PBRMaterial, Quaternion, Vector3, type Camera, type HemisphericLight, type Mesh, type Scene } from "@babylonjs/core";
-import { ITEMS, queryGroundLoot, type ItemId, type LootItem } from "@twobullets/shared";
+import { ITEMS, forEachGroundLoot, type GroundLoot, type ItemId, type LootItem } from "@twobullets/shared";
 import type { AssetLibrary } from "../../assets";
 import type { EquipmentView } from "../types";
 import { createLootTemplate, usesLootMaterial, type LootModelFactory } from "./lootModels";
@@ -42,9 +42,10 @@ interface Batch {
 }
 
 /**
- * Ground loot as thin instances: one batch (template mesh) per item id, so Map v1's ~440 items cost at most one draw
- * call per item id in view. Only items near the camera are in the buffers; they are rebuilt when the ground loot
- * changes (`groundLoot.version`) or the camera has moved a few meters. The item the interaction would pick up
+ * Ground loot as thin instances: one batch (template mesh) per item id, so Map v1's ~2,300 items (loot table v3, with
+ * outdoor piles) cost at most one draw call per item id in view (about 30). Only items near the camera are in the
+ * buffers; they are rebuilt without allocating (buffers grow by doubling, then stay) when the ground loot changes
+ * (`groundLoot.version`) or the camera has moved a few meters. The item the interaction would pick up
  * (`lootTarget`) is drawn as a separate outlined copy, with its instance hidden.
  */
 export class LootRenderer {
@@ -57,6 +58,7 @@ export class LootRenderer {
   private version = -1;
   private highlighted: { batch: Batch; index: number; item: LootItem } | null = null;
   private highlightedLootId = -1;
+  private drawn = 0;
   /** Counts from the last rebuild (DEV stats). */
   readonly stats = { items: 0, drawn: 0, batches: 0, rebuilds: 0 };
 
@@ -81,7 +83,7 @@ export class LootRenderer {
     if (moved || ground.version !== this.version) {
       this.version = ground.version;
       this.lastCenter.copyFrom(center);
-      this.rebuild(queryGroundLoot(ground, { x: center.x, y: center.y, z: center.z }, LOOT_RENDER.drawDistance), center);
+      this.rebuild(ground, center);
     }
     this.updateHighlight(this.equipment.lootTarget);
   }
@@ -98,29 +100,14 @@ export class LootRenderer {
     this.material.dispose();
   }
 
-  private rebuild(items: readonly LootItem[], center: Vector3): void {
+  private rebuild(ground: GroundLoot, center: Vector3): void {
     this.restoreHighlighted();
     for (const batch of this.batches.values()) {
       batch.count = 0;
       batch.lootIds.length = 0;
     }
-    let drawn = 0;
-    const smallRange2 = LOOT_RENDER.smallItemDrawDistance ** 2;
-    for (const item of items) {
-      const batch = this.batchFor(item.itemId);
-      const [x, y, z] = item.position;
-      if (batch.small && (x - center.x) ** 2 + (y - center.y) ** 2 + (z - center.z) ** 2 > smallRange2) continue;
-      this.itemMatrix(item, this.matrix);
-      if ((batch.count + 1) * 16 > batch.matrices.length) {
-        const grown = new Float32Array(batch.matrices.length * 2);
-        grown.set(batch.matrices);
-        batch.matrices = grown;
-      }
-      this.matrix.copyToArray(batch.matrices, batch.count * 16);
-      batch.lootIds.push(item.lootId);
-      batch.count++;
-      drawn++;
-    }
+    this.drawn = 0;
+    forEachGroundLoot(ground, center, LOOT_RENDER.drawDistance, this.addItem);
     for (const batch of this.batches.values()) {
       batch.mesh.setEnabled(batch.count > 0);
       if (batch.count === 0) continue;
@@ -129,8 +116,30 @@ export class LootRenderer {
       batch.mesh.thinInstanceRefreshBoundingInfo(false);
     }
     this.highlightedLootId = -1;
-    Object.assign(this.stats, { items: this.equipment.groundLoot?.items.size ?? 0, drawn, batches: this.batches.size, rebuilds: this.stats.rebuilds + 1 });
+    const stats = this.stats;
+    stats.items = ground.items.size;
+    stats.drawn = this.drawn;
+    stats.batches = this.batches.size;
+    stats.rebuilds++;
   }
+
+  /** Adds one item in draw range to its batch (small items only within `smallItemDrawDistance`). */
+  private readonly addItem = (item: LootItem): void => {
+    const batch = this.batchFor(item.itemId);
+    const center = this.lastCenter;
+    const [x, y, z] = item.position;
+    if (batch.small && (x - center.x) ** 2 + (y - center.y) ** 2 + (z - center.z) ** 2 > LOOT_RENDER.smallItemDrawDistance ** 2) return;
+    this.itemMatrix(item, this.matrix);
+    if ((batch.count + 1) * 16 > batch.matrices.length) {
+      const grown = new Float32Array(batch.matrices.length * 2);
+      grown.set(batch.matrices);
+      batch.matrices = grown;
+    }
+    this.matrix.copyToArray(batch.matrices, batch.count * 16);
+    batch.lootIds.push(item.lootId);
+    batch.count++;
+    this.drawn++;
+  };
 
   private updateHighlight(target: LootItem | null): void {
     const lootId = target?.lootId ?? -1;

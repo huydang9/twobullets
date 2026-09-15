@@ -20,7 +20,7 @@ import {
 } from "./inventory";
 import { ITEMS } from "./items";
 import { IDLE_ITEM_USE, itemUseProgress, stepItemUse, type ItemUseInput, type ItemUseState } from "./itemUse";
-import { createOfflineInventory } from "./presets";
+import { createOfflineInventory, createStartingInventory, STARTING_KIT } from "./presets";
 import { createVitals, type Vitals } from "./vitals";
 
 function ok<T>(result: InventoryResult<T>): InventoryState {
@@ -103,6 +103,34 @@ describe("weapons", () => {
     const after = consumeAmmo(inventory, "rifle", 25);
     expect(reserveFor(after, "rifle")).toBe(95);
     expect(countItem(consumeAmmo(after, "rifle", 1000), "ammo_556")).toBe(0);
+  });
+});
+
+describe("starting kit", () => {
+  it("is the AR-4 and P-9 with loaded magazines and two spares each, one frag and one smoke, in a level 1 backpack", () => {
+    const kit = createStartingInventory();
+    expect(kit.weapons).toEqual([{ weaponId: "rifle", magazine: 30 }, null, { weaponId: "pistol", magazine: 12 }]);
+    expect(ITEMS[`weapon_${kit.weapons[0]!.weaponId}`].name).toBe("AR-4");
+    expect(ITEMS[`weapon_${kit.weapons[2]!.weaponId}`].name).toBe("P-9");
+    expect(reserveFor(kit, "rifle")).toBe(60);
+    expect(reserveFor(kit, "pistol")).toBe(24);
+    expect([STARTING_KIT.rifleReserve, STARTING_KIT.pistolReserve]).toEqual([60, 24]);
+    expect(countItem(kit, "frag")).toBe(1);
+    expect(countItem(kit, "smoke")).toBe(1);
+    expect(kit.stacks.map((s) => s.itemId).sort()).toEqual(["ammo_556", "ammo_9mm", "frag", "smoke"]);
+    expect(kit.selectedThrowable).toBe("frag");
+    expect([kit.helmet, kit.vest, kit.backpack]).toEqual([null, null, 1]);
+    expect(inventoryWeight(kit)).toBeCloseTo(65.6, 6);
+    expect(inventoryCapacity(kit)).toBe(200);
+    // Room left to loot: over 100 units.
+    expect(inventoryCapacity(kit) - inventoryWeight(kit)).toBeGreaterThan(100);
+    // A fresh kit each call, and one without grenades for networked play.
+    expect(createStartingInventory()).not.toBe(kit);
+    const net = createStartingInventory({ throwables: false });
+    expect(net.weapons).toEqual(kit.weapons);
+    expect(net.stacks.map((s) => s.itemId).sort()).toEqual(["ammo_556", "ammo_9mm"]);
+    expect(net.backpack).toBe(0);
+    expect(net.selectedThrowable).toBeNull();
   });
 });
 

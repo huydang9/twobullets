@@ -3,8 +3,8 @@ import {
   TICK_SECONDS,
   buildNavGrid,
   createActorConfigs,
-  createInventory,
   createNavQuery,
+  createStartingInventory,
   isValidZoneCenter,
   navStats,
   planTeamSpawns,
@@ -128,8 +128,8 @@ export class OfflineMatch {
     this.maxPlayers = options.maxPlayers;
     this.teamMode = options.teamMode;
     if (this.humanSlot !== null) {
-      // Everyone starts empty-handed and loots (bots too).
-      equipment.resetLoadout(createInventory());
+      // Everyone starts with the same kit (AR-4, P-9, a frag and a smoke) and loots the rest; bots get it in MatchSim.
+      equipment.resetLoadout(createStartingInventory());
       life.respawnEnabled = false;
     }
     this.resources = new SoldierResources(deps.assets);

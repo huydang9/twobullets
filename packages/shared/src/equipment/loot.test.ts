@@ -6,6 +6,7 @@ import {
   createGroundLoot,
   dropGroundItem,
   generateLoot,
+  LOOT,
   pickLootTarget,
   queryGroundLoot,
   setGroundQuantity,
@@ -59,35 +60,47 @@ describe("loot generation", () => {
     expect(new Set(layout.items.map((i) => i.lootId)).size).toBe(layout.items.length);
   });
 
-  it("gives every building loot and enough for 10 players on a 1 km map", () => {
+  it("gives every building loot, nearly every pile a gun, and plenty for 20 players on a 1 km map", () => {
     const withLoot = new Set(layout.piles.map((p) => p.buildingId));
     expect(withLoot.size).toBe(buildings.filter((b) => isBuildingPrefabId(b.prefab) && b.prefab !== "container_closed").length);
-    expect(layout.piles.length).toBeGreaterThan(150);
-    expect(layout.piles.length).toBeLessThan(320);
-    expect(layout.items.length / 10).toBeGreaterThan(25);
-    expect(layout.items.length / 10).toBeLessThan(70);
+    expect(layout.piles.length).toBeGreaterThan(400);
+    expect(layout.piles.length).toBeLessThan(650);
+    expect(layout.items.length).toBeGreaterThan(1200);
+    expect(layout.items.length).toBeLessThan(2400);
     for (const pile of layout.piles) {
       expect(pile.items.length).toBeGreaterThanOrEqual(1);
-      expect(pile.items.length).toBeLessThanOrEqual(4);
+      expect(pile.items.length).toBeLessThanOrEqual(LOOT.maxItemsPerPile + 1);
+      expect(pile.outdoor).toBeUndefined();
     }
+    const armed = layout.piles.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "weapon"));
+    expect(armed.length / layout.piles.length).toBeGreaterThan(0.85);
     const counts = categoryCounts(layout);
-    expect(counts.weapon).toBeGreaterThanOrEqual(100);
+    expect(counts.weapon).toBeGreaterThanOrEqual(450);
     expect(counts.ammo).toBeGreaterThanOrEqual(counts.weapon!);
-    expect(counts.heal).toBeGreaterThanOrEqual(30);
-    expect(counts.throwable).toBeGreaterThanOrEqual(15);
-    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(20);
-    expect(counts.backpack).toBeGreaterThanOrEqual(10);
+    expect(counts.heal).toBeGreaterThanOrEqual(90);
+    expect(counts.throwable).toBeGreaterThanOrEqual(60);
+    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(75);
+    expect(counts.backpack).toBeGreaterThanOrEqual(40);
+    // Every gun lies next to its ammo.
+    for (const pile of layout.piles) {
+      for (const item of pile.items) {
+        const def = ITEMS[item.itemId];
+        if (def.category === "weapon") expect(pile.items.some((o) => o.itemId === def.ammo && o.quantity >= ITEMS[def.ammo].lootQuantity * 2)).toBe(true);
+      }
+    }
   });
 
-  it("puts a primary weapon with its ammo in most buildings with 3+ loot spots", () => {
+  it("puts several primary weapons with their ammo in big buildings", () => {
     const big = buildings.filter((b) => isBuildingPrefabId(b.prefab) && getPrefabLootSpots(b.prefab).length >= 3);
-    const armed = big.filter((b) =>
-      layout.piles.some((p) => p.buildingId === b.id && p.items.some((i) => {
+    const primaries = (id: string) =>
+      layout.piles.filter((p) => p.buildingId === id).reduce((n, p) => n + p.items.filter((i) => {
         const def = ITEMS[i.itemId];
         return def.category === "weapon" && def.weaponClass === "primary" && p.items.some((o) => o.itemId === def.ammo && o.quantity >= ITEMS[def.ammo].lootQuantity * 2);
-      })),
-    );
-    expect(armed.length / big.length).toBeGreaterThan(0.85);
+      }).length, 0);
+    expect(big.filter((b) => primaries(b.id) > 0).length / big.length).toBeGreaterThan(0.95);
+    const huge = big.filter((b) => isBuildingPrefabId(b.prefab) && getPrefabLootSpots(b.prefab).length >= 40);
+    expect(huge.length).toBeGreaterThan(0);
+    for (const b of huge) expect(primaries(b.id)).toBeGreaterThanOrEqual(3);
   });
 
   it("makes hot drops denser and better than outskirts", () => {

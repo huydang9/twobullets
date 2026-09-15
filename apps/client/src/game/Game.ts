@@ -8,6 +8,7 @@ import { installDebugTools } from "../debug/debugTools";
 import { EquipmentSystem, soldierTargets } from "../equipment/EquipmentSystem";
 import { LootRenderer, presentationLootModels } from "../equipment/loot";
 import { OfflineMatch, readOfflineMatchOptions } from "../match";
+import { createNetLocalInventory } from "../net/NetEquipmentView";
 import { NetGame } from "../net/NetGame";
 import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
@@ -107,10 +108,11 @@ export class Game {
     // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
     // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
     const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
-    // Networked: no ground loot until loot is on the wire (plan.md B5).
+    // Networked: no ground loot until loot is on the wire (plan.md B5). Everyone starts with the starting kit (AR-4, P-9,
+    // a frag and a smoke); networked play leaves the grenades out, since the server doesn't simulate throwables yet.
     const equipment = new EquipmentSystem(scene, input, player, {
-      ...(world && !net ? { map: { pois: world.map.pois, buildings: world.layout.buildings } } : {}),
-      ...(net ? { loot: [] } : {}),
+      ...(world && !net ? { map: { pois: world.map.pois, buildings: world.layout.buildings, outdoor: { flatten: world.map.flatten, terrain: world.terrain, layout: world.layout } } } : {}),
+      ...(net ? { loot: [], inventory: createNetLocalInventory() } : {}),
       targets: () => targets,
     });
     // Networked movement ignores equipment gates (the M3 server doesn't simulate equipment).

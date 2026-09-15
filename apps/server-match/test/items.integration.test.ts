@@ -1,5 +1,7 @@
 import { consumableCode, type OwnerItemsBlock } from "@twobullets/protocol";
-import { itemCode, type ConsumableItemId } from "@twobullets/shared/equipment/items";
+import { NET_RESPAWN_SECONDS } from "@twobullets/contracts";
+import { createInventory } from "@twobullets/shared/equipment/inventory";
+import { itemCode, ITEMS, type ConsumableItemId } from "@twobullets/shared/equipment/items";
 import { Btn, PlayerActionType } from "@twobullets/shared/input";
 import type { HavokModule } from "@twobullets/sim";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
@@ -112,6 +114,32 @@ describe("networked consumables", () => {
     // Two 6 s pulses at 2 HP (boost above 20).
     expect(player.vitals.health).toBe(54);
     expect(player.vitals.boost).toBeLessThan(35);
+    await h.dispose();
+  }, 60_000);
+
+  it("starting kit at join and respawn: AR-4 and P-9 loaded, the heal kit, no grenades (throwables aren't simulated online)", async () => {
+    const { h, player, count } = await setup();
+    const expectKit = () => {
+      expect(player.state.weapon.slots.map((slot) => (slot ? { id: slot.id, magazine: slot.magazine } : null))).toEqual([
+        { id: "rifle", magazine: 30 },
+        null,
+        { id: "pistol", magazine: 12 },
+      ]);
+      expect(player.state.weapon.slots[0]!.reserve).toBeGreaterThan(0);
+      expect(player.state.weapon.slots[2]!.reserve).toBeGreaterThan(0);
+      expect(player.inventory.stacks.map((s) => s.itemId).sort()).toEqual(["bandage", "energy_drink", "first_aid", "medkit", "painkiller"]);
+      expect(player.inventory.stacks.some((s) => ITEMS[s.itemId].category === "throwable")).toBe(false);
+    };
+    expectKit();
+    expect(count("medkit")).toBe(1);
+
+    h.match.combat!.zoneDamage(player, 100);
+    expect(player.life).toBe("dead");
+    player.inventory = createInventory();
+    h.run(NET_RESPAWN_SECONDS * 1000 + 500);
+    expect(player.life).toBe("alive");
+    expectKit();
+    expect(count("medkit")).toBe(1);
     await h.dispose();
   }, 60_000);
 });

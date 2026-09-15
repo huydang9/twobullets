@@ -167,7 +167,7 @@ The footer has the hints and the **Auto pickup** toggle. Refusals (`pickupFailed
 | `damagePlayer(hit)` | Same path as grenade damage: armor, `onArmor`, `onVitals damaged/knocked/eliminated` |
 | `canBeKnocked` | Settable, default false (solo) |
 | `setReviver(id \| null)` | While set and downed: `stepRevive` each tick before vitals (bleed pauses), `reviveStarted` → `reviveProgress` (0..1 every tick) → `revived` + `healed { source: "revive" }`. `null` cancels (`reviveCancelled`) |
-| `resetLoadout(inventory?)` | Fresh inventory (default `createOfflineInventory()`), idle throw/use, full vitals, cancels revives, bumps `loadoutVersion` (combat rebuilds its weapons) and emits `respawned`. Game owns the respawn timer; `EquipmentSystem` no longer respawns or touches `player.modifiers`. |
+| `resetLoadout(inventory?)` | Fresh inventory (default `createStartingInventory()`: AR-4, P-9, 1 frag, 1 smoke), idle throw/use, full vitals, cancels revives, bumps `loadoutVersion` (combat rebuilds its weapons) and emits `respawned`. Game owns the respawn timer; `EquipmentSystem` no longer respawns or touches `player.modifiers`. |
 
 `equipment.modifiers` are the combined gates (equipment state plus the reviving root) that Game feeds to `player.setMoveGates`.
 

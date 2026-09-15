@@ -1,13 +1,19 @@
 import type { Vec3Tuple } from "../level/types";
 import type { Vec3 } from "../movement/types";
 import { getBuildingPrefab, getPrefabLootSpots, isBuildingPrefabId, localToWorld } from "../map/buildings/index";
-import type { PointOfInterest } from "../map/types";
+import type { ResolvedBuilding } from "../map/layout/buildings";
+import { distanceToRect, SpatialHash } from "../map/layout/geometry";
+import type { PropInstanceSet } from "../map/layout/mapLayout";
+import { getMapProp } from "../map/layout/props";
+import { mapPaths } from "../map/layout/roads";
+import { INSTANCE_STRIDE } from "../map/layout/scatter";
+import type { FlattenRegion, PointOfInterest } from "../map/types";
 import type { ItemInstance } from "./inventory";
 import { ITEMS, type ItemCategory, type ItemId } from "./items";
 import { createRng, hash32, hashString, len2, len3, pickWeighted } from "./math";
 
 /** Bump when tables or generation change; part of the match content hash (netcode §8.3). */
-export const LOOT_TABLE_VERSION = 2;
+export const LOOT_TABLE_VERSION = 3;
 
 type Tier = 0 | 1 | 2;
 type TierTable<K extends string> = readonly [Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>];
@@ -15,39 +21,48 @@ type LootCategory = Exclude<ItemCategory, "helmet" | "vest"> | "armor";
 
 export const LOOT = {
   /** Chance that a building loot spot (1.5 m grid) holds a pile, by POI tier. Outdoor rooms (balconies, roofs) get less. */
-  spotChance: [0.12, 0.165, 0.22],
+  spotChance: [0.17, 0.22, 0.28],
   outdoorChanceScale: 0.6,
   /** Buildings outside any POI use tier 0 at this scale. */
   outskirtsChanceScale: 0.8,
-  /** Chance of a second item in a pile, and of a third after that. */
+  /** A building gets at least ceil(sqrt(spots) × this) piles (extra piles on seeded free spots), so small houses get several. */
+  minPilesPerSqrtSpot: 1.1,
+  /** Chance that a pile starts with a gun and its ammo, by tier; its other rolls follow. */
+  pileWeaponChance: [0.88, 0.92, 0.95],
+  /** Chance of a second roll after the first, and of a third after that. */
   extraItemChance: [0.35, 0.45, 0.55],
-  maxItemsPerPile: 3,
-  /** Items in a pile sit on a ring of this radius around the spot, m. */
+  maxRolls: 3,
+  /** A pile stops rolling once it holds this many items (a gun and its ammo are two). */
+  maxItemsPerPile: 5,
+  /** Items in a pile sit on a ring of this radius around the spot, m; piles of 4+ items use the wide ring. */
   pileRadius: 0.3,
+  widePileRadius: 0.45,
 
+  /** Rolls after a pile's gun (the weapon weight is a second gun). */
   category: [
-    { weapon: 19, ammo: 14, heal: 20, boost: 8, throwable: 10, armor: 14, backpack: 8, attachment: 0 },
-    { weapon: 22, ammo: 14, heal: 18, boost: 9, throwable: 12, armor: 14, backpack: 8, attachment: 0 },
-    { weapon: 25, ammo: 13, heal: 16, boost: 10, throwable: 13, armor: 15, backpack: 8, attachment: 0 },
+    { weapon: 6, ammo: 12, heal: 25, boost: 12, throwable: 15, armor: 19, backpack: 11, attachment: 0 },
+    { weapon: 7, ammo: 12, heal: 23, boost: 12, throwable: 16, armor: 19, backpack: 11, attachment: 0 },
+    { weapon: 8, ammo: 11, heal: 21, boost: 13, throwable: 17, armor: 20, backpack: 10, attachment: 0 },
   ] satisfies TierTable<LootCategory>,
   weapon: [
-    { weapon_pistol: 30, weapon_shotgun: 34, weapon_rifle: 31, weapon_sniper: 5 },
-    { weapon_pistol: 20, weapon_shotgun: 26, weapon_rifle: 42, weapon_sniper: 12 },
-    { weapon_pistol: 12, weapon_shotgun: 20, weapon_rifle: 48, weapon_sniper: 20 },
+    { weapon_pistol: 18, weapon_shotgun: 30, weapon_rifle: 42, weapon_sniper: 10 },
+    { weapon_pistol: 14, weapon_shotgun: 24, weapon_rifle: 46, weapon_sniper: 16 },
+    { weapon_pistol: 10, weapon_shotgun: 20, weapon_rifle: 48, weapon_sniper: 22 },
   ] satisfies TierTable<ItemId>,
   /** Military POIs multiply sniper weight. */
   militarySniperScale: 1.5,
   /**
-   * A building with at least `minSpots` loot spots that rolled no primary weapon gets one (from the tier's weapon
-   * table without pistols) with this chance by tier. It joins one of the building's piles with room, else a new pile.
+   * A building with at least `minSpots` loot spots should hold 1 + floor(spots / spotsPerPrimary) primary weapons; each
+   * missing one is added (from the tier's weapon table without pistols) with this chance by tier, on a free spot as a
+   * new pile, else joining a pile with room.
    */
-  guaranteedPrimary: { minSpots: 3, chance: [0.8, 0.85, 0.9] },
+  guaranteedPrimary: { minSpots: 3, spotsPerPrimary: 8, chance: [0.9, 0.95, 1] },
   /** A loose ammo roll picks the ammo of a gun already found in the same building with this chance. */
   matchingAmmoChance: 0.6,
   ammo: [
-    { ammo_9mm: 35, ammo_12g: 25, ammo_556: 30, ammo_762: 10 },
-    { ammo_9mm: 25, ammo_12g: 22, ammo_556: 38, ammo_762: 15 },
-    { ammo_9mm: 18, ammo_12g: 18, ammo_556: 44, ammo_762: 20 },
+    { ammo_9mm: 30, ammo_12g: 25, ammo_556: 33, ammo_762: 12 },
+    { ammo_9mm: 22, ammo_12g: 22, ammo_556: 40, ammo_762: 16 },
+    { ammo_9mm: 16, ammo_12g: 18, ammo_556: 45, ammo_762: 21 },
   ] satisfies TierTable<ItemId>,
   heal: [
     { bandage: 60, first_aid: 32, medkit: 8 },
@@ -70,6 +85,29 @@ export const LOOT = {
   quantity: { bandage: 5 } as Readonly<Partial<Record<ItemId, number>>>,
   /** A weapon comes with this many stacks of its ammo. */
   weaponAmmoStacks: [2, 3],
+
+  /** Ground piles outside buildings (only when `generateLoot` gets an `OutdoorLootWorld`): always a gun and its ammo. */
+  outdoor: {
+    /** Roadside stations along painted roads, m apart, each on a seeded side of the road. */
+    roadSpacing: 20,
+    /** Distance past the road edge, m. */
+    roadShoulder: 1.2,
+    /** Pile chance per road station inside a POI, by tier; stations outside every POI use `outskirtsChance`. */
+    roadChance: [0.35, 0.5, 0.65],
+    outskirtsChance: 0.2,
+    /** Grid step over POI pads (flatten circles and rects whose center is inside a POI), m, and chance per point. */
+    padStep: 9,
+    padChance: [0.2, 0.3, 0.4],
+    /** Chance of one more roll after the gun. */
+    extraItemChance: 0.5,
+    /** Clear distance from building bounds, prop footprints and other outdoor piles, m. */
+    buildingClearance: 2.5,
+    propClearance: 0.6,
+    pileSpacing: 6,
+    maxSlopeTan: 0.25,
+    /** Max height difference to the road center line (ditches, banks, embankments), m. */
+    maxStep: 0.35,
+  },
 } as const;
 
 /** A building as the generator needs it: MapLayout's ResolvedBuilding fits (Y must be resolved). */
@@ -92,10 +130,14 @@ export interface LootPile {
   readonly id: number;
   /** World floor position of the loot spot. */
   readonly position: Vec3Tuple;
+  /** Building of the spot; "" for outdoor piles. */
   readonly buildingId: string;
+  /** Room of the spot; "road" or "pad" for outdoor piles. */
   readonly roomId: string;
   readonly poi: string | null;
   readonly items: readonly LootItem[];
+  /** Set on piles outside buildings. */
+  readonly outdoor?: "road" | "pad";
 }
 
 export interface LootLayout {
@@ -105,14 +147,29 @@ export interface LootLayout {
   readonly items: readonly LootItem[];
 }
 
+/** Terrain queries outdoor piles need (map Terrain fits). */
+export interface OutdoorLootTerrain {
+  /** Physics surface height. */
+  sampleHeight(x: number, z: number): number;
+  slopeTanAt(x: number, z: number): number;
+  isPlayable(x: number, z: number): boolean;
+}
+
+/** What outdoor piles are placed against: roads and pads from the map, the built terrain and the resolved layout. */
+export interface OutdoorLootWorld {
+  readonly flatten: readonly FlattenRegion[];
+  readonly terrain: OutdoorLootTerrain;
+  readonly layout: { readonly buildings: readonly ResolvedBuilding[]; readonly props: readonly PropInstanceSet[] };
+}
+
 /**
  * Deterministic ground loot for a match: every building loot spot rolls for a pile with a chance by its POI tier;
- * each pile holds 1–3 rolls drawn from tier tables (weapons bring their ammo). Every spot is seeded from
- * (seed, building id, spot index), so adding or moving one building never reshuffles the others. Buildings that
- * roll nothing get one pile on a seeded spot; most buildings with 3+ spots are topped up with a primary weapon.
- * Pure data; the same result in the browser, the server and tests.
+ * nearly every pile starts with a gun and its ammo, then 1–3 rolls from tier tables. Every spot is seeded from
+ * (seed, building id, spot index), so adding or moving one building never reshuffles the others. Buildings get a
+ * minimum number of piles by size and are topped up with primary weapons by size. With `outdoor`, roadsides and POI
+ * pads get gun piles too (after all building piles). Pure data; the same result in the browser, the server and tests.
  */
-export function generateLoot(seed: number, pois: readonly PointOfInterest[], buildings: readonly LootBuilding[]): LootLayout {
+export function generateLoot(seed: number, pois: readonly PointOfInterest[], buildings: readonly LootBuilding[], outdoor?: OutdoorLootWorld): LootLayout {
   const piles: LootPile[] = [];
   const items: LootItem[] = [];
 
@@ -126,50 +183,158 @@ export function generateLoot(seed: number, pois: readonly PointOfInterest[], bui
     const chanceScale = poi ? 1 : LOOT.outskirtsChanceScale;
     const buildingSeed = hash32(seed, hashString(building.id), LOOT_TABLE_VERSION);
     const outdoorRooms = new Set(getBuildingPrefab(building.prefab).rooms.filter((room) => !room.indoor).map((room) => room.id));
-    const context: RollContext = { tier, military, gunAmmo: [], hasPrimary: false };
+    const context: RollContext = { tier, military, gunAmmo: [], primaries: 0 };
+    const weaponChance = LOOT.pileWeaponChance[tier];
 
-    // Piles are drafted per building first so the primary top-up can join one before item ids are assigned.
+    // Piles are drafted per building first so top-ups can join one before item ids are assigned.
     const drafts: { spotIndex: number; items: ItemInstance[] }[] = [];
     spots.forEach((spot, index) => {
       const random = createRng(hash32(buildingSeed, index));
       const chance = LOOT.spotChance[tier] * chanceScale * (outdoorRooms.has(spot.roomId) ? LOOT.outdoorChanceScale : 1);
-      if (random() < chance) drafts.push({ spotIndex: index, items: rollPile(random, context) });
+      if (random() < chance) drafts.push({ spotIndex: index, items: rollPile(random, context, weaponChance) });
     });
-    if (drafts.length === 0) {
-      const random = createRng(hash32(buildingSeed, 0xffff));
-      drafts.push({ spotIndex: Math.floor(random() * spots.length), items: rollPile(random, context) });
-    }
+    const extra = createRng(hash32(buildingSeed, 0xffff));
+    const freeSpot = (): number => {
+      const used = new Set(drafts.map((d) => d.spotIndex));
+      const free = spots.map((_, i) => i).filter((i) => !used.has(i));
+      return free.length > 0 ? free[Math.floor(extra() * free.length)]! : -1;
+    };
+    const minPiles = Math.min(spots.length, Math.ceil(Math.sqrt(spots.length) * LOOT.minPilesPerSqrtSpot));
+    while (drafts.length < minPiles) drafts.push({ spotIndex: freeSpot(), items: rollPile(extra, context, weaponChance) });
 
     const guarantee = LOOT.guaranteedPrimary;
     const topUp = createRng(hash32(buildingSeed, 0xfffe));
-    if (!context.hasPrimary && spots.length >= guarantee.minSpots && topUp() < guarantee.chance[tier]) {
+    const wanted = spots.length >= guarantee.minSpots ? 1 + Math.floor(spots.length / guarantee.spotsPerPrimary) : 0;
+    for (let k = context.primaries; k < wanted; k++) {
+      if (topUp() >= guarantee.chance[tier]) continue;
       const weapon = rollWeapon(topUp, context, true);
-      const roomy = drafts.filter((d) => d.items.length + weapon.length <= LOOT.maxItemsPerPile + 1);
-      if (roomy.length > 0) {
-        roomy[Math.floor(topUp() * roomy.length)]!.items.push(...weapon);
-      } else {
-        const used = new Set(drafts.map((d) => d.spotIndex));
-        const free = spots.map((_, i) => i).filter((i) => !used.has(i));
-        if (free.length > 0) drafts.push({ spotIndex: free[Math.floor(topUp() * free.length)]!, items: weapon });
+      const free = freeSpot();
+      if (free >= 0) {
+        drafts.push({ spotIndex: free, items: weapon });
+        continue;
       }
+      const roomy = drafts.filter((d) => d.items.length + weapon.length <= LOOT.maxItemsPerPile + 1);
+      if (roomy.length > 0) roomy[Math.floor(topUp() * roomy.length)]!.items.push(...weapon);
     }
 
     for (const draft of drafts) {
       const spot = spots[draft.spotIndex]!;
-      const pileId = piles.length;
       const position = roundTuple(localToWorld(building, spot.position));
       const jitter = createRng(hash32(buildingSeed, draft.spotIndex, 0x6a17));
-      const pileItems = draft.items.map((instance, k, all): LootItem => {
-        const angle = (k / all.length) * Math.PI * 2 + jitter() * 0.6;
-        const r = all.length > 1 ? LOOT.pileRadius : 0;
-        const itemPosition = roundTuple([position[0] + Math.sin(angle) * r, position[1], position[2] + Math.cos(angle) * r]);
-        return { ...instance, lootId: items.length + k, pileId, position: itemPosition };
-      });
-      items.push(...pileItems);
-      piles.push({ id: pileId, position, buildingId: building.id, roomId: spot.roomId, poi: poi?.id ?? null, items: pileItems });
+      pushPile(piles, items, draft.items, position, jitter, null, { buildingId: building.id, roomId: spot.roomId, poi: poi?.id ?? null });
     }
   }
+  if (outdoor) generateOutdoorLoot(seed, pois, outdoor, piles, items);
   return { seed, version: LOOT_TABLE_VERSION, piles, items };
+}
+
+function pushPile(
+  piles: LootPile[],
+  items: LootItem[],
+  instances: readonly ItemInstance[],
+  position: Vec3Tuple,
+  jitter: () => number,
+  terrain: OutdoorLootTerrain | null,
+  meta: Pick<LootPile, "buildingId" | "roomId" | "poi" | "outdoor">,
+): void {
+  const pileId = piles.length;
+  const r = instances.length > 3 ? LOOT.widePileRadius : instances.length > 1 ? LOOT.pileRadius : 0;
+  const pileItems = instances.map((instance, k): LootItem => {
+    const angle = (k / instances.length) * Math.PI * 2 + jitter() * 0.6;
+    const x = position[0] + Math.sin(angle) * r;
+    const z = position[2] + Math.cos(angle) * r;
+    const y = terrain ? terrain.sampleHeight(x, z) : position[1];
+    return { ...instance, lootId: items.length + k, pileId, position: roundTuple([x, y, z]) };
+  });
+  items.push(...pileItems);
+  piles.push({ id: pileId, position, ...meta, items: pileItems });
+}
+
+/** Roadside and POI pad piles, placed clear of buildings, props and each other on gentle, playable ground. */
+function generateOutdoorLoot(seed: number, pois: readonly PointOfInterest[], world: OutdoorLootWorld, piles: LootPile[], items: LootItem[]): void {
+  const cfg = LOOT.outdoor;
+  const { terrain } = world;
+  const outdoorSeed = hash32(seed, 0x0d00, LOOT_TABLE_VERSION);
+  const blockers = new SpatialHash<{ x: number; z: number; r: number }>(16);
+  for (const set of world.layout.props) {
+    const def = getMapProp(set.prop);
+    if (def.category === "grass") continue;
+    const base = def.category === "tree" && def.collision.kind === "cylinder" ? def.collision.radius : def.footprint;
+    for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
+      const r = base * set.data[i + 4]! + cfg.propClearance;
+      blockers.insert({ x: set.data[i]!, z: set.data[i + 2]!, r }, set.data[i]!, set.data[i + 2]!, r);
+    }
+  }
+  const buildingHash = new SpatialHash<ResolvedBuilding>(32);
+  for (const b of world.layout.buildings) {
+    const reach = Math.sqrt(b.bounds.halfExtents[0] ** 2 + b.bounds.halfExtents[1] ** 2) + cfg.buildingClearance;
+    buildingHash.insert(b, b.bounds.center[0], b.bounds.center[1], reach);
+  }
+  const placed = new SpatialHash<{ x: number; z: number }>(cfg.pileSpacing * 2);
+
+  const clear = (x: number, z: number): boolean => {
+    if (!terrain.isPlayable(x, z) || terrain.slopeTanAt(x, z) > cfg.maxSlopeTan) return false;
+    if (buildingHash.query(x, z, 0, (b) => distanceToRect(b.bounds, x, z) < cfg.buildingClearance)) return false;
+    if (blockers.query(x, z, 0, (p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)) return false;
+    return !placed.query(x, z, cfg.pileSpacing, (p) => (p.x - x) ** 2 + (p.z - z) ** 2 < cfg.pileSpacing * cfg.pileSpacing);
+  };
+  const place = (x: number, z: number, random: () => number, kind: "road" | "pad"): void => {
+    const poi = pois.find((p) => len2(x - p.center[0], z - p.center[1]) <= p.radius) ?? null;
+    const context: RollContext = { tier: poi?.lootTier ?? 0, military: poi?.kind === "military", gunAmmo: [], primaries: 0 };
+    const instances = rollWeapon(random, context, false);
+    if (random() < cfg.extraItemChance) instances.push(...rollCategory(pickWeighted<LootCategory>(LOOT.category[context.tier], random()), random, context));
+    placed.insert({ x, z }, x, z, 0);
+    const position = roundTuple([x, terrain.sampleHeight(x, z), z]);
+    pushPile(piles, items, instances, position, random, terrain, { buildingId: "", roomId: kind, poi: poi?.id ?? null, outdoor: kind });
+  };
+
+  for (const path of mapPaths(world)) {
+    const points = path.points;
+    let along = 0;
+    let station = 0;
+    for (let i = 1; i < points.length; i++) {
+      const [ax, az] = points[i - 1]!;
+      const [bx, bz] = points[i]!;
+      const length = len2(bx - ax, bz - az);
+      if (length < 1e-6) continue;
+      for (; (station + 0.5) * cfg.roadSpacing <= along + length; station++) {
+        const random = createRng(hash32(outdoorSeed, path.index, station));
+        const t = ((station + 0.5) * cfg.roadSpacing - along) / length;
+        const cx = ax + (bx - ax) * t;
+        const cz = az + (bz - az) * t;
+        const poi = pois.find((p) => len2(cx - p.center[0], cz - p.center[1]) <= p.radius);
+        if (random() >= (poi ? cfg.roadChance[poi.lootTier] : cfg.outskirtsChance)) continue;
+        const side = random() < 0.5 ? -1 : 1;
+        const offset = path.halfWidth + cfg.roadShoulder;
+        const x = cx + (-(bz - az) / length) * offset * side;
+        const z = cz + ((bx - ax) / length) * offset * side;
+        if (Math.abs(terrain.sampleHeight(x, z) - terrain.sampleHeight(cx, cz)) > cfg.maxStep || !clear(x, z)) continue;
+        place(x, z, random, "road");
+      }
+      along += length;
+    }
+  }
+
+  world.flatten.forEach((region, index) => {
+    if (region.shape === "polyline") return;
+    const poi = pois.find((p) => len2(region.center[0] - p.center[0], region.center[1] - p.center[1]) <= p.radius);
+    if (!poi) return;
+    const reach = region.shape === "circle" ? region.radius : Math.max(region.halfExtents[0], region.halfExtents[1]);
+    const cells = Math.floor(reach / cfg.padStep);
+    const { sin, cos } = region.shape === "rect" ? { sin: Math.sin(region.yaw ?? 0), cos: Math.cos(region.yaw ?? 0) } : { sin: 0, cos: 1 };
+    for (let gx = -cells; gx <= cells; gx++) {
+      for (let gz = -cells; gz <= cells; gz++) {
+        const lx = gx * cfg.padStep;
+        const lz = gz * cfg.padStep;
+        if (region.shape === "circle" ? lx * lx + lz * lz > (region.radius - 1) ** 2 : Math.abs(lx) > region.halfExtents[0] - 1 || Math.abs(lz) > region.halfExtents[1] - 1) continue;
+        const random = createRng(hash32(outdoorSeed ^ 0x9ad, index, (gx + 512) * 1024 + gz + 512));
+        if (random() >= cfg.padChance[poi.lootTier]) continue;
+        const x = region.center[0] + lx * cos + lz * sin;
+        const z = region.center[1] - lx * sin + lz * cos;
+        if (clear(x, z)) place(x, z, random, "pad");
+      }
+    }
+  });
 }
 
 interface RollContext {
@@ -177,14 +342,15 @@ interface RollContext {
   readonly military: boolean;
   /** Ammo of the guns rolled so far in this building. */
   readonly gunAmmo: ItemId[];
-  hasPrimary: boolean;
+  /** Primary weapons rolled so far in this building. */
+  primaries: number;
 }
 
-function rollPile(random: () => number, context: RollContext): ItemInstance[] {
+function rollPile(random: () => number, context: RollContext, weaponChance: number): ItemInstance[] {
   const { tier } = context;
-  const out: ItemInstance[] = [];
+  const out: ItemInstance[] = random() < weaponChance ? rollWeapon(random, context, false) : [];
   let rolls = 1;
-  while (rolls < LOOT.maxItemsPerPile && random() < LOOT.extraItemChance[tier]) rolls++;
+  while (rolls < LOOT.maxRolls && random() < LOOT.extraItemChance[tier]) rolls++;
   for (let r = 0; r < rolls && out.length < LOOT.maxItemsPerPile; r++) {
     const category = pickWeighted<LootCategory>(LOOT.category[tier], random());
     out.push(...rollCategory(category, random, context));
@@ -199,7 +365,7 @@ function rollWeapon(random: () => number, context: RollContext, primaryOnly: boo
   const id = pickWeighted(weights, random());
   const def = ITEMS[id];
   if (def.category !== "weapon") return [];
-  if (def.weaponClass === "primary") context.hasPrimary = true;
+  if (def.weaponClass === "primary") context.primaries++;
   if (!context.gunAmmo.includes(def.ammo)) context.gunAmmo.push(def.ammo);
   const [minStacks, maxStacks] = LOOT.weaponAmmoStacks;
   const stacks = minStacks + Math.floor(random() * (maxStacks - minStacks + 1));
@@ -319,6 +485,32 @@ export function queryGroundLoot(ground: GroundLoot, center: Vec3, radius: number
     }
   }
   return out.sort((a, b) => a.d - b.d || a.item.lootId - b.item.lootId).map((e) => e.item);
+}
+
+/**
+ * Calls `visit` for every ground item within `radius` of a point, in no particular order and without allocating
+ * (renderers rebuilding instance buffers; use `queryGroundLoot` for nearest-first lists).
+ */
+export function forEachGroundLoot(ground: GroundLoot, center: Vec3, radius: number, visit: (item: LootItem) => void): void {
+  const r2 = radius * radius;
+  const minX = cellCoord(center.x - radius);
+  const maxX = cellCoord(center.x + radius);
+  const minZ = cellCoord(center.z - radius);
+  const maxZ = cellCoord(center.z + radius);
+  for (let cx = minX; cx <= maxX; cx++) {
+    for (let cz = minZ; cz <= maxZ; cz++) {
+      const cell = ground.cells.get(cellKey(cx, cz));
+      if (!cell) continue;
+      for (const id of cell) {
+        const item = ground.items.get(id);
+        if (!item) continue;
+        const dx = item.position[0] - center.x;
+        const dy = item.position[1] - center.y;
+        const dz = item.position[2] - center.z;
+        if (dx * dx + dy * dy + dz * dz <= r2) visit(item);
+      }
+    }
+  }
 }
 
 export const INTERACT = {
