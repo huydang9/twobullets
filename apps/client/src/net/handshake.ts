@@ -57,8 +57,19 @@ export function devPlayerId(override: string | null): string {
   }
 }
 
-/** Fetches a fresh single-use join token; call once per connect attempt. */
+/** Where join tokens come from when not the dev endpoint: the menu installs server-api's `POST /v1/matches/{id}/join`. */
+export type JoinTokenProvider = (endpoint: NetEndpoint, sub: string, team: number) => Promise<DevToken>;
+
+let joinTokenProvider: JoinTokenProvider | null = null;
+
+/** Replaces `/dev/token` for every following connect (null restores it). `?net=` dev play never sets one. */
+export function setJoinTokenProvider(provider: JoinTokenProvider | null): void {
+  joinTokenProvider = provider;
+}
+
+/** Fetches a fresh single-use join token (the installed provider, else `/dev/token`); call once per connect attempt. */
 export async function fetchDevToken(endpoint: NetEndpoint, sub: string, team: number): Promise<DevToken> {
+  if (joinTokenProvider) return joinTokenProvider(endpoint, sub, team);
   const url = `${endpoint.tokenUrl}?sub=${encodeURIComponent(sub)}&team=${team}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`dev token: HTTP ${response.status}`);

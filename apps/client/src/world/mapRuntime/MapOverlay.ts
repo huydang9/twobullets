@@ -1,3 +1,5 @@
+import { bindText, t } from "../../i18n";
+
 /**
  * Minimal DOM overlay owned by the map runtime (the HUD has no map hooks yet): a loading card with a progress bar,
  * and an out-of-bounds warning with a countdown. Plain inline styles, no pointer events.
@@ -16,7 +18,7 @@ export class MapOverlay {
       "position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:320px;padding:18px 22px;background:rgba(10,13,18,.82);border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.4)",
     );
     const title = element("div", "font-weight:600;letter-spacing:.04em;margin-bottom:10px");
-    title.textContent = "Loading map";
+    bindText(title, "mapLoad.title");
     this.stage = element("div", "opacity:.8;margin-bottom:8px;font-size:12px");
     const track = element("div", "height:4px;background:rgba(255,255,255,.15);border-radius:2px;overflow:hidden");
     this.bar = element("div", "height:100%;width:0;background:#e8b04a;transition:width .12s linear");
@@ -47,7 +49,7 @@ export class MapOverlay {
       return;
     }
     this.warning.style.display = "block";
-    this.warning.textContent = `Outside the play area. Return in ${Math.max(0, secondsLeft).toFixed(1)} s`;
+    this.warning.textContent = t("mapLoad.outside", { s: Math.max(0, secondsLeft).toFixed(1) });
   }
 
   dispose(): void {

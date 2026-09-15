@@ -14,6 +14,7 @@ import {
 } from "@twobullets/shared";
 import { buildBuilding, createTerrainBody, type BuiltBuilding, type TerrainBody } from "@twobullets/sim";
 import type { AudioWorldProbe } from "../../audio/AudioWorldProbe";
+import { t, type MessageKey } from "../../i18n";
 import { terrainSurfaceProvider } from "../../audio/surfaces";
 import { BuildingVisuals } from "../buildings";
 import type { Environment } from "../environment";
@@ -50,12 +51,12 @@ export interface MapPlayer extends Respawnable {
 }
 
 /** Stage labels and the share of the loading bar each takes. */
-const STAGES: Readonly<Record<MapWorldStage | "scene", { label: string; from: number; to: number }>> = {
-  download: { label: "Downloading terrain", from: 0, to: 0.35 },
-  decode: { label: "Decoding terrain", from: 0.35, to: 0.45 },
-  generate: { label: "Generating terrain (bake missing or stale)", from: 0, to: 0.55 },
-  layout: { label: "Placing props", from: 0.55, to: 0.65 },
-  scene: { label: "Building the world", from: 0.65, to: 1 },
+const STAGES: Readonly<Record<MapWorldStage | "scene", { label: MessageKey; from: number; to: number }>> = {
+  download: { label: "mapLoad.stage.download", from: 0, to: 0.35 },
+  decode: { label: "mapLoad.stage.decode", from: 0.35, to: 0.45 },
+  generate: { label: "mapLoad.stage.generate", from: 0, to: 0.55 },
+  layout: { label: "mapLoad.stage.layout", from: 0.55, to: 0.65 },
+  scene: { label: "mapLoad.stage.scene", from: 0.65, to: 1 },
 };
 
 /**
@@ -119,7 +120,8 @@ export class MapRuntime {
     const yardPlacement = options.trainingYard !== undefined ? options.trainingYard : map === MAP_V1 ? MAP_V1_TRAINING_YARD : null;
     const overlay = options.overlay;
     const progress = (stage: keyof typeof STAGES, fraction: number, detail = "") => {
-      const { label, from, to } = STAGES[stage];
+      const { label: key, from, to } = STAGES[stage];
+      const label = t(key);
       overlay?.setProgress(detail ? `${label}: ${detail}` : label, from + (to - from) * fraction);
     };
     const timings: Record<string, number> = {};

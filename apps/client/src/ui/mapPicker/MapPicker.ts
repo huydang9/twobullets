@@ -1,7 +1,7 @@
 import { DEFAULT_REAL_MAP_ID } from "@twobullets/shared/map/real/index";
 import { mapChoices, type MapChoice } from "../../world/mapRuntime/maps";
 import { el } from "../dom";
-import { MAP_PICKER_STRINGS, type MapPickerStrings } from "./strings";
+import { mapPickerStrings, type MapPickerStrings } from "./strings";
 import "./mapPicker.css";
 
 export interface MapPickerOptions {
@@ -13,8 +13,14 @@ export interface MapPickerOptions {
   onSelect?(id: string): void;
   /** Called when the player confirms (the button, Enter or a double click on a card). */
   onConfirm?(id: string): void;
-  /** Text (default English); the i18n pass swaps in translated strings. */
+  /** Text (default: the current language's `mapPicker.*` strings). */
   readonly strings?: MapPickerStrings;
+  /** Ids shown as "coming soon": visible, not selectable (e.g. maps the match server can't run yet). */
+  readonly unavailable?: ReadonlySet<string>;
+  /** Shows a back button and makes Escape close the picker. */
+  onCancel?(): void;
+  /** Replaces the confirm button label. */
+  readonly confirmLabel?: string;
 }
 
 /**
@@ -36,11 +42,12 @@ export class MapPicker {
 
   constructor(parent: HTMLElement, options: MapPickerOptions = {}) {
     this.options = options;
-    this.strings = options.strings ?? MAP_PICKER_STRINGS;
+    this.strings = options.strings ?? mapPickerStrings();
     this.choices = options.choices ?? mapChoices();
     this.confirmed = new Promise((resolve) => (this.resolveConfirmed = resolve));
-    const fallback = this.choices.find((c) => c.id === DEFAULT_REAL_MAP_ID) ?? this.choices[0];
-    this.current = this.choices.some((c) => c.id === options.selected) ? options.selected! : (fallback?.id ?? "");
+    const selectable = this.choices.filter((c) => this.isAvailable(c.id));
+    const fallback = selectable.find((c) => c.id === DEFAULT_REAL_MAP_ID) ?? selectable[0];
+    this.current = selectable.some((c) => c.id === options.selected) ? options.selected! : (fallback?.id ?? "");
 
     const s = this.strings;
     this.root = el("div", "tb-mappicker", undefined, parent);
@@ -60,7 +67,12 @@ export class MapPicker {
 
     const footer = el("div", "tb-mappicker__footer", undefined, this.root);
     this.credits = el("div", "tb-mappicker__credits", undefined, footer);
-    const confirm = el("button", "tb-mappicker__confirm", s.confirm, footer);
+    if (options.onCancel) {
+      const cancel = el("button", "tb-mappicker__cancel", s.cancel, footer);
+      cancel.type = "button";
+      cancel.addEventListener("click", () => options.onCancel?.());
+    }
+    const confirm = el("button", "tb-mappicker__confirm", options.confirmLabel ?? s.confirm, footer);
     confirm.type = "button";
     confirm.addEventListener("click", () => this.confirm());
     this.select(this.current, false);
@@ -71,7 +83,7 @@ export class MapPicker {
   }
 
   select(id: string, notify = true): void {
-    if (!this.cards.has(id)) return;
+    if (!this.cards.has(id) || !this.isAvailable(id)) return;
     this.current = id;
     for (const [cardId, card] of this.cards) {
       const on = cardId === id;
@@ -88,6 +100,10 @@ export class MapPicker {
     this.resolveConfirmed(this.current);
   }
 
+  private isAvailable(id: string): boolean {
+    return !this.options.unavailable?.has(id);
+  }
+
   dispose(): void {
     this.root.remove();
   }
@@ -98,6 +114,8 @@ export class MapPicker {
     card.type = "button";
     card.setAttribute("role", "radio");
     card.dataset.mapId = choice.id;
+    const available = this.isAvailable(choice.id);
+    if (!available) card.setAttribute("aria-disabled", "true");
     card.addEventListener("click", () => this.select(choice.id));
     card.addEventListener("dblclick", () => {
       this.select(choice.id);
@@ -111,7 +129,8 @@ export class MapPicker {
     img.loading = "lazy";
     img.decoding = "async";
     img.draggable = false;
-    if (choice.id === DEFAULT_REAL_MAP_ID) el("span", "tb-mappicker__badge", s.recommended, figure);
+    if (!available) el("span", "tb-mappicker__badge tb-mappicker__badge--soon", s.comingSoon, figure);
+    else if (choice.id === DEFAULT_REAL_MAP_ID && !this.options.unavailable) el("span", "tb-mappicker__badge", s.recommended, figure);
 
     const body = el("div", "tb-mappicker__body", undefined, card);
     el("div", "tb-mappicker__name", this.displayName(choice), body);
@@ -141,7 +160,13 @@ export class MapPicker {
 
   private onKey(event: KeyboardEvent): void {
     event.stopPropagation();
-    const ids = this.choices.map((c) => c.id);
+    if (event.key === "Escape" && this.options.onCancel) {
+      event.preventDefault();
+      this.options.onCancel();
+      return;
+    }
+    const ids = this.choices.map((c) => c.id).filter((id) => this.isAvailable(id));
+    if (ids.length === 0) return;
     const index = ids.indexOf(this.current);
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
       event.preventDefault();
