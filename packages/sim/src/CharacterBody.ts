@@ -61,6 +61,15 @@ class ReplayableController extends PhysicsCharacterController {
     this._refreshManifoldAtPosition(this.getPosition());
   }
 
+  /**
+   * Empties the contact manifold. The refreshed manifold holds every proximity hit (on a heightfield, neighbouring
+   * triangles' edge contacts with tilted normals); integrate() would treat those as walls. From an empty manifold,
+   * integrate's own merge keeps only the closest start contact plus cast hits, as it does in continuous play.
+   */
+  clearManifold(): void {
+    (this as unknown as ControllerHiddenState)._manifold.length = 0;
+  }
+
   get body(): PhysicsBody {
     return (this as unknown as ControllerHiddenState)._body;
   }
@@ -70,8 +79,9 @@ class ReplayableController extends PhysicsCharacterController {
  * Engine side of player movement: wraps Havok's PhysicsCharacterController (support queries, collide-and-slide,
  * slope limits), ground snapping, step climbing and the crouch/prone capsules. Feet positions are ground-contact points.
  *
- * Replay (R5): every `step` starts from state derived from the position alone (`resetForReplay`), so
- * `restore(feet, velocity, stance)` + the same inputs reproduce a tick bit for bit on client and server.
+ * Replay (R5): every `step` starts from state derived from the feet alone (`resetForReplay` for the support query, an
+ * empty manifold for collide-and-slide, a center re-derived from the feet), so `restore(feet, velocity, stance)` + the
+ * same inputs reproduce a tick bit for bit on client and server.
  *
  * Player body blocking (product rule; not built yet): give capsules `collideWith` including `CollisionLayer.player`,
  * and before stepping a player move every other player's body to its current feet in Havok directly
@@ -173,7 +183,9 @@ export class CharacterBody {
     this.controller.setPosition(this.centerFor(feet, stance, this.tmpA));
     this.controller.setVelocity(this.tmpVelocity.set(velocity.x, velocity.y, velocity.z));
     this.resetForReplay();
-    this.syncFeet();
+    this.feetValue.x = feet.x;
+    this.feetValue.y = feet.y;
+    this.feetValue.z = feet.z;
   }
 
   /**
@@ -211,6 +223,8 @@ export class CharacterBody {
     const desired = next.velocity;
     const start = this.moveStart.copyFrom(cc.getPosition());
     cc.setVelocity(this.tmpVelocity.set(desired.x, desired.y, desired.z));
+    // Support comes from the full proximity manifold; collide-and-slide starts from an empty one (see clearManifold).
+    cc.clearManifold();
     cc.integrate(dt, this.surface, this.gravity);
 
     if (next.grounded) {
@@ -222,6 +236,7 @@ export class CharacterBody {
       }
     }
     this.syncFeet();
+    this.canonicalizeCenter();
     return { ...next, velocity: this.getVelocity() };
   }
 
@@ -325,15 +340,34 @@ export class CharacterBody {
   }
 
   private centerFor(feet: Vec3, stance: Stance, result: Vector3): Vector3 {
-    return result.set(feet.x, feet.y + KEEP_DISTANCE + capsuleHeightFor(stance) / 2, feet.z);
+    return result.set(feet.x, feet.y + centerHeight(stance), feet.z);
   }
 
   private syncFeet(): void {
     const center = this.controller.getPosition();
     this.feetValue.x = center.x;
-    this.feetValue.y = center.y - this.controller.footOffset - KEEP_DISTANCE;
+    this.feetValue.y = center.y - centerHeight(this.currentStance);
     this.feetValue.z = center.z;
+  }
+
+  /**
+   * Re-derives the capsule center from the feet, so the center is exactly what `restore(feet)` computes: y + h - h
+   * isn't always y in floating point, and a 1-ULP different center would break bitwise replay.
+   */
+  private canonicalizeCenter(): void {
+    const center = this.controller.getPosition();
+    const y = this.feetValue.y + centerHeight(this.currentStance);
+    if (y !== center.y) this.controller.setPosition(this.tmpA.set(center.x, y, center.z));
   }
 }
 
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Feet to capsule center height for a stance (the controller's footOffset plus the skin), m. */
+function centerHeight(stance: Stance): number {
+  return stance === "stand" ? STAND_CENTER : stance === "crouch" ? CROUCH_CENTER : PRONE_CENTER;
+}
+
+const STAND_CENTER = KEEP_DISTANCE + capsuleHeightFor("stand") / 2;
+const CROUCH_CENTER = KEEP_DISTANCE + capsuleHeightFor("crouch") / 2;
+const PRONE_CENTER = KEEP_DISTANCE + capsuleHeightFor("prone") / 2;
