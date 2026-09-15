@@ -143,6 +143,7 @@ export class PlayerController {
   private zoomFovDegrees: number = CAMERA.fovDegrees;
   private zoomBlend = 0;
   private readonly punch = new Vector3();
+  private rollWarned = false;
   /** Render-only correction offset (networked reconciliation smoothing), added to the camera position. */
   private readonly renderOffset = new Vector3();
 
@@ -400,9 +401,35 @@ export class PlayerController {
     const feet = Vector3.LerpToRef(this.previousFeet, this.currentFeet, alpha, this.camera.position);
     feet.addInPlace(this.renderOffset);
     feet.y += this.eyeHeight + this.stepOffset + bob;
-    this.camera.rotation.set(this.pitch + this.punch.x, this.yaw + this.punch.y, this.punch.z);
+    // Punch and shake are small by design; a large or non-finite roll is a bug upstream, so clamp it and report once.
+    let roll = this.punch.z;
+    if (!(Math.abs(roll) <= MAX_CAMERA_ROLL)) {
+      if (!this.rollWarned) {
+        this.rollWarned = true;
+        console.warn(`[camera] roll ${roll} clamped (punch ${this.punch.x}, ${this.punch.y})`, new Error().stack);
+      }
+      roll = Number.isFinite(roll) ? Math.max(-MAX_CAMERA_ROLL, Math.min(MAX_CAMERA_ROLL, roll)) : 0;
+    }
+    if (this.camera.rotationQuaternion) {
+      if (!this.rollWarned) {
+        this.rollWarned = true;
+        console.warn("[camera] rotationQuaternion was set on the player camera; clearing it", new Error().stack);
+      }
+      this.camera.rotationQuaternion = null;
+    }
+    if (this.camera.parent) {
+      if (!this.rollWarned) {
+        this.rollWarned = true;
+        console.warn(`[camera] player camera was parented to ${this.camera.parent.name}; detaching`);
+      }
+      this.camera.parent = null;
+    }
+    this.camera.rotation.set(this.pitch + this.punch.x, this.yaw + this.punch.y, roll);
   }
 }
+
+/** Largest camera roll punch and explosion shake may add, rad. */
+const MAX_CAMERA_ROLL = 0.12;
 
 function axis(positive: boolean, negative: boolean): -1 | 0 | 1 {
   return positive === negative ? 0 : positive ? 1 : -1;
