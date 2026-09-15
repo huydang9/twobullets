@@ -1,6 +1,7 @@
 /*
- * Inventory screen (Tab). Same language as the HUD: thin strokes, translucent dark panels, light condensed text,
- * amber for warnings. Lives inside .tb-hud so its tokens apply.
+ * Inventory screen (Tab). PUBG-like: the game blurred and dimmed behind three solid dark columns, item pictures, big
+ * high-contrast names and quantities. Lives inside .tb-hud so its tokens apply. Sizes are em of .tb-inv, whose font
+ * size follows the viewport height, so the layout scales from 1080p to 4K.
  */
 
 /* The play overlay would cover the screen while the pointer is released for the inventory. */
@@ -9,36 +10,71 @@
 }
 
 .tb-inv {
+  --inv-col: rgba(13, 15, 18, 0.86);
+  --inv-row: rgba(255, 255, 255, 0.05);
+  --inv-row-hover: rgba(255, 255, 255, 0.13);
+  --inv-line: rgba(255, 255, 255, 0.1);
+  --inv-accent: #f0bf4c;
+  --inv-ok: rgba(242, 242, 238, 0.92);
+
   position: absolute;
   inset: 0;
   z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 7vh 24px 24px;
+  gap: 0.9em;
+  padding: 5vh 2em 2.5vh;
+  box-sizing: border-box;
+  font-size: clamp(14px, 1.55vh, 26px);
+  line-height: 1.25;
   pointer-events: auto;
   cursor: default;
-  background: linear-gradient(180deg, rgba(6, 8, 10, 0.72), rgba(6, 8, 10, 0.5) 60%, rgba(6, 8, 10, 0.7));
+  text-shadow: none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(4, 6, 8, 0.55), rgba(4, 6, 8, 0.8));
+  -webkit-backdrop-filter: blur(10px) saturate(0.7);
+  backdrop-filter: blur(10px) saturate(0.7);
+}
+
+.tb-inv *,
+.tb-inv *::before,
+.tb-inv *::after {
+  box-sizing: border-box;
+}
+
+.tb-inv .tb-key {
+  min-width: 1.6em;
+  padding: 0.05em 0.4em;
+  font-size: 0.72em;
 }
 
 .tb-inv__panel {
+  flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(240px, 320px) minmax(280px, 380px);
-  gap: 18px;
-  width: min(1040px, 100%);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 1.1em;
+  width: min(90em, 100%);
   min-height: 0;
-  max-height: calc(100% - 64px);
 }
+
+/* ---------- Columns ---------- */
 
 .tb-inv__col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.7em;
+  min-width: 0;
   min-height: 0;
-  padding: 10px 12px 12px;
-  background: var(--tb-panel);
-  border: 1px solid transparent;
+  padding: 0.85em 0.9em 0.9em;
+  background: var(--inv-col);
+  border: 1px solid var(--inv-line);
+  border-top: 2px solid rgba(255, 255, 255, 0.3);
   transition: border-color 100ms;
+}
+
+.tb-inv__col--gear {
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .tb-inv__col[data-over],
@@ -46,9 +82,26 @@
   border-color: var(--tb-stroke-strong);
 }
 
-.tb-inv__title,
+.tb-inv__title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 0.5em;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--tb-text);
+  border-bottom: 1px solid var(--inv-line);
+}
+
+.tb-inv__title-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--tb-text-dim);
+}
+
 .tb-inv__label {
-  font-size: 11px;
+  font-size: 0.72em;
   letter-spacing: 0.16em;
   color: var(--tb-text-dim);
 }
@@ -56,71 +109,182 @@
 .tb-inv__list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
 
 .tb-inv__empty {
-  padding: 8px 2px;
-  font-size: 12px;
+  padding: 1em 0.2em;
+  font-size: 0.9em;
   color: var(--tb-text-faint);
 }
 
+/* ---------- Item rows ---------- */
+
 .tb-inv__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 8px;
-  font-size: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  --cat: transparent;
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.3em 0.8em 0.3em 0.3em;
+  background: var(--inv-row);
+  border-left: 2px solid transparent;
   cursor: grab;
+  transition: background 80ms, border-color 80ms;
 }
 
-.tb-inv__row:hover,
-.tb-inv__weapon:hover,
-.tb-inv__cell:hover,
-.tb-inv__chip:hover {
-  background: rgba(255, 255, 255, 0.1);
+.tb-inv__row[data-wide] {
+  grid-template-columns: 7.2em minmax(0, 1fr) auto;
 }
 
-.tb-inv__row-detail {
-  font-variant-numeric: tabular-nums;
+.tb-inv__row:hover {
+  background: var(--inv-row-hover);
+  border-left-color: rgba(255, 255, 255, 0.75);
+}
+
+.tb-inv__row[data-selected] {
+  border-left-color: var(--inv-accent);
+}
+
+.tb-inv__row[data-category="ammo"] { --cat: rgba(214, 178, 96, 0.8); }
+.tb-inv__row[data-category="throwable"] { --cat: rgba(150, 172, 104, 0.8); }
+.tb-inv__row[data-category="heal"] { --cat: rgba(216, 96, 82, 0.85); }
+.tb-inv__row[data-category="boost"] { --cat: rgba(96, 164, 216, 0.85); }
+.tb-inv__row[data-category="weapon"] { --cat: rgba(236, 236, 230, 0.55); }
+.tb-inv__row[data-category="helmet"],
+.tb-inv__row[data-category="vest"],
+.tb-inv__row[data-category="backpack"] { --cat: rgba(170, 150, 214, 0.8); }
+
+.tb-inv__icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 4em;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 55%, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.025) 72%);
+  box-shadow: inset 0 -2px 0 var(--cat, transparent);
+}
+
+.tb-inv__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 0.12em 0.18em rgba(0, 0, 0, 0.55));
+}
+
+.tb-inv__row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12em;
+  min-width: 0;
+}
+
+.tb-inv__row-name,
+.tb-inv__row-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-inv__row-name {
+  font-size: 1.1em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--tb-text);
+}
+
+.tb-inv__row-sub {
+  font-size: 0.8em;
   color: var(--tb-text-dim);
 }
 
-/* ---------- Capacity ---------- */
+.tb-inv__row-qty {
+  min-width: 2.2em;
+  font-size: 1.3em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--tb-text);
+}
+
+/* ---------- Bag groups and capacity ---------- */
+
+.tb-inv__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tb-inv__group + .tb-inv__group {
+  margin-top: 0.7em;
+}
+
+.tb-inv__group-title {
+  margin-bottom: 0.2em;
+  padding: 0 0.1em 0.3em;
+  font-size: 0.7em;
+  letter-spacing: 0.18em;
+  color: var(--tb-text-faint);
+  border-bottom: 1px solid var(--inv-line);
+}
 
 .tb-inv__capacity {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+.tb-inv__capacity-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.tb-inv__capacity-text {
   font-variant-numeric: tabular-nums;
+}
+
+.tb-inv__capacity-used {
+  font-size: 1.3em;
+  font-weight: 600;
+}
+
+.tb-inv__capacity-max {
   color: var(--tb-text-dim);
 }
 
 .tb-inv__bar {
   position: relative;
-  flex: 1;
   height: 4px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.12);
 }
 
+.tb-inv__bar--capacity {
+  height: 0.5em;
+}
+
 .tb-inv__bar--thin {
-  flex: none;
-  height: 2px;
-  margin-top: 4px;
+  height: 3px;
 }
 
 .tb-inv__bar-fill {
   position: absolute;
   inset: 0;
-  background: var(--tb-text);
+  background: var(--inv-ok);
   transform-origin: left center;
   transform: scaleX(0);
+}
+
+.tb-inv__bar-fill[data-high] {
+  background: #e6d28a;
 }
 
 .tb-inv__bar-fill[data-full],
@@ -128,189 +292,334 @@
   background: var(--tb-amber);
 }
 
-/* ---------- Equipment ---------- */
+/* ---------- Weapons ---------- */
 
 .tb-inv__weapons {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.5em;
 }
 
 .tb-inv__weapon {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-areas:
-    "head head"
-    "name ammo";
-  align-items: baseline;
-  gap: 2px 12px;
-  padding: 7px 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 0.5em 0.7em 0.6em;
+  background: var(--inv-row);
+  border: 1px solid var(--inv-line);
   cursor: grab;
+  transition: background 80ms, border-color 80ms;
+}
+
+.tb-inv__weapon:hover {
+  background: var(--inv-row-hover);
 }
 
 .tb-inv__weapon-head {
-  grid-area: head;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.55em;
+  min-width: 0;
 }
 
 .tb-inv__weapon-name {
-  grid-area: name;
-  font-size: 17px;
-  letter-spacing: 0.04em;
+  margin-left: auto;
+  overflow: hidden;
+  font-size: 1.15em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-inv__weapon-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8em;
+}
+
+.tb-inv__weapon-art {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 17em;
+  aspect-ratio: 8 / 3;
+  background: radial-gradient(ellipse at 50% 55%, rgba(255, 255, 255, 0.11), transparent 72%);
 }
 
 .tb-inv__weapon-ammo {
-  grid-area: ammo;
-  justify-self: end;
-  font-size: 12px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tb-inv__weapon-mag {
+  font-size: 1.6em;
+  font-weight: 600;
+}
+
+.tb-inv__weapon-ammo[data-empty] .tb-inv__weapon-mag {
+  color: var(--tb-amber);
+}
+
+.tb-inv__weapon-reserve {
+  font-size: 1.05em;
   color: var(--tb-text-dim);
-  white-space: pre;
+}
+
+.tb-inv__weapon-caliber {
+  display: block;
+  font-size: 0.8em;
+  color: var(--tb-text-dim);
+}
+
+.tb-inv__attachments {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35em;
+}
+
+.tb-inv__attachment {
+  height: 1.7em;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
 }
 
 .tb-inv__weapon[data-empty] {
   cursor: default;
   background: transparent;
-  border: 1px dashed var(--tb-stroke);
+  border-style: dashed;
+  border-color: var(--tb-stroke);
 }
 
 .tb-inv__weapon[data-empty] .tb-inv__weapon-name {
+  font-weight: 400;
   color: var(--tb-text-faint);
 }
 
+/* ---------- Helmet, vest, backpack ---------- */
+
 .tb-inv__gear {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5em;
 }
 
 .tb-inv__cell {
-  padding: 7px 10px;
-  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  min-width: 0;
+  padding: 0.45em 0.55em 0.55em;
+  background: var(--inv-row);
+  border: 1px solid var(--inv-line);
   cursor: grab;
+  transition: background 80ms;
 }
 
-.tb-inv__cell-name {
-  font-size: 15px;
+.tb-inv__cell:hover {
+  background: var(--inv-row-hover);
+}
+
+.tb-inv__cell-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.3em;
+}
+
+.tb-inv__cell-level {
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.tb-inv__cell[data-level="1"] .tb-inv__cell-level { color: #dedbd0; }
+.tb-inv__cell[data-level="2"] .tb-inv__cell-level { color: #86b8ea; }
+.tb-inv__cell[data-level="3"] .tb-inv__cell-level { color: #c9a2ee; }
+
+.tb-inv__icon--gear {
+  height: auto;
+  aspect-ratio: 1;
+  max-height: 6.5em;
+}
+
+.tb-inv__cell-detail {
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--tb-text-dim);
 }
 
 .tb-inv__cell[data-empty] {
   cursor: default;
   background: transparent;
-  outline: 1px dashed var(--tb-stroke);
-  outline-offset: -1px;
+  border-style: dashed;
+  border-color: var(--tb-stroke);
 }
 
-.tb-inv__cell[data-empty] .tb-inv__cell-name {
+.tb-inv__cell[data-empty] .tb-inv__cell-detail {
+  text-align: center;
   color: var(--tb-text-faint);
 }
 
+/* ---------- Throwables ---------- */
+
 .tb-inv__throwables {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 0.4em;
 }
 
 .tb-inv__chip {
   display: flex;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.15em 0.55em 0.15em 0.15em;
+  background: var(--inv-row);
   border: 1px solid transparent;
   cursor: pointer;
 }
 
-.tb-inv__chip[data-selected] {
-  background: var(--tb-panel);
-  border-color: var(--tb-stroke-strong);
+.tb-inv__chip:hover {
+  background: var(--inv-row-hover);
 }
 
-.tb-inv__chip[data-empty] {
-  color: var(--tb-text-faint);
-  pointer-events: none;
+.tb-inv__chip-icon {
+  width: 2.6em;
+  height: 2.6em;
 }
 
 .tb-inv__chip-count {
+  font-size: 1.05em;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--tb-text-dim);
 }
 
-/* ---------- Footer, notice, split popover ---------- */
+.tb-inv__chip[data-selected] {
+  border-color: var(--inv-accent);
+}
+
+.tb-inv__chip[data-empty] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ---------- Footer, notice, tooltip, split popover ---------- */
 
 .tb-inv__footer {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  gap: 20px;
-  margin-top: 14px;
-  font-size: 12px;
-  color: var(--tb-text-faint);
+  gap: 0.6em 1.5em;
+  width: min(90em, 100%);
+  font-size: 0.85em;
+  color: var(--tb-text-dim);
+}
+
+.tb-inv__hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em 1.2em;
+}
+
+.tb-inv__hint {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
 }
 
 .tb-inv__toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--tb-text-dim);
+  gap: 0.45em;
+  color: var(--tb-text);
   cursor: pointer;
 }
 
 .tb-inv__toggle input {
+  width: 1.1em;
+  height: 1.1em;
   margin: 0;
-  accent-color: #d9d9d2;
+  accent-color: var(--inv-accent);
 }
 
 .tb-inv__notice {
   position: absolute;
-  bottom: 12vh;
+  bottom: 11vh;
   left: 50%;
-  padding: 5px 14px;
-  font-size: 14px;
-  letter-spacing: 0.08em;
+  padding: 0.4em 1em;
+  font-size: 1em;
+  letter-spacing: 0.06em;
   color: var(--tb-amber);
-  background: var(--tb-panel-strong);
+  background: rgba(10, 12, 14, 0.94);
+  border: 1px solid rgba(232, 166, 64, 0.4);
   transform: translateX(-50%);
+}
+
+.tb-inv__tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  max-width: 21em;
+  padding: 0.6em 0.8em 0.65em;
+  line-height: 1.45;
+  background: rgba(10, 12, 14, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0.3em 1.2em rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.tb-inv__tip-title {
+  margin-bottom: 0.2em;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.tb-inv__tip-line {
+  font-size: 0.85em;
+  color: var(--tb-text-dim);
 }
 
 .tb-inv__split {
   position: absolute;
   top: 40%;
   left: 50%;
+  z-index: 6;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-width: 260px;
-  padding: 12px 14px;
-  background: var(--tb-panel-strong);
+  gap: 0.7em;
+  width: min(20em, calc(100% - 2em));
+  padding: 0.8em 1em;
+  background: rgba(10, 12, 14, 0.96);
   border: 1px solid var(--tb-stroke);
   transform: translate(-50%, -50%);
-  text-shadow: none;
 }
 
 .tb-inv__split-title {
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  font-size: 1em;
+  letter-spacing: 0.06em;
 }
 
 .tb-inv__split-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0.7em;
 }
 
 .tb-inv__split-range {
   flex: 1;
-  accent-color: #d9d9d2;
+  min-width: 0;
+  accent-color: var(--inv-accent);
 }
 
 .tb-inv__split-number {
-  width: 56px;
-  padding: 3px 4px;
-  font: 13px var(--tb-font);
+  width: 4em;
+  padding: 0.2em 0.3em;
+  font: 1em var(--tb-font);
   color: var(--tb-text);
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--tb-stroke);
@@ -319,12 +628,12 @@
 .tb-inv__split-buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 0.4em;
 }
 
 .tb-inv__button {
-  padding: 4px 14px;
-  font: 500 12px var(--tb-font);
+  padding: 0.3em 1em;
+  font: 500 0.85em var(--tb-font);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--tb-text);
@@ -339,11 +648,39 @@
   color: var(--tb-text-dim);
 }
 
-@media (max-width: 860px) {
+/* ---------- Narrow screens ---------- */
+
+@media (max-width: 1100px) {
   .tb-inv__panel {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(20em, 1fr) auto;
+    overflow-y: auto;
   }
   .tb-inv__col--gear {
     grid-column: span 2;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 640px) {
+  .tb-inv {
+    padding: 2vh 1em 1.5vh;
+  }
+  .tb-inv__panel {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .tb-inv__col {
+    flex: none;
+  }
+  .tb-inv__list {
+    overflow: visible;
+  }
+  .tb-inv__row[data-wide] {
+    grid-template-columns: 5.5em minmax(0, 1fr) auto;
+  }
+  .tb-inv__weapon-art {
+    max-width: none;
   }
 }

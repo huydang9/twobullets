@@ -131,7 +131,7 @@ export class Game {
     // M: full-screen map (N zooms, wheel/drag), minimap bottom right; OfflineMatch swaps in zone and teammates.
     if (world && !benchmark) hud.attachMap({ world, input, source: cameraMapSource(player.camera) });
     // Tab: releases pointer lock while open and asks for it again on close (the play overlay's click is the fallback).
-    const inventory = new InventoryScreen(hudRoot, equipment, input);
+    const inventory = new InventoryScreen(hudRoot, equipment, input, { icons: { scene, assets, models: presentationLootModels(presentation.itemMeshes) } });
     // DEV: `?teammate=1` simulates a standing teammate, so 0 HP knocks (revive with `__twobullets.life.revive()`).
     const life = new PlayerLife(player, equipment, equipment, { teammate: import.meta.env.DEV && params.get("teammate") === "1", respawn: !botsMatch });
 

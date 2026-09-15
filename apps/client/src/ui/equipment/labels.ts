@@ -1,7 +1,11 @@
 import {
+  ITEM_IDS,
   ITEMS,
+  WEAPONS,
+  type AmmoItemId,
   type DamageKind,
   type InventoryError,
+  type ItemId,
   type ItemInstance,
   type ThrowableKind,
   type UseCancelReason,
@@ -61,6 +65,82 @@ export const DEATH_CAUSE_TEXT: Readonly<Record<DamageKind | "teamWipe", string>>
   bleed: "Bled out",
   teamWipe: "Squad eliminated",
 };
+
+/** Throwable effect lines for tooltips. */
+const THROWABLE_EFFECT: Readonly<Record<ThrowableKind, string>> = {
+  frag: "Explodes when the fuse runs out",
+  smoke: "Thick smoke screen",
+  flash: "Blinds and deafens nearby players",
+  molotov: "Bursts into fire on impact",
+};
+
+/** One short line under an item's name in the inventory: "+10 HP · 4 s", "Primary · 5.56mm", "Absorbs 40%". */
+export function itemSummary(itemId: ItemId): string {
+  const def = ITEMS[itemId];
+  switch (def.category) {
+    case "weapon":
+      return `${def.weaponClass === "primary" ? "Primary" : "Sidearm"} · ${ITEMS[def.ammo].name}`;
+    case "ammo":
+      return weaponsUsing(def.id);
+    case "throwable":
+      return def.cookable ? `Fuse ${def.fuseSeconds} s · cookable` : def.detonateOnImpact ? "Impact" : `Fuse ${def.fuseSeconds} s`;
+    case "heal":
+      return `${def.healAmount === null ? `To ${def.healCap} HP` : `+${def.healAmount} HP`} · ${def.useSeconds} s`;
+    case "boost":
+      return `+${def.boostAmount} boost · ${def.useSeconds} s`;
+    case "helmet":
+    case "vest":
+      return `Absorbs ${Math.round(def.reduction * 100)}%`;
+    case "backpack":
+      return `+${def.capacity} capacity`;
+  }
+}
+
+export interface ItemTooltip {
+  readonly title: string;
+  readonly lines: readonly string[];
+}
+
+/** Hover card: effect, use time, heal cap, weight. `durability` is the piece's remaining durability for armor. */
+export function itemTooltip(itemId: ItemId, durability?: number): ItemTooltip {
+  const def = ITEMS[itemId];
+  const weight = def.weight > 0 ? [`Weight ${def.weight}${def.maxStack > 1 ? " each" : ""}`] : [];
+  switch (def.category) {
+    case "weapon": {
+      const weapon = WEAPONS[def.weaponId];
+      return {
+        title: def.name,
+        lines: [`${def.weaponClass === "primary" ? "Primary" : "Sidearm"} · ${ITEMS[def.ammo].name}`, `Damage ${weapon.damage}${weapon.pellets > 1 ? ` × ${weapon.pellets}` : ""} · ${weapon.roundsPerMinute} RPM`, `Magazine ${weapon.magazineSize} · Reload ${weapon.reloadSeconds} s`],
+      };
+    }
+    case "ammo":
+      return { title: def.name, lines: [`Ammo for ${weaponsUsing(def.id)}`, ...weight] };
+    case "throwable":
+      return { title: def.name, lines: [THROWABLE_EFFECT[def.id], def.detonateOnImpact ? "No fuse" : `Fuse ${def.fuseSeconds} s${def.cookable ? " · cook with R" : ""}`, ...weight] };
+    case "heal":
+      return {
+        title: def.name,
+        lines: [def.healAmount === null ? `Heals to ${def.healCap} HP` : `Heals ${def.healAmount} HP`, `Heal cap ${def.healCap} HP`, `Use time ${def.useSeconds} s`, ...weight],
+      };
+    case "boost":
+      return { title: def.name, lines: [`+${def.boostAmount} boost (heals over time, raises speed)`, `Use time ${def.useSeconds} s`, ...weight] };
+    case "helmet":
+    case "vest":
+      return {
+        title: def.name,
+        lines: [`Absorbs ${Math.round(def.reduction * 100)}% of ${def.category === "helmet" ? "head" : "body"} damage`, `Durability ${Math.ceil(durability ?? def.durability)} / ${def.durability}`],
+      };
+    case "backpack":
+      return { title: def.name, lines: [`+${def.capacity} capacity`] };
+  }
+}
+
+function weaponsUsing(ammo: AmmoItemId): string {
+  return ITEM_IDS.flatMap((id) => {
+    const def = ITEMS[id];
+    return def.category === "weapon" && def.ammo === ammo ? [def.name] : [];
+  }).join(", ");
+}
 
 /** What dealt area damage, for the kill feed and the death recap. */
 export function areaWeaponName(kind: DamageKind): string | null {
