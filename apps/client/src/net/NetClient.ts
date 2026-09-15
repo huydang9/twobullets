@@ -22,6 +22,7 @@ import { MsgId } from "@twobullets/protocol/messages/ids";
 import { decodeMatchEnd, decodePhaseChange, decodeZonePhase, type MatchEnd, type PhaseChange, type ZonePhaseMessage } from "@twobullets/protocol/messages/match";
 import { encodeInputPacket, MAX_INPUTS_PER_PACKET, type InputPacket } from "@twobullets/protocol/messages/input";
 import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages/ping";
+import { decodeRoster, type Roster } from "@twobullets/protocol/messages/roster";
 import type { ReliableEvent } from "@twobullets/protocol/messages/events";
 import type { Mutable, Snapshot } from "@twobullets/protocol/messages/snapshot";
 import { Btn, type PlayerInput } from "@twobullets/shared/input";
@@ -125,6 +126,8 @@ export interface NetClientOptions {
   readonly movement?: { life: number } | null;
   /** Battle royale lifecycle (protocol v4): PhaseChange, ZonePhase, MatchEnd, after the client state is updated. */
   readonly onMatchMessage?: (client: NetClient) => void;
+  /** Roster (protocol v5): after Welcome and on every join, leave or bot fill; `client.matchRoster` is already updated. */
+  readonly onRoster?: (roster: Roster, client: NetClient) => void;
 }
 
 /**
@@ -148,6 +151,8 @@ export class NetClient {
   /** Announced zone phases by index order; run the shared `zoneAt(tick)` over them. */
   readonly zonePhases: ZonePhaseMessage[] = [];
   matchEnd: MatchEnd | null = null;
+  /** Newest Roster (who holds each slot; bots carry `botIndex` for a localized name), null until the first. */
+  matchRoster: Roster | null = null;
   private readonly session: Session;
   private readonly clock: Clock;
   private readonly netClock: NetClock;
@@ -159,6 +164,7 @@ export class NetClient {
   private readonly events: NetEventSink | null;
   private readonly movement: { life: number } | null;
   private readonly onMatchMessage: ((client: NetClient) => void) | null;
+  private readonly onRoster: ((roster: Roster, client: NetClient) => void) | null;
   private deliverTick = 0;
   private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
   private ownerLife: number = LifeCode.alive;
@@ -201,6 +207,7 @@ export class NetClient {
     this.events = options.events ?? null;
     this.movement = options.movement ?? null;
     this.onMatchMessage = options.onMatchMessage ?? null;
+    this.onRoster = options.onRoster ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
     this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
     this.stats = {
@@ -409,6 +416,13 @@ export class NetClient {
         else if (this.zonePhases[i]!.index === zone.index) this.zonePhases[i] = zone;
         else this.zonePhases.splice(i, 0, zone);
         this.onMatchMessage?.(this);
+        break;
+      }
+      case MsgId.Roster: {
+        const roster = decodeRoster(reader);
+        if (roster === null) return;
+        this.matchRoster = roster;
+        this.onRoster?.(roster, this);
         break;
       }
       case MsgId.MatchEnd: {

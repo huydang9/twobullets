@@ -4,6 +4,7 @@ import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, dec
 import { MsgId } from "../src/messages/ids";
 import { createInputPacketBuffer, decodeInputPacketInto, encodeInputPacket } from "../src/messages/input";
 import { decodePing } from "../src/messages/ping";
+import { decodeRoster } from "../src/messages/roster";
 import { MAX_ENTITY_SLOTS, createSnapshotBuffer, decodeSnapshotInto, encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
 import { describeMessage } from "../src/debug/describe";
 import { StreamDeframer } from "../src/framing";
@@ -13,7 +14,7 @@ import { createTestRng, randInt } from "./rng";
 // netcode.md §11.4 gate: random bytes never throw uncaught. The BitReader bounds every read, so decoders see zeros
 // past the end and report `overflowed` instead of indexing out of range.
 
-const IDS = [MsgId.Input, MsgId.Ping, MsgId.Snapshot, MsgId.Hello, MsgId.Welcome, MsgId.Resync, MsgId.Disconnect, MsgId.KillFeed];
+const IDS = [MsgId.Input, MsgId.Ping, MsgId.Snapshot, MsgId.Hello, MsgId.Welcome, MsgId.Resync, MsgId.Disconnect, MsgId.KillFeed, MsgId.Roster];
 
 function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   const r = createBitReader(bytes);
@@ -25,7 +26,7 @@ function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   r.reset(bytes);
   const snap = createSnapshotBuffer();
   if (decodeSnapshotInto(r, 5000, () => baseline, snap)) expect(snap.entities.length).toBeLessThanOrEqual(MAX_ENTITY_SLOTS);
-  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed]) {
+  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed, decodeRoster]) {
     r.reset(bytes);
     decode(r);
   }

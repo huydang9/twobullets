@@ -175,7 +175,7 @@ export class MatchService implements AllocatorListener {
     const previous = record.epochs.get(accountId);
     const epoch = previous === undefined ? 0 : previous + 1;
     record.epochs.set(accountId, epoch);
-    const { token, expiresAt } = this.o.tokens.issueJoin({ accountId, matchId, hostId: record.config.hostId, teamId: human.teamId, epoch, reconnect: previous !== undefined });
+    const { token, expiresAt } = this.o.tokens.issueJoin({ accountId, matchId, hostId: record.config.hostId, teamId: human.teamId, epoch, reconnect: previous !== undefined, nickname: human.nickname });
     this.o.metrics.inc("tb_join_tokens_total", { reconnect: String(previous !== undefined) }, 1, "Join tokens issued");
     return { wsUrl: record.wsUrl, joinToken: token, expiresAt, matchId, teamId: human.teamId, reconnect: previous !== undefined };
   }

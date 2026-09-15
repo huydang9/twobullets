@@ -8,6 +8,7 @@ export * from "./framing";
 export * from "./messages/ids";
 export * from "./messages/control";
 export * from "./messages/match";
+export * from "./messages/roster";
 export * from "./messages/ping";
 export * from "./messages/input";
 export * from "./messages/snapshot";

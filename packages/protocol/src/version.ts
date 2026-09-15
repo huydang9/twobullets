@@ -9,8 +9,9 @@
  * teamSize and maxPlayers.
  * v4: battle royale lifecycle on the control stream: PhaseChange (0x43), ZonePhase (0x46), MatchEnd (0x4A); Welcome
  * carries the live phase and its end tick.
+ * v5: Roster (0x4D) on the control stream after Welcome and on every join, leave or bot fill.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const CONTENT_HASH = 0xb1eab561;
 
 export interface CompatKey {

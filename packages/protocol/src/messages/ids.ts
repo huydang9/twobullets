@@ -21,6 +21,8 @@ export const MsgId = {
   MatchEnd: 0x4a,
   Resync: 0x4b,
   Resume: 0x4c,
+  /** v5: who is in the match (names, teams, bots, connection). */
+  Roster: 0x4d,
   Disconnect: 0x4f,
 } as const;
 export type MsgId = (typeof MsgId)[keyof typeof MsgId];

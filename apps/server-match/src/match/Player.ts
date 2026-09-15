@@ -58,6 +58,10 @@ export class Player implements ReplicatedPlayer {
   session: Session | null = null;
   /** Server bot driving this slot's input buffer (never has a session), or null for a human. */
   bot: BotSeat | null = null;
+  /** Roster name: the join token's nickname (else the account id); unused for bots. */
+  name = "";
+  /** Roster revision last sent to this player's session. */
+  rosterSent = -1;
   lastRecvMs = 0;
   disconnectedAtMs = -1;
   rateWindowStartMs = 0;

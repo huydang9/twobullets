@@ -15,12 +15,14 @@ import {
   DisconnectReason,
   encodePing,
   encodeResyncResponse,
+  encodeRoster,
   encodeWelcome,
   MsgId,
   PhaseCode,
   RESUME_TOKEN_BYTES,
   type Mutable,
   type OwnerMoveBlock,
+  type RosterPlayer,
 } from "@twobullets/protocol";
 import { MOVEMENT } from "@twobullets/shared/constants";
 import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
@@ -49,6 +51,8 @@ import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slo
 // runs (BrLifecycle): Warmup → LandingSelect → Glide → Combat → Ended/Cancelled, then the match closes itself.
 // Server bots (ServerBots) take the roster's `bot:<n>` seats when the world is ready and, with `rules.fillWithBots` in a BR
 // match, every slot still empty when warmup ends; their brains write into the same input buffers humans' packets do.
+// Roster: a joining session gets it right after Welcome; any other change (join, leave, bot fill, grace expiry) bumps a
+// revision that is sent once at the end of the tick to every session behind it.
 
 export interface ServerMatchOptions {
   readonly config: MatchConfig;
@@ -138,6 +142,9 @@ export class ServerMatch implements Match, CombatHost {
   private readonly gatedAction: { type: PlayerActionType; arg: number } = { type: PlayerActionType.pickup, arg: 0 };
   private readonly datagramWriter = createBitWriter(64);
   private readonly controlWriter = createBitWriter(128);
+  /** Roster: 2 B + ≤ 27 B per slot. */
+  private readonly rosterWriter = createBitWriter(600);
+  private rosterRevision = 0;
   private readonly idleTimeoutMs: number;
   private readonly graceMs: number;
   private readonly rateLimit: number;
@@ -281,6 +288,7 @@ export class ServerMatch implements Match, CombatHost {
     lifecycle?.endTick(tick);
     this.next = tick + 1;
     if (this.closed) return;
+    this.flushRoster();
     const now = this.clock.now();
     this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
@@ -441,6 +449,7 @@ export class ServerMatch implements Match, CombatHost {
     this.byAccount.set(accountId, player);
     this.rebuildActive();
     this.bots!.attach(player);
+    this.rosterRevision++;
     return player;
   }
 
@@ -513,10 +522,14 @@ export class ServerMatch implements Match, CombatHost {
     player.inputs.reset();
     player.net.reset(this.next - 1);
     player.viewDelay.reset();
+    player.name = typeof claims.nick === "string" && claims.nick.length > 0 ? claims.nick : claims.sub;
     this.bySession.set(session, player);
     session.onDatagram((bytes, recvMs) => this.onDatagram(player, session, bytes, recvMs));
     session.onStream((bytes) => this.onStream(player, session, bytes));
     this.sendWelcome(player, session);
+    this.rosterRevision++;
+    this.sendRoster([session]);
+    player.rosterSent = this.rosterRevision;
     this.lifecycle?.onBound(player, session);
     this.options.onPlayer?.(player.accountId, "joined");
   }
@@ -527,6 +540,7 @@ export class ServerMatch implements Match, CombatHost {
     this.bySession.delete(session);
     player.session = null;
     player.disconnectedAtMs = this.clock.now();
+    this.rosterRevision++;
     this.options.onPlayer?.(player.accountId, "left");
   }
 
@@ -556,6 +570,38 @@ export class ServerMatch implements Match, CombatHost {
       flags: 0,
     });
     session.sendStream(w.bytes());
+  }
+
+  /** Sends the current roster to every session that hasn't seen this revision (at most once per change). */
+  private flushRoster(): void {
+    const revision = this.rosterRevision;
+    let targets: Session[] | null = null;
+    for (const p of this.active) {
+      if (p.session === null || p.rosterSent === revision) continue;
+      (targets ??= []).push(p.session);
+      p.rosterSent = revision;
+    }
+    if (targets !== null) this.sendRoster(targets);
+  }
+
+  private sendRoster(sessions: readonly Session[]): void {
+    const players: RosterPlayer[] = [];
+    for (const p of this.active) {
+      const isBot = isBotAccountId(p.accountId);
+      players.push({
+        slot: p.slot,
+        team: p.teamId,
+        name: isBot ? "" : p.name,
+        isBot,
+        botIndex: isBot ? botIndexOf(p.accountId) : -1,
+        connected: isBot || p.session !== null,
+      });
+    }
+    const w = this.rosterWriter;
+    w.reset();
+    encodeRoster(w, { players });
+    const bytes = w.bytes();
+    for (const session of sessions) session.sendStream(bytes);
   }
 
   private onDatagram(player: Player, session: Session, bytes: Uint8Array, recvMs: number): void {
@@ -656,7 +702,10 @@ export class ServerMatch implements Match, CombatHost {
         removed = true;
       }
     }
-    if (removed) this.rebuildActive();
+    if (removed) {
+      this.rebuildActive();
+      this.rosterRevision++;
+    }
     this.lifecycle?.sweep(now);
   }
 
@@ -665,6 +714,12 @@ export class ServerMatch implements Match, CombatHost {
     for (const p of this.slots) if (p !== null) list.push(p);
     this.active = list;
   }
+}
+
+/** `n` of a `bot:<n>` account id (0 when it is not a number). */
+function botIndexOf(accountId: string): number {
+  const n = Number(accountId.slice(accountId.indexOf(":") + 1));
+  return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
 /** The zone a bot sees outside BR combat: the level's initial circle, not shrinking. */

@@ -14,6 +14,7 @@ import {
   encodeHello,
   encodeInputPacket,
   MAX_INPUTS_PER_PACKET,
+  MAX_JOIN_TOKEN_BYTES,
   MsgId,
   PROTOCOL_VERSION,
   type Disconnect,
@@ -96,7 +97,8 @@ export class HeadlessClient {
   private readonly session: Session;
   private readonly clock: Clock;
   private readonly rng: Rng;
-  private readonly writer = createBitWriter(512);
+  /** Sized for Hello with the longest accepted join token. */
+  private readonly writer = createBitWriter(MAX_JOIN_TOKEN_BYTES + 16);
   private readonly reader = createBitReader(new Uint8Array(0));
   private readonly history: MutablePlayerInput[] = [];
   private readonly packetInputs: PlayerInput[] = [];

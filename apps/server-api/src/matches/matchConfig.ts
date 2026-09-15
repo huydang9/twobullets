@@ -1,5 +1,6 @@
 import { BOT_ACCOUNT_PREFIX } from "@twobullets/contracts/claims";
 import {
+  BOT_DIFFICULTIES,
   DEFAULT_MATCH_PLAYERS,
   DEFAULT_TEAM_MODE,
   MAX_MATCH_PLAYERS,
@@ -7,6 +8,7 @@ import {
   TEAM_MODE_SIZE,
   TEAM_MODES,
   teamCount,
+  type BotDifficulty,
   type MatchConfig,
   type TeamAssignment,
   type TeamMode,
@@ -54,7 +56,7 @@ export function isTeamMode(value: unknown): value is TeamMode {
   return typeof value === "string" && (TEAM_MODES as readonly string[]).includes(value);
 }
 
-export type SettingsError = "mode" | "maxPlayers" | "mapId" | "fillWithBots";
+export type SettingsError = "mode" | "maxPlayers" | "mapId" | "fillWithBots" | "botDifficulty";
 
 /** Validates client settings; missing optional fields take defaults. */
 export function parseSettings(input: Partial<Record<keyof MatchSettings, unknown>>, base?: MatchSettings): MatchSettings | SettingsError {
@@ -66,7 +68,14 @@ export function parseSettings(input: Partial<Record<keyof MatchSettings, unknown
   if (typeof mapId !== "string" || !MAPS.some((m) => m.id === mapId && m.available)) return "mapId";
   const fillWithBots = input.fillWithBots ?? base?.fillWithBots ?? true;
   if (typeof fillWithBots !== "boolean") return "fillWithBots";
-  return { mode, maxPlayers, mapId, fillWithBots };
+  const botDifficulty = input.botDifficulty ?? base?.botDifficulty;
+  if (botDifficulty === undefined) return { mode, maxPlayers, mapId, fillWithBots };
+  if (!isBotDifficulty(botDifficulty)) return "botDifficulty";
+  return { mode, maxPlayers, mapId, fillWithBots, botDifficulty };
+}
+
+export function isBotDifficulty(value: unknown): value is BotDifficulty {
+  return typeof value === "string" && (BOT_DIFFICULTIES as readonly string[]).includes(value);
 }
 
 export function teamsOf(settings: MatchSettings): { teamCount: number; teamSize: number } {
@@ -132,6 +141,7 @@ export function buildMatchConfig(input: BuildMatchConfigInput): MatchConfig {
     teamMode: settings.mode,
     teams: assignments,
     rules: { friendlyFire: true, reviveSeconds: 5, bodyBlocking: true, fillWithBots: settings.fillWithBots },
+    ...(settings.botDifficulty !== undefined ? { botDifficulty: settings.botDifficulty } : {}),
   };
 }
 

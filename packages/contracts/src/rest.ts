@@ -1,4 +1,4 @@
-import type { MatchPhase, TeamMode } from "./match";
+import type { BotDifficulty, MatchPhase, TeamMode } from "./match";
 
 // server-api REST contract (v1) for the client front door: guest login, lobby (custom matches), quick queue, join
 // tokens, reconnect and results. JSON bodies ≤ 16 KB, `Content-Type: application/json`. Authenticated routes take
@@ -162,6 +162,8 @@ export interface MatchSettings {
   readonly maxPlayers: number;
   readonly mapId: string;
   readonly fillWithBots: boolean;
+  /** Lobby only: server bot tuning passed to `MatchConfig.botDifficulty`. Absent = DEFAULT_BOT_DIFFICULTY. */
+  readonly botDifficulty?: BotDifficulty;
 }
 
 export interface CreateLobbyRequest extends MatchSettings {

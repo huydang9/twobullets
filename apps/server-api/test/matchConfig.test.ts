@@ -38,4 +38,17 @@ describe("match config from lobby/queue settings", () => {
     expect(parseSettings({ maxPlayers: 2.5 })).toBe("maxPlayers");
     expect(parseSettings({ mapId: "cz-holasovice" })).toBe("mapId");
   });
+
+  it("botDifficulty is optional, validated, inherited by updates and copied into MatchConfig", () => {
+    expect(parseSettings({ botDifficulty: "hard" })).toEqual({ mode: "duo", maxPlayers: 10, mapId: "v1", fillWithBots: true, botDifficulty: "hard" });
+    expect(parseSettings({ botDifficulty: "insane" })).toBe("botDifficulty");
+    expect(parseSettings({ botDifficulty: 2 })).toBe("botDifficulty");
+    const easy = parseSettings({ botDifficulty: "easy" });
+    if (typeof easy === "string") throw new Error(easy);
+    expect(parseSettings({ maxPlayers: 6 }, easy)).toMatchObject({ maxPlayers: 6, botDifficulty: "easy" });
+    expect(parseSettings({ botDifficulty: "normal" }, easy)).toMatchObject({ botDifficulty: "normal" });
+    expect(buildMatchConfig({ ...base, settings: easy, humans: [] }).botDifficulty).toBe("easy");
+    const plain = buildMatchConfig({ ...base, settings: { mode: "duo", maxPlayers: 4, mapId: "v1", fillWithBots: true }, humans: [] });
+    expect("botDifficulty" in plain).toBe(false);
+  });
 });

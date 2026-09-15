@@ -23,6 +23,8 @@ export interface JoinTokenInput {
   readonly teamId: number;
   readonly epoch: number;
   readonly reconnect: boolean;
+  /** Shown in the match roster. */
+  readonly nickname?: string;
 }
 
 export class TokenService {
@@ -81,6 +83,7 @@ export class TokenService {
       ch: CONTENT_HASH >>> 0,
       epoch: input.epoch,
       rc: input.reconnect,
+      ...(input.nickname !== undefined ? { nick: input.nickname } : {}),
       jti: randomBytes(16).toString("hex"),
       iat,
       exp: iat + JOIN_TOKEN_TTL_SEC,

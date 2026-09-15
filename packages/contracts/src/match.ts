@@ -123,6 +123,8 @@ export interface JoinClaims {
   readonly epoch: number;
   /** Issued for a reconnect. */
   readonly rc: boolean;
+  /** Nickname at issue time, shown in the match roster. Absent in dev tokens (the server falls back to `sub`). */
+  readonly nick?: string;
   /** Single-use, 128-bit random. */
   readonly jti: string;
   readonly iat: number;

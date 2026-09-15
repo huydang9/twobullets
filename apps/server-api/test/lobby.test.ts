@@ -126,6 +126,28 @@ describe("custom lobbies", () => {
     expect((await api.call("GET", `/v1/lobbies/${code}`, { token: b.accessToken })).status).toBe(404);
   });
 
+  it("lobby botDifficulty: create, update, validation, view, and MatchConfig.botDifficulty at allocate", async () => {
+    api = await startTestApi();
+    const { auth: host, code, lobby } = await lobbyWith("Host", { mode: "duo", maxPlayers: 6, botDifficulty: "easy" });
+    expect(lobby.settings).toMatchObject({ botDifficulty: "easy" });
+    expect((await api.call("POST", "/v1/lobbies", { token: (await api.guest("Other")).accessToken, body: { botDifficulty: "brutal" } })).status).toBe(400);
+    expect((await api.call("PATCH", `/v1/lobbies/${code}`, { token: host.accessToken, body: { botDifficulty: "brutal" } })).status).toBe(400);
+    const patched = await api.call("PATCH", `/v1/lobbies/${code}`, { token: host.accessToken, body: { maxPlayers: 8 } });
+    expect(patched.body.lobby.settings).toMatchObject({ maxPlayers: 8, botDifficulty: "easy" });
+    const hard = await api.call("PATCH", `/v1/lobbies/${code}`, { token: host.accessToken, body: { botDifficulty: "hard" } });
+    expect(hard.body.lobby.settings.botDifficulty).toBe("hard");
+    const started = await api.call("POST", `/v1/lobbies/${code}/start`, { token: host.accessToken });
+    expect(started.body.lobby.status).toBe("inMatch");
+    expect(api.allocator.allocated.at(-1)).toMatchObject({ maxPlayers: 8, botDifficulty: "hard" });
+    // The join token carries the nickname for the match roster.
+    const join = await api.call("POST", `/v1/matches/${started.body.lobby.matchId}/join`, { token: host.accessToken });
+    expect(JSON.parse(Buffer.from(join.body.joinToken.split(".")[1], "base64url").toString()).nick).toBe("Host");
+
+    const { auth: other, code: plainCode } = await lobbyWith("Plain", { mode: "solo", maxPlayers: 4 });
+    await api.call("POST", `/v1/lobbies/${plainCode}/start`, { token: other.accessToken });
+    expect(api.allocator.allocated.at(-1)!.botDifficulty).toBeUndefined();
+  });
+
   it("without bots, start needs two teams; a failed allocation reopens the lobby with noCapacity", async () => {
     api = await startTestApi();
     const { auth: host, code } = await lobbyWith("Host", { mode: "solo", maxPlayers: 4, fillWithBots: false });

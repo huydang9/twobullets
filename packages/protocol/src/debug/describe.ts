@@ -4,6 +4,7 @@ import { MsgId, peekMsgId } from "../messages/ids";
 import { decodeMatchEnd, decodePhaseChange, decodeZonePhase } from "../messages/match";
 import { decodeInputPacket } from "../messages/input";
 import { decodePing } from "../messages/ping";
+import { decodeRoster } from "../messages/roster";
 import { createSnapshotBuffer, decodeSnapshotHeader, decodeSnapshotInto, type Snapshot } from "../messages/snapshot";
 
 // Debug decoding of one message to JSON-friendly data (ADR 0204: "debugging needs a decoder tool").
@@ -84,6 +85,9 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
       break;
     case MsgId.MatchEnd:
       message = decodeMatchEnd(r);
+      break;
+    case MsgId.Roster:
+      message = decodeRoster(r);
       break;
     case MsgId.Resync:
       message = bytes.length === 2 ? decodeResyncRequest(r) : decodeResyncResponse(r);
