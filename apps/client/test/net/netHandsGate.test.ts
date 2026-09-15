@@ -22,7 +22,8 @@ function harness(held: number) {
       out.select = 0;
     },
   };
-  const link = netCombatLink(combat, { handsBusy: () => hands.busy, interactHeld: () => false, life: () => LifeCode.alive });
+  const interrupts = { count: 0 };
+  const link = netCombatLink(combat, { handsBusy: () => hands.busy, interactHeld: () => false, life: () => LifeCode.alive, handsInterrupted: () => interrupts.count++ });
   const ctx = createWeaponContext();
   const combatInput = createCombatInput();
   /** One live tick: the outgoing input and the shots the local prediction fired from it. */
@@ -34,7 +35,7 @@ function harness(held: number) {
     weaponState = result.state;
     return { buttons: out.buttons, shots: result.shots.length };
   };
-  return { hands, tick, setHeld: (buttons: number) => (held = buttons) };
+  return { hands, tick, interrupts, setHeld: (buttons: number) => (held = buttons) };
 }
 
 describe("networked hands gate", () => {
@@ -79,5 +80,23 @@ describe("networked hands gate", () => {
     expect(netHandsBusy("idle", true)).toBe(true);
     const gate = new NetHandsGate();
     expect(gate.apply(Btn.jump | Btn.fire, true)).toBe(Btn.jump);
+  });
+
+  it("fire or reload pressed while the hands are busy interrupts (an item use) once per press; held or free hands don't", () => {
+    const h = harness(Btn.fire);
+    h.tick();
+    expect(h.interrupts.count).toBe(0);
+    h.hands.busy = true;
+    h.setHeld(0);
+    h.tick();
+    h.setHeld(Btn.fire);
+    for (let i = 0; i < 5; i++) expect(h.tick().buttons & Btn.fire).toBe(0);
+    expect(h.interrupts.count).toBe(1);
+    h.setHeld(Btn.fire | Btn.reload);
+    h.tick();
+    expect(h.interrupts.count).toBe(2);
+    h.setHeld(Btn.sprint);
+    h.tick();
+    expect(h.interrupts.count).toBe(2);
   });
 });

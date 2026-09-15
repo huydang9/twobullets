@@ -97,8 +97,8 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
   }
   if (message === null && error === null) error = "malformed";
   if (message !== null && typeof message === "object" && "entityPool" in message) {
-    const { header, owner, entities, weapon, vitals, shots, hits, reliable } = message as unknown as Snapshot;
-    message = { header, owner, weapon, vitals, entities, shots, hits, reliable };
+    const { header, owner, entities, weapon, vitals, items, shots, hits, reliable, teammates } = message as unknown as Snapshot;
+    message = { header, owner, weapon, vitals, items, entities, shots, hits, reliable, teammates };
   }
   return { ...base, ok: error === null, ...(message !== null ? { message: plain(message) } : {}), ...(error ? { error } : {}) };
 }

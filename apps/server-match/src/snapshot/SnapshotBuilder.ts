@@ -3,18 +3,25 @@ import { ReliableEventSender, ServerSnapshotBaselines, type ServerInputBuffer } 
 import {
   createEntityState,
   createOwnerBlock,
+  writeOwnerItems,
   writeOwnerMove,
   writeOwnerVitals,
   writeOwnerWeapon,
   writeRemoteEntity,
   writeShotEvent,
+  writeTeammateVitals,
 } from "@twobullets/netcode/replication";
 import {
   createBitWriter,
+  createOwnerItemsBlock,
   createOwnerVitalsBlock,
   createOwnerWeaponBlock,
   createShotEvent,
   createSnapshotCapResult,
+  createTeammateVitals,
+  copyTeammateVitals,
+  MAX_TEAMMATES,
+  teammateVitalsEqual,
   encodeSnapshotCapped,
   NO_TICK,
   SNAPSHOT_MAX_BYTES,
@@ -22,6 +29,7 @@ import {
   type CappableSnapshot,
   type EntityState,
   type Mutable,
+  type MutableOwnerItemsBlock,
   type MutableOwnerWeaponBlock,
   type OwnerMoveBlock,
   type OwnerVitalsBlock,
@@ -30,8 +38,11 @@ import {
   type ShotEvent,
   type SnapshotCapResult,
   type SnapshotHeader,
+  type TeammateVitals,
 } from "@twobullets/protocol";
 import type { ArmorLoadout } from "@twobullets/shared/equipment/armor";
+import type { InventoryState } from "@twobullets/shared/equipment/inventory";
+import type { ItemUseState } from "@twobullets/shared/equipment/itemUse";
 import type { LifeState, Vitals } from "@twobullets/shared/equipment/vitals";
 import type { PlayerState } from "@twobullets/shared/input";
 import type { Vec3 } from "@twobullets/shared/movement/types";
@@ -43,7 +54,8 @@ import { MAX_EVENT_AGE, type HitLog, type ShotLog } from "./eventLog";
 // the recipient's ReliableEventSender within a bit budget; `encodeSnapshotCapped` enforces the size cap (drops U events,
 // then far entities, never R events or the owner block) and the reliable selection is marked sent only after the
 // datagram went out. Backpressure (C18): skip when the send queue backs up, then drop to 30 Hz, then 20 Hz; step back up
-// after 5 s clean.
+// after 5 s clean. Teammate vitals (protocol v6) go only to the recipient's own team: while the recipient hasn't acked a
+// snapshot carrying the current values (every sent snapshot from the change on carries them), and as a keyframe.
 
 export const SNAPSHOT_DIVISORS = [1, 2, 3] as const;
 const DEGRADE_HOLD_MS = 1000;
@@ -56,14 +68,21 @@ const WT_QUEUED_BYTES_LIMIT = 16 * 1024;
 const NON_RELIABLE_RESERVE_BYTES = 420;
 /** Send-time ring for RTT samples (matches the baseline ring). */
 const SENT_RING = 128;
+/** Unchanged teammate vitals are re-sent after this many sent snapshots without them (≈1 s at 60 Hz). */
+export const TEAMMATE_KEYFRAME_SNAPSHOTS = 60;
 
 /** What the builder needs from a player; the match owns the rest. */
 export interface ReplicatedPlayer {
   readonly slot: number;
+  /** Teammates (same id) receive this player's vitals group; enemies never do. */
+  readonly teamId: number;
   readonly feet: Readonly<Vec3>;
   readonly state: PlayerState;
   readonly vitals: Vitals;
   readonly armor: ArmorLoadout;
+  /** Consumable counts and the use in progress (owner items group). */
+  readonly inventory: InventoryState;
+  readonly use: ItemUseState;
   readonly life: LifeState;
   readonly yawQ: number;
   readonly pitchQ: number;
@@ -81,9 +100,11 @@ interface MutableSnapshotView extends CappableSnapshot {
   readonly entities: EntityState[];
   readonly weapon: MutableOwnerWeaponBlock;
   readonly vitals: Mutable<OwnerVitalsBlock>;
+  readonly items: MutableOwnerItemsBlock;
   readonly shots: ShotEvent[];
   readonly hits: PlayerHitEvent[];
   reliable: readonly ReliableEvent[];
+  readonly teammates: TeammateVitals[];
 }
 
 export class ClientReplication {
@@ -96,15 +117,26 @@ export class ClientReplication {
     entities: [],
     weapon: createOwnerWeaponBlock(),
     vitals: createOwnerVitalsBlock(),
+    items: createOwnerItemsBlock(),
     shots: [],
     hits: [],
     reliable: [],
+    teammates: [],
   };
   readonly cap: SnapshotCapResult = createSnapshotCapResult();
   /** Pools behind `snapshot.shots` (grows to the busiest snapshot, then stays). */
   private readonly shotPool: Mutable<ShotEvent>[] = [];
   private readonly sentTicks = new Float64Array(SENT_RING).fill(-1);
   private readonly sentMs = new Float64Array(SENT_RING);
+  /** This tick's teammate vitals (first `teammateCount`), and the values the group last changed to. */
+  readonly teammatePool: Mutable<TeammateVitals>[] = [];
+  private readonly teammatesKnown: Mutable<TeammateVitals>[] = [];
+  /** −1 = nothing yet (the next group is new). */
+  private teammatesKnownCount = -1;
+  /** First tick whose snapshot carried the current teammate values: an ack at or after it means the client has them. */
+  private teammatesSince = 0;
+  /** Sent snapshots left before an unchanged group is sent again as a keyframe. */
+  teammateKeyframeIn = 0;
   /** `clientTimeMs` of the newest input packet (by newest tick) and when it arrived; −1 before any. */
   echoTimeMs = -1;
   echoTick = -1;
@@ -148,8 +180,33 @@ export class ClientReplication {
     if (this.events.push(event) < 0) this.reliableOverflows++;
   }
 
+  constructor() {
+    for (let i = 0; i < MAX_TEAMMATES; i++) {
+      this.teammatePool.push(createTeammateVitals());
+      this.teammatesKnown.push(createTeammateVitals());
+    }
+  }
+
+  /**
+   * Whether this tick's snapshot carries the first `count` pool entries: always after they changed until an acked
+   * snapshot carried them, on a full snapshot, and as a keyframe.
+   */
+  teammatesDue(tick: number, count: number, fullSnapshot: boolean): boolean {
+    const known = this.teammatesKnown;
+    let changed = count !== this.teammatesKnownCount;
+    for (let i = 0; !changed && i < count; i++) changed = !teammateVitalsEqual(this.teammatePool[i]!, known[i]!);
+    if (changed) {
+      for (let i = 0; i < count; i++) copyTeammateVitals(this.teammatePool[i]!, known[i]!);
+      this.teammatesKnownCount = count;
+      this.teammatesSince = tick;
+    }
+    return count > 0 && (fullSnapshot || this.baselines.ackedTick < this.teammatesSince || this.teammateKeyframeIn <= 0);
+  }
+
   /** New connection or Resync: next snapshot is full, rate back to 60 Hz, reliable queue restarts at seq 0. */
   reset(currentTick = -1): void {
+    this.teammatesKnownCount = -1;
+    this.teammateKeyframeIn = 0;
     this.baselines.reset();
     this.events.reset();
     this.sentTicks.fill(-1);
@@ -239,6 +296,7 @@ export class SnapshotBuilder {
     writeOwnerMove(p.feet, p.state.move, snap.owner);
     writeOwnerWeapon(p.state.weapon, snap.weapon);
     writeOwnerVitals(p.vitals, p.armor, snap.vitals);
+    writeOwnerItems(p.use, p.inventory, snap.items);
     const entities = snap.entities;
     entities.length = 0;
     for (let i = 0; i < players.length; i++) {
@@ -246,6 +304,7 @@ export class SnapshotBuilder {
       if (other.slot !== p.slot && this.remoteValid[other.slot] === 1) entities.push(this.remote[other.slot]!);
     }
     this.collectEvents(p, tick, events);
+    this.collectTeammates(p, tick, players, baseline === null);
     h.sections = 0;
 
     const cap = session.maxDatagramSize > 0 ? Math.min(SNAPSHOT_MAX_BYTES, session.maxDatagramSize) : SNAPSHOT_MAX_BYTES;
@@ -267,6 +326,7 @@ export class SnapshotBuilder {
     net.baselines.record(snap);
     net.recordSent(tick, nowMs);
     net.lastEventTick = tick;
+    net.teammateKeyframeIn = snap.teammates.length > 0 ? TEAMMATE_KEYFRAME_SNAPSHOTS : net.teammateKeyframeIn - 1;
     const bytes = w.byteLength;
     net.lastSnapshotBytes = bytes;
     net.bytesOut += bytes;
@@ -308,6 +368,21 @@ export class SnapshotBuilder {
       if (e.tick < oldest || e.tick > tick || e.event.victim === p.slot) continue;
       snap.hits.push(e.event);
     }
+  }
+
+  /** The recipient's teammates (same team, never enemies), sorted by slot, when due (see `teammatesDue`). */
+  private collectTeammates(p: ReplicatedPlayer, tick: number, players: readonly ReplicatedPlayer[], fullSnapshot: boolean): void {
+    const net = p.net;
+    const list = net.snapshot.teammates;
+    list.length = 0;
+    let count = 0;
+    for (let i = 0; i < players.length && count < MAX_TEAMMATES; i++) {
+      const other = players[i]!;
+      if (other.slot === p.slot || other.teamId !== p.teamId) continue;
+      writeTeammateVitals(other.slot, other.vitals, p.slot, net.teammatePool[count++]!);
+    }
+    if (!net.teammatesDue(tick, count, fullSnapshot)) return;
+    for (let i = 0; i < count; i++) list.push(net.teammatePool[i]!);
   }
 
   private skip(net: ClientReplication, nowMs: number): void {

@@ -9,6 +9,8 @@ import type { WeaponPresentation } from "../fx/WeaponPresentation";
 import type { NetGameConfig, NetMatchExit } from "../game/launch";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
+import type { Mutable } from "@twobullets/protocol/messages/snapshot";
+import type { PlayerInput } from "@twobullets/shared/input";
 import type { Hud } from "../ui/Hud";
 import { t } from "../i18n";
 import { NetDebugHud } from "../ui/NetDebugHud";
@@ -73,6 +75,7 @@ export class NetGame {
   private overlay: HitboxOverlay | null = null;
   private matchValue: NetMatch | null = null;
   private clientValue: NetClient | null = null;
+  private itemsTick = -1;
   private connecting = false;
 
   constructor(config: NetGameConfig) {
@@ -92,6 +95,21 @@ export class NetGame {
     return this.combatEvents;
   }
 
+  /**
+   * `equipment` for UI created before `attach` (the inventory screen): reads and calls go to the net equipment view
+   * (server consumable counts, `useItem` as a server use) once it exists, to `equipment` until then.
+   */
+  equipmentFor<T extends object>(equipment: T): T {
+    const current = (): object => this.presenter?.equipmentView.view ?? equipment;
+    return new Proxy(equipment, {
+      get: (_target, property) => {
+        const value: unknown = Reflect.get(current(), property);
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(equipment) : value;
+      },
+      set: (_target, property, value) => Reflect.set(equipment, property, value),
+    });
+  }
+
   /** Battle royale presentation (phase, zone, roster names, death and results). */
   get match(): NetMatch | null {
     return this.matchValue;
@@ -105,13 +123,21 @@ export class NetGame {
     this.movement.weaponSource = () => combat.weaponState;
     const local = (this.local = new LocalPlayerNet(new NetPlayerBody(player, combat)));
 
-    // Tick input: combat bits cleared while downed or dead (the server steps them cleared), and while local equipment has
-    // the hands (throwable out, item in use), so the click that throws never also fires; interact held for revives.
+    // Tick input: combat bits cleared while downed or dead (the server steps them cleared), and while the hands are busy
+    // (local throwable out, or a heal/boost in use on the server), so the click that throws never also fires; interact
+    // held for revives. Fire/reload pressed or a throwable taken out during an item use cancel it on the server.
     const movement = this.movement;
     const equipment = deps.equipment;
+    let presenter: NetCombatPresenter | null = null;
     player.setCombatLink(
       netCombatLink(combat, {
-        handsBusy: () => netHandsBusy(equipment.throwState.phase, equipment.use !== null),
+        handsBusy: () => {
+          const items = presenter?.equipmentView;
+          const throwPhase = equipment.throwState.phase;
+          if (throwPhase !== "idle" && items?.usingItem) items.interrupt();
+          return netHandsBusy(throwPhase, items?.usingItem ?? false);
+        },
+        handsInterrupted: () => presenter?.equipmentView.interrupt(),
         interactHeld: () => input.isLocked && input.isActionDown("interact"),
         life: () => movement.life,
       }),
@@ -129,7 +155,6 @@ export class NetGame {
     );
 
     const layer = deps.hud.mountMatchLayer();
-    let presenter: NetCombatPresenter | null = null;
     const remotes = (this.avatars = new RemotePlayers(scene, this.roster, {
       soldiers: this.config.avatar === "soldier" ? deps.soldiers : null,
       onAvatarCreated: (slot, soldier) => presenter?.registerAvatar(slot, soldier),
@@ -147,6 +172,10 @@ export class NetGame {
       equipment: deps.equipment,
     });
     deps.hud.attachEquipment(presenter.equipmentView.view);
+    // Hands (use animation, gun put away) and use sounds follow the server's item use rather than the local equipment's
+    // attempt; throwables still pass through to the local equipment (throw sounds, frag-out callout).
+    presentation.attachEquipment(presenter.equipmentView.view);
+    presentation.audio.attachEquipment(presenter.equipmentView.view);
     this.combatEvents = new NetCombat(presenter);
     this.matchValue = new NetMatch({
       scene,
@@ -162,8 +191,12 @@ export class NetGame {
       exit: (exit) => this.exitMatch(exit),
     });
     this.predictor = new CosmeticHitPredictor(this.hitboxes, presenter);
+    const items = presenter.equipmentView;
     player.onTick.add((tick: PlayerTick) => {
       if (movement.life === LifeCode.alive) this.predictor?.tick(combat.projectiles, tick.dt);
+      // Item use/cancel rides this tick's input (the ring's entry, so redundant resends carry it).
+      const action = items.takeAction();
+      if (action !== null) (tick.playerInput as Mutable<PlayerInput>).action = action;
       this.clientValue?.onPredictedTick(tick.playerInput);
     });
     if (this.config.debugHitboxes) this.overlay = new HitboxOverlay(scene, this.hitboxes, remotes);
@@ -180,6 +213,7 @@ export class NetGame {
     this.connecting = true;
     this.clientValue?.disconnect();
     this.clientValue = null;
+    this.itemsTick = -1;
     this.clock.stop();
     this.roster.clear();
     this.combatEvents?.clear();
@@ -257,6 +291,10 @@ export class NetGame {
     this.avatars?.update(dt);
     const client = this.clientValue;
     if (client) this.combatEvents?.update(client.renderTick);
+    if (client && client.ownerItems !== null && client.ownerItemsTick !== this.itemsTick) {
+      this.itemsTick = client.ownerItemsTick;
+      this.presenter?.equipmentView.setItems(client.ownerItems);
+    }
     this.presenter?.update(dt);
     this.matchValue?.update(dt, client, this.combatEvents);
     this.overlay?.update();

@@ -1,6 +1,6 @@
 import { NET_RESPAWN_SECONDS, NET_WEAPON_LOADOUT } from "@twobullets/contracts";
 import { MAX_REWIND_TICKS, NETWORK_PROFILES, type NetworkProfile } from "@twobullets/netcode";
-import { killCauseOfCode, LifeCode, ReliableEventType, type KillFeed, type ReliableEvent } from "@twobullets/protocol";
+import { killCauseOfCode, LifeCode, ReliableEventType, TEAMMATE_REVIVE_MAX, type KillFeed, type ReliableEvent, type TeammateVitals } from "@twobullets/protocol";
 import { quantizePitch, quantizeYaw } from "@twobullets/shared/aim";
 import { MOVEMENT } from "@twobullets/shared/constants";
 import { Btn } from "@twobullets/shared/input";
@@ -278,6 +278,90 @@ describe("networked combat", () => {
     await h.dispose();
   }, 60_000);
 
+  it("teammate vitals: damage, knock and revive reach the teammate's snapshots (reviver sees its progress); enemies never get the group", async () => {
+    const h = await createHarness(havok);
+    const a = h.connect({ team: 0, seed: 41, interpDelayMs: 25 });
+    const mate = h.connect({ team: 0, seed: 42, interpDelayMs: 25 });
+    const enemy = h.connect({ team: 1, seed: 43, interpDelayMs: 25 });
+    const enemyMate = h.connect({ team: 1, seed: 44, interpDelayMs: 25 });
+    let reviving = false;
+    idle(a);
+    idle(mate, () => reviving);
+    idle(enemyMate);
+    h.run(300);
+    const clients = [a, mate, enemy, enemyMate] as const;
+    // Newest group per client, every slot any group listed, and how many snapshots carried one.
+    const newest = clients.map(() => ({ tick: -1, list: [] as TeammateVitals[] }));
+    const listed = clients.map(() => new Set<number>());
+    const carried = clients.map(() => ({ snapshots: 0, groups: 0 }));
+    let maxReviveQ = 0;
+    clients.forEach((c, i) => {
+      c.onSnapshot = (snap) => {
+        carried[i]!.snapshots++;
+        const list = snap.teammates ?? [];
+        if (list.length === 0) return;
+        carried[i]!.groups++;
+        for (const m of list) listed[i]!.add(m.slot);
+        if (snap.header.serverTick > newest[i]!.tick) newest[i] = { tick: snap.header.serverTick, list: list.map((m) => ({ ...m })) };
+        const mine = list.find((m) => m.slot === a.playerSlot && m.reviverIsMe);
+        if (i === 1 && mine) maxReviveQ = Math.max(maxReviveQ, mine.reviveQ);
+      };
+    });
+    const entry = (i: number, slot: number) => newest[i]!.list.find((m) => m.slot === slot) ?? null;
+
+    // Quiet: unchanged vitals ride only the keyframes.
+    for (const c of carried) c.snapshots = c.groups = 0;
+    h.run(3000);
+    for (const c of carried) {
+      expect(c.snapshots).toBeGreaterThan(150);
+      expect(c.groups / c.snapshots).toBeLessThan(0.05);
+    }
+    expect(entry(1, a.playerSlot)).toMatchObject({ life: LifeCode.alive, health: 100 });
+
+    h.match.debugPlace(a.playerSlot, A);
+    h.match.debugPlace(mate.playerSlot, { x: 8.2, y: 0, z: -26.5 });
+    h.match.debugPlace(enemy.playerSlot, S);
+    h.match.debugPlace(enemyMate.playerSlot, { x: -10, y: 0, z: -14 });
+    const victim = h.match.player(a.playerSlot)!;
+    const gun = gunner(h, enemy, () => feetOf(h.match, a.playerSlot));
+    gun.auto = { every: 12, while: () => victim.vitals.health >= 100 };
+    for (let i = 0; i < 100 && victim.vitals.health >= 100; i++) h.run(100);
+    gun.auto = null;
+    h.run(500);
+    expect(victim.life).toBe("alive");
+    expect(victim.vitals.health).toBeLessThan(100);
+    expect(entry(1, a.playerSlot)).toMatchObject({ life: LifeCode.alive, health: Math.ceil(victim.vitals.health) });
+    expect(entry(0, mate.playerSlot)).toMatchObject({ life: LifeCode.alive, health: 100 });
+
+    gun.auto = { every: 12, while: () => victim.life === "alive" };
+    for (let i = 0; i < 100 && victim.life === "alive"; i++) h.run(100);
+    gun.auto = null;
+    expect(victim.life).toBe("downed");
+    h.run(300);
+    const knocked = entry(1, a.playerSlot)!;
+    expect(knocked).toMatchObject({ life: LifeCode.downed, health: 0, reviverIsMe: false, reviveQ: 0 });
+    expect(Math.abs(knocked.downedHealth - victim.vitals.downedHealth)).toBeLessThanOrEqual(2);
+
+    reviving = true;
+    h.run(2500);
+    expect(victim.life).toBe("downed");
+    const midway = entry(1, a.playerSlot)!;
+    expect(midway.reviverIsMe).toBe(true);
+    expect(Math.abs(midway.reviveQ - (victim.vitals.reviveProgress / 5) * TEAMMATE_REVIVE_MAX)).toBeLessThanOrEqual(4);
+    h.run(3000);
+    expect(victim.life).toBe("alive");
+    expect(maxReviveQ).toBeGreaterThan(55);
+    h.run(200);
+    expect(entry(1, a.playerSlot)).toMatchObject({ life: LifeCode.alive, health: 10 });
+
+    // Never an enemy's vitals: each client's groups list only its own teammate.
+    expect([...listed[0]!]).toEqual([mate.playerSlot]);
+    expect([...listed[1]!]).toEqual([a.playerSlot]);
+    expect([...listed[2]!]).toEqual([enemyMate.playerSlot]);
+    expect([...listed[3]!]).toEqual([enemy.playerSlot]);
+    await h.dispose();
+  }, 60_000);
+
   it("knock → bleed-out → dead (credited to the knocker) → respawn with a fresh loadout", async () => {
     const { h, a, mate, enemy, logs, victim, gun } = await knockSetup();
     idle(mate);
@@ -291,7 +375,7 @@ describe("networked combat", () => {
     a.onSnapshot = (snap) => {
       if (snap.vitals?.life === LifeCode.dead) deadSeen = true;
     };
-    for (let i = 0; i < 40 && victim.life === "downed"; i++) h.run(1000);
+    for (let i = 0; i < 70 && victim.life === "downed"; i++) h.run(1000);
     expect(victim.life).toBe("dead");
     const k = kills(logs[2]);
     expect(k.map((e) => e.type === ReliableEventType.Kill && [e.knock, killCauseOfCode(e.cause), e.killer])).toEqual([

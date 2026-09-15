@@ -5,7 +5,7 @@ import type { Roster } from "@twobullets/protocol/messages/roster";
 import { RemoteFlags } from "@twobullets/protocol/quantize";
 import type { MatchEvent } from "@twobullets/shared/match/types";
 import { describe, expect, it } from "vitest";
-import { NetMatchView, type NetMatchSource, type NetOwnState, type NetPoseSource } from "../../src/net/NetMatchView";
+import { createNetTeammateVitals, NetMatchView, type NetMatchSource, type NetOwnState, type NetPoseSource, type NetTeammateVitals } from "../../src/net/NetMatchView";
 
 // NetMatchView turns the BR control messages into the offline MatchView the match HUD, map and screens read.
 
@@ -48,6 +48,7 @@ class Source implements NetMatchSource {
   readonly zonePhases: ZonePhaseMessage[] = [];
   matchEnd: MatchEnd | null = null;
   matchRoster: Roster | null = null;
+  teammateVitals: NetTeammateVitals | null = null;
 }
 
 class Poses implements NetPoseSource {
@@ -240,5 +241,54 @@ describe("NetMatchView", () => {
     expect(events.slice(-2)).toEqual([knock, kill]);
     view.update(30, poses, own(12, -7, "dead"));
     expect(view.state.actors[0]).toMatchObject({ life: "dead", feet: { x: 12, y: 0, z: -7 }, deathTick: 20 });
+  });
+
+  it("teammate vitals: real health, downed pool and revive progress on the teammate; enemies stay full; the local revive", () => {
+    const { source, view, poses } = setup();
+    const mates = createNetTeammateVitals();
+    source.teammateVitals = mates;
+    view.sync(source);
+    poses.set(1, 3, 4, LifeCode.alive);
+    poses.set(2, 9, 9, LifeCode.alive);
+    view.update(100, poses, own());
+    // No group yet: pose flags, full bar.
+    expect(view.state.actors[1]).toMatchObject({ life: "alive", health: 100 });
+
+    mates.tick[1] = 95;
+    mates.life[1] = LifeCode.alive;
+    mates.health[1] = 43;
+    view.update(101, poses, own());
+    expect(view.state.actors[1]).toMatchObject({ life: "alive", health: 43, downedHealth: 0, reviverSlot: -1, feet: { x: 3, z: 4 } });
+    expect(view.reviveTargetSlot).toBe(-1);
+
+    // Knocked (newer than the pose flags), someone else reviving.
+    mates.life[1] = LifeCode.downed;
+    mates.health[1] = 0;
+    mates.downedHealth[1] = 71;
+    mates.reviveQ[1] = 21;
+    view.update(102, poses, own());
+    const knocked = view.state.actors[1]!;
+    expect(knocked).toMatchObject({ life: "downed", health: 0, downedHealth: 71, reviverSlot: 1 });
+    expect(knocked.reviveProgress).toBeCloseTo((21 / 63) * 5, 5);
+    expect(view.reviveTargetSlot).toBe(-1);
+
+    // The local player is the reviver.
+    mates.reviverIsMe[1] = 1;
+    mates.reviveQ[1] = 63;
+    view.update(103, poses, own());
+    expect(view.state.actors[1]!.reviverSlot).toBe(0);
+    expect(view.reviveTargetSlot).toBe(1);
+    expect(view.reviveProgress).toBeCloseTo(1, 5);
+
+    // A slot that isn't on our team never takes group values (and enemies' health isn't sent at all).
+    mates.tick[2] = 95;
+    mates.health[2] = 12;
+    view.update(104, poses, own());
+    expect(view.state.actors[2]).toMatchObject({ life: "alive", health: 100 });
+
+    // A kill feed line newer than the group keeps the teammate dead.
+    view.onKillFeed({ type: "kill", tick: 120, killer: 2, victim: 1, cause: "pistol", headshot: false, knockedBy: 2, teamKill: false });
+    view.update(121, poses, own());
+    expect(view.state.actors[1]).toMatchObject({ life: "dead", health: 0, deathTick: 120 });
   });
 });

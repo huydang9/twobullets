@@ -1,5 +1,8 @@
 import {
   actorCode,
+  CONSUMABLE_COUNT,
+  CONSUMABLE_IDS_BY_CODE,
+  consumableCode,
   damageKindCode,
   hitZoneCode,
   killCauseCode,
@@ -26,12 +29,18 @@ import {
 import {
   EntityPresence,
   MAX_WEAPON_SLOTS,
+  CONSUMABLE_COUNT_BITS,
+  USE_TICKS_BITS,
+  TEAMMATE_HEALTH_BITS,
+  TEAMMATE_REVIVE_MAX,
   type EntityState,
   type Mutable,
+  type MutableOwnerItemsBlock,
   type MutableOwnerWeaponBlock,
   type OwnerMoveBlock,
   type OwnerVitalsBlock,
   type OwnerWeaponBlock,
+  type TeammateVitals,
 } from "@twobullets/protocol/messages/snapshot";
 import {
   BLOOM_BITS,
@@ -60,7 +69,9 @@ import {
 } from "@twobullets/protocol/quantize";
 import { dequantizePitch, dequantizeYaw } from "@twobullets/shared/aim";
 import type { ArmorLoadout, DamageKind } from "@twobullets/shared/equipment/armor";
-import type { LifeState, Vitals } from "@twobullets/shared/equipment/vitals";
+import { countItem, type InventoryState } from "@twobullets/shared/equipment/inventory";
+import type { ItemUseState } from "@twobullets/shared/equipment/itemUse";
+import { VITALS, type LifeState, type Vitals } from "@twobullets/shared/equipment/vitals";
 import type { MoveState, Stance, Vec3 } from "@twobullets/shared/movement/types";
 import type { HitZone, WeaponId, WeaponSlotState, WeaponState } from "@twobullets/shared/weapons/types";
 
@@ -237,6 +248,40 @@ export function writeOwnerVitals(vitals: Vitals, armor: ArmorLoadout | null, out
   out.helmetDurability = helmet === null ? 0 : quantizePointsCeil(helmet.durability, 8);
   out.vestLevel = vest?.level ?? 0;
   out.vestDurability = vest === null ? 0 : quantizePointsCeil(vest.durability, 8);
+}
+
+/** Owner items group (v6) from the server's item use state and inventory: use ticks and counts saturate at their widths. */
+export function writeOwnerItems(use: ItemUseState, inventory: InventoryState, out: MutableOwnerItemsBlock): void {
+  out.useItem = consumableCode(use.itemId);
+  out.useTicks = out.useItem !== 0 ? quantizeTicks(use.elapsed, USE_TICKS_BITS) : 0;
+  const max = (1 << CONSUMABLE_COUNT_BITS) - 1;
+  for (let i = 0; i < CONSUMABLE_COUNT; i++) {
+    const count = countItem(inventory, CONSUMABLE_IDS_BY_CODE[i + 1]!);
+    out.counts[i] = count > max ? max : count;
+  }
+}
+
+// ---- Teammate vitals (protocol v6) -------------------------------------------------------------------------------
+
+/**
+ * One entry of a recipient's teammate vitals group: whole HP rounded up (a standing teammate never shows an empty bar),
+ * and while downed the downed pool, revive progress (rounded up: a started revive is ≥ 1) and whether `recipientSlot`
+ * is the reviver.
+ */
+export function writeTeammateVitals(slot: number, vitals: Vitals, recipientSlot: number, out: Mutable<TeammateVitals>): void {
+  out.slot = slot;
+  out.life = lifeCode(vitals.life);
+  out.health = vitals.life === "alive" ? quantizePointsCeil(vitals.health, TEAMMATE_HEALTH_BITS) : 0;
+  const downed = vitals.life === "downed";
+  out.downedHealth = downed ? quantizePointsCeil(vitals.downedHealth, TEAMMATE_HEALTH_BITS) : 0;
+  const revive = downed ? Math.ceil((vitals.reviveProgress / VITALS.reviveSeconds) * TEAMMATE_REVIVE_MAX - 1e-9) : 0;
+  out.reviveQ = revive <= 0 ? 0 : revive > TEAMMATE_REVIVE_MAX ? TEAMMATE_REVIVE_MAX : revive;
+  out.reviverIsMe = downed && vitals.reviverId >= 0 && vitals.reviverId === recipientSlot;
+}
+
+/** Client: seconds of revive progress from `TeammateVitals.reviveQ` (within 1/63 of the revive time, never above it). */
+export function teammateReviveSeconds(reviveQ: number): number {
+  return (reviveQ / TEAMMATE_REVIVE_MAX) * VITALS.reviveSeconds;
 }
 
 // ---- Events -----------------------------------------------------------------------------------------------------

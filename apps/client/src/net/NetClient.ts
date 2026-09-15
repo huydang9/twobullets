@@ -5,7 +5,7 @@ import type { Clock } from "@twobullets/netcode/testing/clock";
 import { TimeSync } from "@twobullets/netcode/timeSync";
 import type { Session } from "@twobullets/netcode/transport/Session";
 import { createBitReader, createBitWriter } from "@twobullets/protocol/bits";
-import { LifeCode } from "@twobullets/protocol/codes";
+import { LifeCode, MAX_PLAYER_SLOTS } from "@twobullets/protocol/codes";
 import {
   decodeDisconnect,
   decodeKillFeed,
@@ -24,7 +24,7 @@ import { encodeInputPacket, MAX_INPUTS_PER_PACKET, type InputPacket } from "@two
 import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages/ping";
 import { decodeRoster, type Roster } from "@twobullets/protocol/messages/roster";
 import type { ReliableEvent } from "@twobullets/protocol/messages/events";
-import type { Mutable, Snapshot } from "@twobullets/protocol/messages/snapshot";
+import { copyOwnerItems, createOwnerItemsBlock, type Mutable, type OwnerItemsBlock, type Snapshot } from "@twobullets/protocol/messages/snapshot";
 import { Btn, type PlayerInput } from "@twobullets/shared/input";
 import { t } from "../i18n";
 import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, helloFor, WELCOME_TIMEOUT_MS } from "./handshake";
@@ -32,6 +32,7 @@ import type { LocalPlayerNet } from "./LocalPlayerNet";
 import type { NetEventSink } from "./NetCombat";
 import { RESYNC_RESETS_RELIABLE_EVENTS, viewOffset8 } from "./netCombatRules";
 import type { NetClock } from "./NetClock";
+import { createNetTeammateVitals, type NetTeammateVitals } from "./NetMatchView";
 import type { RemoteRoster } from "./RemoteRoster";
 
 export type NetConnectionState = "handshaking" | "syncing" | "playing" | "disconnected";
@@ -153,6 +154,14 @@ export class NetClient {
   matchEnd: MatchEnd | null = null;
   /** Newest Roster (who holds each slot; bots carry `botIndex` for a localized name), null until the first. */
   matchRoster: Roster | null = null;
+  /** Newest teammate vitals group (protocol v6: teammates only) by slot. */
+  readonly teammateVitals: NetTeammateVitals = createNetTeammateVitals();
+  private teammateVitalsTick = -1;
+  /** Newest owner items group (protocol v6: consumable in use and counts), null until the first. */
+  ownerItems: OwnerItemsBlock | null = null;
+  /** Server tick of `ownerItems` (−1 = none): changes whenever a newer group was stored. */
+  ownerItemsTick = -1;
+  private readonly ownerItemsStore = createOwnerItemsBlock();
   private readonly session: Session;
   private readonly clock: Clock;
   private readonly netClock: NetClock;
@@ -451,7 +460,10 @@ export class NetClient {
       this.stats.decodeFailures++;
       // The baseline is gone, but events precede the state: don't lose shots, hits and reliable events with it.
       const eventsOnly = this.store.eventsOnly;
-      if (eventsOnly !== null) this.deliverEvents(eventsOnly, false);
+      if (eventsOnly !== null) {
+        this.deliverEvents(eventsOnly, false);
+        this.applyTeammateVitals(eventsOnly);
+      }
       if (++this.decodeFailStreak >= DECODE_FAILURES_FOR_RESYNC) this.requestResync(recvMs);
       return;
     }
@@ -467,6 +479,7 @@ export class NetClient {
     if (playing && !stalled && h.serverTick >= this.depthFromServerTick) this.netClock.dilation.onBufferDepth(h.inputBufferDepthQ / 4, recvMs);
     const events = this.events;
     this.deliverEvents(snap, true);
+    this.applyTeammateVitals(snap);
     this.roster.onSnapshot(h.serverTick, snap.entities);
     if (snap.owner === null) return;
     if (h.serverTick > this.newestOwnerTick) this.newestOwnerTick = h.serverTick;
@@ -479,6 +492,12 @@ export class NetClient {
         this.ownerLife = life;
         events?.onOwnerVitals(h.serverTick, vitals);
       }
+    }
+    const items = snap.items ?? null;
+    if (items !== null && h.serverTick > this.ownerItemsTick) {
+      copyOwnerItems(items, this.ownerItemsStore);
+      this.ownerItems = this.ownerItemsStore;
+      this.ownerItemsTick = h.serverTick;
     }
     if (!playing) return;
     if (this.movement !== null) this.movement.life = life;
@@ -520,6 +539,27 @@ export class NetClient {
       this.stats.shotsReceived += snap.shots?.length ?? 0;
       this.stats.hitsReceived += snap.hits?.length ?? 0;
       events.onSnapshotEvents(snap, entitiesValid);
+    }
+  }
+
+  /** Absolute values, decoded before the baseline: the newest group wins, whatever order snapshots arrived in. */
+  private applyTeammateVitals(snap: Snapshot): void {
+    const list = snap.teammates;
+    const tick = snap.header.serverTick;
+    if (list === undefined || list.length === 0 || tick <= this.teammateVitalsTick) return;
+    this.teammateVitalsTick = tick;
+    const store = this.teammateVitals;
+    // The group lists every teammate: a slot it no longer lists isn't one.
+    store.tick.fill(-1);
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i]!;
+      if (m.slot >= MAX_PLAYER_SLOTS) continue;
+      store.tick[m.slot] = tick;
+      store.life[m.slot] = m.life;
+      store.health[m.slot] = m.health;
+      store.downedHealth[m.slot] = m.downedHealth;
+      store.reviveQ[m.slot] = m.reviveQ;
+      store.reviverIsMe[m.slot] = m.reviverIsMe ? 1 : 0;
     }
   }
 

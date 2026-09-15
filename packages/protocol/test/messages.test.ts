@@ -25,12 +25,14 @@ import {
   decodeSnapshot,
   decodeSnapshotInto,
   encodeSnapshot,
+  MAX_TEAMMATES,
+  SnapshotSection,
   type MutableSnapshot,
   type Snapshot,
 } from "../src/messages/snapshot";
 import { audibleXZFromMm, audibleXZToMm, audibleYFromMm, audibleYToMm } from "../src/quantize";
 import { NO_TICK } from "../src/ticks";
-import { randomInput, SnapshotWorld } from "./fixtures";
+import { randomInput, randomItemsBlock, randomTeammates, SnapshotWorld } from "./fixtures";
 import { createTestRng, randInt } from "./rng";
 
 function wire(input: PlayerInput): PlayerInput {
@@ -140,6 +142,93 @@ describe("Snapshot", () => {
       clientStore.set(world.tick, stored);
     }
     expect(deltas).toBeGreaterThan(2000);
+  });
+
+  it("teammate vitals roundtrip in full and delta snapshots, and decode even when the baseline is gone", () => {
+    const rng = createTestRng(31);
+    const world = new SnapshotWorld(rng);
+    const w = createBitWriter(1500);
+    const scratch = createSnapshotBuffer();
+    let prev: Snapshot | null = null;
+    for (let t = 0; t < 3000; t++) {
+      world.step();
+      const teammates = t % 4 === 3 ? [] : randomTeammates(rng);
+      const snap: Snapshot = { ...world.snapshot(0, t % 2 === 0), teammates };
+      w.reset();
+      encodeSnapshot(w, snap, prev);
+      expect(decodeSnapshotInto(createBitReader(w.bytes()), world.tick, () => prev, scratch)).toBe(true);
+      expect((scratch.header.sections & SnapshotSection.teammates) !== 0).toBe(teammates.length > 0);
+      expect(scratch.teammates).toEqual(teammates);
+      expectSnapshotEqual(scratch, snap);
+      const copy = createSnapshotBuffer();
+      copySnapshot(scratch, copy);
+      expect(copy.teammates).toEqual(teammates);
+      // Baseline unavailable: the body is dropped, the teammate section (before it) is still valid.
+      if (prev !== null) {
+        expect(decodeSnapshotInto(createBitReader(w.bytes()), world.tick, () => null, scratch)).toBe(false);
+        expect(scratch.eventsValid).toBe(true);
+        expect(scratch.teammates).toEqual(teammates);
+      }
+      prev = snap;
+    }
+  });
+
+  it("teammate vitals: downed-only fields cost bits only while downed; more than MAX_TEAMMATES throws; bad lists are rejected", () => {
+    const w = createBitWriter(256);
+    const header = { serverTick: 500, baselineTick: null, lastProcessedInputTick: NO_TICK, clientTimeEcho: 0, serverHoldMs: 0, inputBufferDepthQ: 0, sections: 0 };
+    const alive = { slot: 3, life: 0, health: 57, downedHealth: 0, reviveQ: 0, reviverIsMe: false };
+    const downed = { slot: 4, life: 1, health: 0, downedHealth: 88, reviveQ: 40, reviverIsMe: true };
+    const bits = (teammates: Snapshot["teammates"]) => {
+      w.reset();
+      encodeSnapshot(w, { header, owner: null, entities: [], teammates }, null);
+      return w.bitLength;
+    };
+    const none = bits([]);
+    expect(bits([alive]) - none).toBe(2 + 14);
+    expect(bits([alive, downed]) - none).toBe(2 + 14 + 28);
+    expect(() => bits([alive, downed, { ...alive, slot: 5 }, { ...alive, slot: 6 }])).toThrow(RangeError);
+    expect(MAX_TEAMMATES).toBe(3);
+    // Duplicate slots decode as malformed.
+    w.reset();
+    encodeSnapshot(w, { header, owner: null, entities: [], teammates: [alive, alive] }, null);
+    expect(decodeSnapshot(createBitReader(w.bytes()), 500, () => null)).toBeNull();
+  });
+
+  it("owner items group roundtrips full and against baselines; unchanged groups cost 2 bits; bad codes are rejected", () => {
+    const rng = createTestRng(33);
+    const world = new SnapshotWorld(rng);
+    const w = createBitWriter(1500);
+    const scratch = createSnapshotBuffer();
+    let prev: Snapshot | null = null;
+    for (let t = 0; t < 2000; t++) {
+      world.step();
+      const items = t % 7 === 0 || prev?.items == null ? randomItemsBlock(rng) : rng() < 0.5 ? prev.items : { ...prev.items, useTicks: prev.items.useItem ? (prev.items.useTicks + 1) & 1023 : 0 };
+      const snap: Snapshot = { ...world.snapshot(0), items };
+      w.reset();
+      encodeSnapshot(w, snap, prev);
+      expect(decodeSnapshotInto(createBitReader(w.bytes()), world.tick, () => prev, scratch)).toBe(true);
+      expect(scratch.items).toEqual(items);
+      const stored = createSnapshotBuffer();
+      copySnapshot(scratch, stored);
+      expect(stored.items).toEqual(items);
+      prev = stored;
+    }
+    const header = { serverTick: 900, baselineTick: null, lastProcessedInputTick: NO_TICK, clientTimeEcho: 0, serverHoldMs: 0, inputBufferDepthQ: 0, sections: 0 };
+    const owner = world.snapshot(0).owner;
+    const base: Snapshot = { header: { ...header, serverTick: 899 }, owner, entities: [], items: { useItem: 3, useTicks: 200, counts: [5, 1, 1, 2, 1] } };
+    const bits = (s: Snapshot, b: Snapshot | null) => {
+      w.reset();
+      encodeSnapshot(w, s, b);
+      return w.bitLength;
+    };
+    const without = bits({ header, owner, entities: [] }, base);
+    expect(bits({ header, owner, entities: [], items: base.items }, base) - without).toBe(2);
+    expect(bits({ header, owner, entities: [], items: { ...base.items!, useTicks: 201 } }, base) - without).toBe(2 + 13);
+    expect(bits({ header, owner, entities: [], items: base.items }, null) - bits({ header, owner, entities: [] }, null)).toBe(3 + 10 + 35);
+    // Consumable code 7 doesn't exist.
+    w.reset();
+    encodeSnapshot(w, { header, owner, entities: [], items: { useItem: 7, useTicks: 1, counts: [0, 0, 0, 0, 0] } }, null);
+    expect(decodeSnapshot(createBitReader(w.bytes()), 900, () => null)).toBeNull();
   });
 
   it("drops a delta whose baseline the client doesn't have", () => {

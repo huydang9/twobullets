@@ -1,4 +1,5 @@
 import type { DamageKind } from "@twobullets/shared/equipment/armor";
+import type { ConsumableItemId } from "@twobullets/shared/equipment/items";
 import type { LifeState } from "@twobullets/shared/equipment/vitals";
 import type { HitZone, WeaponId, WeaponPhase } from "@twobullets/shared/weapons/types";
 import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
@@ -43,6 +44,19 @@ export function weaponCode(id: WeaponId | null | undefined): number {
 }
 export function weaponIdOfCode(code: number): WeaponId | null {
   return WEAPON_IDS_BY_CODE[code] ?? null;
+}
+
+/** Owner items group (v6), 3 bits; 0 = none. Separate from the u8 `itemCode` the `use` input action carries. */
+export const CONSUMABLE_CODE_BITS = 3;
+export const CONSUMABLE_IDS_BY_CODE: readonly (ConsumableItemId | null)[] = [null, "bandage", "first_aid", "medkit", "energy_drink", "painkiller"];
+/** Consumables with a code (counts are indexed code − 1). */
+export const CONSUMABLE_COUNT = CONSUMABLE_IDS_BY_CODE.length - 1;
+
+export function consumableCode(id: ConsumableItemId | null | undefined): number {
+  return id ? Math.max(0, CONSUMABLE_IDS_BY_CODE.indexOf(id)) : 0;
+}
+export function consumableIdOfCode(code: number): ConsumableItemId | null {
+  return CONSUMABLE_IDS_BY_CODE[code] ?? null;
 }
 
 /** 2 bits. */

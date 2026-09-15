@@ -2,7 +2,17 @@ import type { PlayerInput } from "@twobullets/shared/input";
 import { MAX_PLAYER_SLOTS } from "../src/codes";
 import * as Q from "../src/quantize";
 import { ReliableEventType, type PlayerHitEvent, type ReliableEvent, type ShotEvent } from "../src/messages/events";
-import { EntityPresence, type EntityState, type OwnerMoveBlock, type OwnerVitalsBlock, type OwnerWeaponBlock, type Snapshot } from "../src/messages/snapshot";
+import {
+  EntityPresence,
+  MAX_TEAMMATES,
+  type EntityState,
+  type OwnerItemsBlock,
+  type OwnerMoveBlock,
+  type OwnerVitalsBlock,
+  type OwnerWeaponBlock,
+  type Snapshot,
+  type TeammateVitals,
+} from "../src/messages/snapshot";
 import { randInt } from "./rng";
 
 type Rng = () => number;
@@ -181,6 +191,35 @@ export function randomVitalsBlock(rng: Rng): OwnerVitalsBlock {
     vestLevel,
     vestDurability: vestLevel ? randInt(rng, 1, 150) : 0,
   };
+}
+
+export function randomItemsBlock(rng: Rng): OwnerItemsBlock {
+  const useItem = rng() < 0.5 ? 0 : randInt(rng, 1, 5);
+  return {
+    useItem,
+    useTicks: useItem !== 0 ? randInt(rng, 0, 1023) : 0,
+    counts: Array.from({ length: 5 }, () => (rng() < 0.3 ? 0 : randInt(rng, 1, 127))),
+  };
+}
+
+/** 1..MAX_TEAMMATES teammates with unique sorted slots; `downedChance` of each being knocked. */
+export function randomTeammates(rng: Rng, count = randInt(rng, 1, MAX_TEAMMATES), downedChance = 0.4): TeammateVitals[] {
+  const slots = new Set<number>();
+  while (slots.size < count) slots.add(randInt(rng, 0, MAX_PLAYER_SLOTS - 1));
+  return [...slots]
+    .sort((a, b) => a - b)
+    .map((slot) => {
+      const life = rng() < downedChance ? 1 : randInt(rng, 0, 1) * 2;
+      const downed = life === 1;
+      return {
+        slot,
+        life,
+        health: life === 0 ? randInt(rng, 1, 100) : 0,
+        downedHealth: downed ? randInt(rng, 0, 100) : 0,
+        reviveQ: downed ? randInt(rng, 0, 63) : 0,
+        reviverIsMe: downed && rng() < 0.5,
+      };
+    });
 }
 
 export function randomShot(rng: Rng): ShotEvent {

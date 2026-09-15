@@ -10,8 +10,11 @@
  * v4: battle royale lifecycle on the control stream: PhaseChange (0x43), ZonePhase (0x46), MatchEnd (0x4A); Welcome
  * carries the live phase and its end tick.
  * v5: Roster (0x4D) on the control stream after Welcome and on every join, leave or bot fill.
+ * v6: snapshot teammate vitals section (bit 128): health, life, downed health and revive progress of the recipient's
+ * teammates only, sent on change until acked and as a keyframe. Owner items group after vitals (consumable in use, use
+ * ticks, consumable counts); the `use`/`cancel` input actions are honoured.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const CONTENT_HASH = 0xb1eab561;
 
 export interface CompatKey {

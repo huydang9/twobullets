@@ -19,9 +19,9 @@ function roundTrip(m: Roster): { bytes: Uint8Array; decoded: Roster | null } {
 const NAME_CHARS = ["a", "Z", "0", " ", "_", "Đ", "ặ", "ư", "ơ", "ễ", "日", "😀"];
 
 describe("Roster (v5)", () => {
-  it("is id 0x4D on protocol v5", () => {
+  it("is id 0x4D (since protocol v5)", () => {
     expect(MsgId.Roster).toBe(0x4d);
-    expect(PROTOCOL_VERSION).toBe(5);
+    expect(PROTOCOL_VERSION).toBeGreaterThanOrEqual(5);
   });
 
   it("round-trips humans (Vietnamese names), bots and connection flags; sizes 2 B + 3 B per player + names", () => {

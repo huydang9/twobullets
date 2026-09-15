@@ -4,8 +4,8 @@ import { createBitWriter } from "../src/bits";
 import { encodeInputPacket } from "../src/messages/input";
 import { encodeKillFeed } from "../src/messages/control";
 import { SHOT_EVENT_BITS, PLAYER_HIT_EVENT_BITS, ReliableEventType, reliableSectionBits } from "../src/messages/events";
-import { encodeSnapshot, MAX_ENTITY_SLOTS, SNAPSHOT_MAX_BYTES, type Snapshot } from "../src/messages/snapshot";
-import { CombatWorld, randomReliable, SnapshotWorld } from "./fixtures";
+import { createSnapshotEncodeStats, encodeSnapshot, SNAPSHOT_MAX_BYTES, type Snapshot } from "../src/messages/snapshot";
+import { CombatWorld, randomReliable, randomTeammates, SnapshotWorld } from "./fixtures";
 import { createTestRng, randInt } from "./rng";
 
 // Wire sizes for the report and as a regression guard against netcode.md §2.2/§2.4 and the §6.5 event table.
@@ -123,6 +123,27 @@ describe("wire sizes", () => {
     expect(kbps(p99, 58)).toBeLessThanOrEqual(160);
   });
 
+  it("teammate vitals at a squad of 4 (3 teammates): ≤ 6 B all standing, ≤ 11 B all knocked and being revived", () => {
+    const rng = createTestRng(41);
+    const combat = new CombatWorld(rng, 16);
+    const w = createBitWriter(1500);
+    const stats = createSnapshotEncodeStats();
+    const bytes = (teammates: Snapshot["teammates"]) => {
+      w.reset();
+      encodeSnapshot(w, { ...combat.snapshot(0), teammates }, null, stats);
+      return stats.teammatesBits / 8;
+    };
+    const standing: number[] = [];
+    const knocked: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      standing.push(bytes(randomTeammates(rng, 3, 0).map((m) => ({ ...m, life: 0, health: m.health || 1 }))));
+      knocked.push(bytes(randomTeammates(rng, 3, 1)));
+    }
+    log(`teammate vitals (3 mates): standing ${Math.max(...standing)} B, knocked ${Math.max(...knocked)} B`);
+    expect(Math.max(...standing)).toBeLessThanOrEqual(6);
+    expect(Math.max(...knocked)).toBeLessThanOrEqual(11);
+  });
+
   it("20-player movement snapshot with the last slot 19 present", () => {
     const world = new SnapshotWorld(createTestRng(21), 20);
     const w = createBitWriter(1500);
@@ -164,7 +185,7 @@ function combatSizes(players: number): { full: number[]; delta: number[]; owner:
     full.push(w.byteLength);
     if (history.length > 4) {
       w.reset();
-      const stats = { shotsBits: 0, hitsBits: 0, reliableBits: 0, ownerBits: 0, entityBits: new Int32Array(MAX_ENTITY_SLOTS) };
+      const stats = createSnapshotEncodeStats();
       encodeSnapshot(w, snap, history[history.length - 5]!, stats);
       delta.push(w.byteLength);
       owner.push(stats.ownerBits / 8);

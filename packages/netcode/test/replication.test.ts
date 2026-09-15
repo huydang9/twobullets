@@ -5,6 +5,7 @@ import {
   createOwnerVitalsBlock,
   createOwnerWeaponBlock,
   createSnapshotBuffer,
+  createTeammateVitals,
   decodeSnapshotInto,
   encodeSnapshot,
   type Snapshot,
@@ -12,7 +13,7 @@ import {
 import { quantizePosXZ, quantizePosY, RemoteFlags } from "@twobullets/protocol/quantize";
 import { dequantizePitch, dequantizeYaw, quantizePitch, quantizeYaw } from "@twobullets/shared/aim";
 import { createArmorPiece } from "@twobullets/shared/equipment/armor";
-import { createVitals } from "@twobullets/shared/equipment/vitals";
+import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
 import type { MoveState } from "@twobullets/shared/movement/types";
 import { diffWeaponState, restoreWeapon } from "@twobullets/shared/weapons/reconcile";
 import type { WeaponId, WeaponPhase, WeaponState } from "@twobullets/shared/weapons/types";
@@ -27,6 +28,7 @@ import {
   remoteWeaponId,
   shotOriginInto,
   shotSpreadDegrees,
+  teammateReviveSeconds,
   unwrapShotId,
   weaponStateFromOwner,
   writeDamageTaken,
@@ -36,6 +38,7 @@ import {
   writeOwnerWeapon,
   writeRemoteEntity,
   writeShotEvent,
+  writeTeammateVitals,
 } from "../src/replication";
 import { createSeededRng } from "../src/testing/rng";
 
@@ -188,5 +191,25 @@ describe("replication", () => {
       knock: true,
       distanceDm: 423,
     });
+  });
+
+  it("teammate vitals: whole HP rounded up, downed fields only while downed, revive progress and reviver-is-me", () => {
+    const out = createTeammateVitals();
+    writeTeammateVitals(4, { ...createVitals(), health: 0.3 }, 1, out);
+    expect(out).toEqual({ slot: 4, life: LifeCode.alive, health: 1, downedHealth: 0, reviveQ: 0, reviverIsMe: false });
+    writeTeammateVitals(4, { ...createVitals(), health: 100 }, 1, out);
+    expect(out.health).toBe(100);
+    const downed = { ...createVitals(), life: "downed" as const, health: 0, downedHealth: 61.2, reviveProgress: 2.5, reviverId: 1 };
+    writeTeammateVitals(4, downed, 1, out);
+    expect(out).toEqual({ slot: 4, life: LifeCode.downed, health: 0, downedHealth: 62, reviveQ: 32, reviverIsMe: true });
+    expect(Math.abs(teammateReviveSeconds(out.reviveQ) - 2.5)).toBeLessThanOrEqual(VITALS.reviveSeconds / 63);
+    // Someone else reviving: progress without the flag. A revive one tick in still reads as started.
+    writeTeammateVitals(4, { ...downed, reviveProgress: 1 / 60, reviverId: 7 }, 1, out);
+    expect([out.reviveQ, out.reviverIsMe]).toEqual([1, false]);
+    writeTeammateVitals(4, { ...downed, reviveProgress: 0, reviverId: -1 }, 1, out);
+    expect([out.reviveQ, out.reviverIsMe]).toEqual([0, false]);
+    expect(teammateReviveSeconds(63)).toBe(VITALS.reviveSeconds);
+    writeTeammateVitals(4, { ...downed, life: "dead" }, 1, out);
+    expect(out).toEqual({ slot: 4, life: LifeCode.dead, health: 0, downedHealth: 0, reviveQ: 0, reviverIsMe: false });
   });
 });

@@ -25,6 +25,7 @@ import {
   type RosterPlayer,
 } from "@twobullets/protocol";
 import { MOVEMENT } from "@twobullets/shared/constants";
+import { IDLE_ITEM_USE } from "@twobullets/shared/equipment/itemUse";
 import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
 import { Btn, PlayerActionType, type MoveGates, type PlayerInput } from "@twobullets/shared/input";
 import { createMoveState, fallDamage } from "@twobullets/shared/movement/movement";
@@ -43,6 +44,7 @@ import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
 import { BrLifecycle, type BrLifecycleOptions, type LifecycleHost } from "./BrLifecycle";
 import { freshPlayerState, Player } from "./Player";
 import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
+import { createNetConsumables, ServerItems } from "./ServerItems";
 import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
@@ -116,6 +118,8 @@ export class ServerMatch implements Match, CombatHost {
   readonly ready: Promise<void>;
   readonly stats: MatchStats = { inputsMalformed: 0, datagramsRateLimited: 0, kicks: 0 };
   readonly snapshots: SnapshotBuilder;
+  /** Consumable use and boost (humans carry the offline kit's heals and boosts). */
+  readonly items = new ServerItems(TICK_SECONDS);
   /** Null until the sim world is ready. */
   combat: ServerCombat | null = null;
   /** Null in the sandbox and until the world is ready. */
@@ -241,6 +245,7 @@ export class ServerMatch implements Match, CombatHost {
     const spawn = this.spawnFor(choice.slot);
     const player = new Player(choice.slot, choice.teamId, claims.sub, this.world.createBody(spawn.feet), spawn);
     player.armor = this.combat!.armorForSpawn();
+    player.inventory = createNetConsumables();
     this.slots[choice.slot] = player;
     this.byAccount.set(claims.sub, player);
     this.rebuildActive();
@@ -277,11 +282,15 @@ export class ServerMatch implements Match, CombatHost {
       const input = p.inputs.take(tick);
       // The dead are frozen (spectating): inputs still drain the buffer and ack, but nothing moves or aims. After the
       // match ends everyone is.
-      if (p.life === "dead" || frozen) continue;
+      if (p.life === "dead" || frozen) {
+        this.items.stop(p);
+        continue;
+      }
       p.yawQ = input.yawQ;
       p.pitchQ = input.pitchQ;
       p.buttons = input.buttons;
       this.step(p, input, combat);
+      this.items.step(p, input);
       if (p.body.feet.y < killY) combat.outOfBounds(p);
     }
     if (!frozen) combat.endTick(tick);
@@ -398,6 +407,8 @@ export class ServerMatch implements Match, CombatHost {
     p.state = freshPlayerState();
     p.vitals = createVitals();
     p.armor = this.combat!.armorForSpawn();
+    if (p.bot === null) p.inventory = createNetConsumables();
+    p.use = IDLE_ITEM_USE;
     p.deathTick = -1;
     p.reviveTarget = -1;
     p.buttons = 0;

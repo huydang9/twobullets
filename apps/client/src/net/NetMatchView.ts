@@ -1,4 +1,4 @@
-import { remoteLifeCode } from "@twobullets/netcode/replication";
+import { remoteLifeCode, teammateReviveSeconds } from "@twobullets/netcode/replication";
 import { lifeOfCode, MAX_PLAYER_SLOTS } from "@twobullets/protocol/codes";
 import { PhaseCode, type Welcome } from "@twobullets/protocol/messages/control";
 import { MatchEndReason, type MatchEnd, type PhaseChange, type ZonePhaseMessage } from "@twobullets/protocol/messages/match";
@@ -27,19 +27,48 @@ import { t } from "../i18n";
 // screens run unchanged on server data. Pure: no Babylon, no DOM. NetMatch (the browser side) feeds it every frame:
 //   sync(client)        Welcome, Roster, PhaseChange, ZonePhase, MatchEnd as NetClient stored them (identity checks)
 //   onKillFeed(event)   knocks and kills from the KillFeed stream
-//   update(tick, …)     server tick estimate, remote poses and the owner's vitals → zone, lives, counters, warnings
+//   update(tick, …)     server tick estimate, remote poses, teammate vitals and the owner's vitals → zone, lives, counters,
+//                       warnings, teammate cards
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableActor = Mutable<ActorState> & { feet: { x: number; y: number; z: number } };
 type MutableTeam = Mutable<TeamState> & { slots: number[] };
 
-/** What NetClient stores from the control stream (NetClient satisfies it). */
+/** Newest teammate vitals group (protocol v6) by slot, as NetClient stores it from snapshots. */
+export interface NetTeammateVitals {
+  /** Server tick of the group that listed the slot, −1 = not a teammate in the newest group. */
+  readonly tick: Float64Array;
+  /** `LifeCode`. */
+  readonly life: Uint8Array;
+  /** Whole HP. */
+  readonly health: Uint8Array;
+  readonly downedHealth: Uint8Array;
+  /** `TeammateVitals.reviveQ`. */
+  readonly reviveQ: Uint8Array;
+  /** 1 when the local player is the reviver. */
+  readonly reviverIsMe: Uint8Array;
+}
+
+export function createNetTeammateVitals(): NetTeammateVitals {
+  return {
+    tick: new Float64Array(MAX_PLAYER_SLOTS).fill(-1),
+    life: new Uint8Array(MAX_PLAYER_SLOTS),
+    health: new Uint8Array(MAX_PLAYER_SLOTS),
+    downedHealth: new Uint8Array(MAX_PLAYER_SLOTS),
+    reviveQ: new Uint8Array(MAX_PLAYER_SLOTS),
+    reviverIsMe: new Uint8Array(MAX_PLAYER_SLOTS),
+  };
+}
+
+/** What NetClient stores from the control stream and snapshots (NetClient satisfies it). */
 export interface NetMatchSource {
   readonly welcomeInfo: Welcome | null;
   readonly matchPhase: PhaseChange | null;
   readonly zonePhases: readonly ZonePhaseMessage[];
   readonly matchEnd: MatchEnd | null;
   readonly matchRoster: Roster | null;
+  /** Teammate health, downed health and revive progress; without it teammates show full bars while standing. */
+  readonly teammateVitals?: NetTeammateVitals | null;
 }
 
 /** Interpolated remote poses by slot (RemoteRoster satisfies it). */
@@ -136,6 +165,10 @@ export class NetMatchView implements MatchView {
   hasRoster = false;
   /** A PhaseChange seen at least once (the M4 sandbox flow never sends one). */
   hasPhase = false;
+  /** Teammate the local player is reviving by the server's progress, or −1. */
+  reviveTargetSlot = -1;
+  /** Server revive progress of `reviveTargetSlot`, 0..1 (0 when none). */
+  reviveProgress = 0;
   private readonly mutable: Mutable<MatchState>;
   private readonly actors: (MutableActor | undefined)[] = [];
   private readonly pool: MutableActor[] = [];
@@ -150,6 +183,7 @@ export class NetMatchView implements MatchView {
   private lastPhase: PhaseChange | null = null;
   private lastEnd: MatchEnd | null = null;
   private lastRoster: Roster | null = null;
+  private teammateVitals: NetTeammateVitals | null = null;
   private announcedIndex = 0;
   /** Length of the zone phase list at the last sync (NetClient appends to the same array). */
   private zoneSeen = 0;
@@ -237,6 +271,7 @@ export class NetMatchView implements MatchView {
     if (source.zonePhases !== this.mutable.zonePhases || source.zonePhases.length !== this.zoneSeen) this.applyZonePhases(source.zonePhases);
     const end = source.matchEnd;
     if (end !== null && end !== this.lastEnd) this.applyEnd(end);
+    this.teammateVitals = source.teammateVitals ?? null;
   }
 
   /** A knock or kill line from the KillFeed stream: lives, kill counts, team eliminations, then listeners. */
@@ -441,6 +476,9 @@ export class NetMatchView implements MatchView {
   private updateActors(poses: NetPoseSource | null, own: NetOwnState | null): void {
     const actors = this.actors;
     const tick = this.mutable.tick;
+    const mates = this.teammateVitals;
+    this.reviveTargetSlot = -1;
+    this.reviveProgress = 0;
     for (let slot = 0; slot < actors.length; slot++) {
       const actor = actors[slot];
       if (!actor) continue;
@@ -457,19 +495,46 @@ export class NetMatchView implements MatchView {
         actor.reviverSlot = own.life === "downed" && own.reviveSeconds > 0 ? slot : -1;
         continue;
       }
-      if (!poses || poses.visible[slot] !== 1) continue;
-      const pose = poses.poses[slot];
+      const pose = poses && poses.visible[slot] === 1 ? poses.poses[slot] : undefined;
+      if (pose) {
+        actor.feet.x = pose.x;
+        actor.feet.y = pose.y;
+        actor.feet.z = pose.z;
+        actor.yaw = pose.yaw;
+      }
+      if (mates !== null && mates.tick[slot]! >= 0 && actor.team === this.ownTeam) {
+        this.applyTeammateVitals(actor, mates, tick);
+        continue;
+      }
       if (!pose) continue;
-      actor.feet.x = pose.x;
-      actor.feet.y = pose.y;
-      actor.feet.z = pose.z;
-      actor.yaw = pose.yaw;
       const life = lifeOfCode(remoteLifeCode(pose.flags));
       this.setLife(actor, life, tick);
-      // Remote health isn't replicated (B7): full while standing.
+      // Enemies' health isn't replicated (anti-ESP): full while standing.
       actor.health = life === "alive" ? VITALS.maxHealth : 0;
       if (life !== "downed") actor.downedHealth = 0;
       else if (actor.downedHealth <= 0) actor.downedHealth = VITALS.downedHealth;
+      actor.reviveProgress = 0;
+      actor.reviverSlot = -1;
+    }
+  }
+
+  /** The server's teammate vitals group: newer than the interpolated pose flags, so its life wins on the cards. */
+  private applyTeammateVitals(actor: MutableActor, mates: NetTeammateVitals, tick: number): void {
+    const slot = actor.slot;
+    // A kill feed line newer than the group already made it dead.
+    const life = actor.life === "dead" && actor.deathTick > mates.tick[slot]! ? "dead" : lifeOfCode(mates.life[slot]!);
+    this.setLife(actor, life, tick);
+    const downed = life === "downed";
+    actor.health = life === "alive" ? mates.health[slot]! : 0;
+    actor.downedHealth = downed ? mates.downedHealth[slot]! : 0;
+    const mine = downed && mates.reviverIsMe[slot] === 1;
+    const reviveQ = downed ? mates.reviveQ[slot]! : 0;
+    actor.reviveProgress = reviveQ > 0 ? teammateReviveSeconds(reviveQ) : 0;
+    // Someone else's revive has no slot on the wire: the downed teammate's own slot stands in (as for the local player).
+    actor.reviverSlot = mine ? this.ownSlot : reviveQ > 0 ? slot : -1;
+    if (mine) {
+      this.reviveTargetSlot = slot;
+      this.reviveProgress = actor.reviveProgress / VITALS.reviveSeconds;
     }
   }
 

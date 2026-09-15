@@ -33,13 +33,15 @@ export function netMoveGates(life: number): MoveGates {
 }
 
 const COMBAT_BUTTONS = Btn.fire | Btn.aim | Btn.reload;
+/** Presses that cancel an item use (with jump, sprint and weapon select, which the server sees on the wire itself). */
+const INTERRUPT_BUTTONS = Btn.fire | Btn.reload;
 
 /** While downed (or dead) the server clears fire, aim and reload before `stepPlayer`; the client sends them cleared. */
 export function netInputButtons(buttons: number, life: number): number {
   return life === LifeCode.alive ? buttons : buttons & ~COMBAT_BUTTONS;
 }
 
-/** Local equipment has the hands (M4 doesn't network equipment): a throwable out in any phase, or a heal/boost in use. */
+/** The hands are busy: a (local) throwable out in any phase, or a heal/boost in use on the server (or just requested). */
 export function netHandsBusy(throwPhase: string, usingItem: boolean): boolean {
   return throwPhase !== "idle" || usingItem;
 }
@@ -78,6 +80,8 @@ export interface NetCombatInputSources {
   interactHeld(): boolean;
   /** Owner life code from the server. */
   life(): number;
+  /** Fire or reload pressed while the hands are busy (cancels an item use; the wire never carries those presses). */
+  handsInterrupted?(): void;
 }
 
 /**
@@ -90,13 +94,18 @@ export function netCombatLink(
   sources: NetCombatInputSources,
 ): { readonly weaponState: WeaponState; takeCombatInput(out: { buttons: number; select: number }): void } {
   const hands = new NetHandsGate();
+  let previousRaw = 0;
   return {
     get weaponState() {
       return combat.weaponState;
     },
     takeCombatInput(out) {
       combat.takeCombatInput(out);
-      out.buttons = hands.apply(out.buttons, sources.handsBusy());
+      const raw = out.buttons;
+      const busy = sources.handsBusy();
+      if (busy && (raw & ~previousRaw & INTERRUPT_BUTTONS) !== 0) sources.handsInterrupted?.();
+      previousRaw = raw;
+      out.buttons = hands.apply(raw, busy);
       if (sources.interactHeld()) out.buttons |= REVIVE_BUTTON;
       const life = sources.life();
       out.buttons = netInputButtons(out.buttons, life);

@@ -2,6 +2,8 @@ import { NET_WEAPON_LOADOUT } from "@twobullets/contracts";
 import { ServerInputBuffer, type Session } from "@twobullets/netcode";
 import { quantizeYaw } from "@twobullets/shared/aim";
 import { NO_ARMOR, type ArmorLoadout } from "@twobullets/shared/equipment/armor";
+import { createInventory, type InventoryState } from "@twobullets/shared/equipment/inventory";
+import { IDLE_ITEM_USE, type ItemUseState } from "@twobullets/shared/equipment/itemUse";
 import { createVitals, type LifeState, type Vitals } from "@twobullets/shared/equipment/vitals";
 import type { PlayerState } from "@twobullets/shared/input";
 import { createMoveState } from "@twobullets/shared/movement/movement";
@@ -13,7 +15,7 @@ import { ClientReplication, type ReplicatedPlayer } from "../snapshot/SnapshotBu
 import type { BotSeat } from "../bots/ServerBots";
 
 // One slot's character and connection state on the match server. Movement/weapon state is predicted by the client;
-// vitals and armor are server-owned (replicated in the owner vitals group and remote flags).
+// vitals, armor and consumables are server-owned (replicated in the owner vitals and items groups and remote flags).
 
 export interface PlayerCombatStats {
   kills: number;
@@ -43,6 +45,11 @@ export class Player implements ReplicatedPlayer {
   state: PlayerState;
   vitals: Vitals = createVitals();
   armor: ArmorLoadout = NO_ARMOR;
+  /** Carried consumables (humans get the offline kit's; bots none) and the timed use in progress (ServerItems). */
+  inventory: InventoryState = createInventory();
+  use: ItemUseState = IDLE_ITEM_USE;
+  /** Buttons of the last input ServerItems saw (press edges). */
+  itemButtons = 0;
   /** Server tick of death, −1 while alive or downed. */
   deathTick = -1;
   /** Downed teammate this player is reviving, or −1. */

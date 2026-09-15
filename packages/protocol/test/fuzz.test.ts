@@ -5,10 +5,10 @@ import { MsgId } from "../src/messages/ids";
 import { createInputPacketBuffer, decodeInputPacketInto, encodeInputPacket } from "../src/messages/input";
 import { decodePing } from "../src/messages/ping";
 import { decodeRoster } from "../src/messages/roster";
-import { MAX_ENTITY_SLOTS, createSnapshotBuffer, decodeSnapshotInto, encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
+import { MAX_ENTITY_SLOTS, MAX_TEAMMATES, createSnapshotBuffer, decodeSnapshotInto, encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
 import { describeMessage } from "../src/debug/describe";
 import { StreamDeframer } from "../src/framing";
-import { CombatWorld, randomInput, randomPlayerHit, randomReliable, randomShot, randomVitalsBlock, randomWeaponBlock, SnapshotWorld } from "./fixtures";
+import { CombatWorld, randomInput, randomItemsBlock, randomPlayerHit, randomReliable, randomShot, randomTeammates, randomVitalsBlock, randomWeaponBlock, SnapshotWorld } from "./fixtures";
 import { createTestRng, randInt } from "./rng";
 
 // netcode.md §11.4 gate: random bytes never throw uncaught. The BitReader bounds every read, so decoders see zeros
@@ -25,7 +25,10 @@ function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   }
   r.reset(bytes);
   const snap = createSnapshotBuffer();
-  if (decodeSnapshotInto(r, 5000, () => baseline, snap)) expect(snap.entities.length).toBeLessThanOrEqual(MAX_ENTITY_SLOTS);
+  if (decodeSnapshotInto(r, 5000, () => baseline, snap)) {
+    expect(snap.entities.length).toBeLessThanOrEqual(MAX_ENTITY_SLOTS);
+    expect(snap.teammates.length).toBeLessThanOrEqual(MAX_TEAMMATES);
+  }
   for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed, decodeRoster]) {
     r.reset(bytes);
     decode(r);
@@ -65,9 +68,11 @@ describe("decoder fuzz", () => {
           ...(i % 2 === 0 ? combat.snapshot(0) : world.snapshot(0, true)),
           weapon: randomWeaponBlock(rng),
           vitals: randomVitalsBlock(rng),
+          items: randomItemsBlock(rng),
           shots: [randomShot(rng), randomShot(rng)],
           hits: [randomPlayerHit(rng)],
           reliable: [randomReliable(rng, 1), randomReliable(rng, 2), randomReliable(rng, 9)],
+          teammates: randomTeammates(rng),
         };
         encodeSnapshot(w, snap, prevSnap?.weapon ? prevSnap : null);
         prevSnap = snap;

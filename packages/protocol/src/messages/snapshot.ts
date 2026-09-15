@@ -1,5 +1,5 @@
 import type { BitReader, BitWriter } from "../bits";
-import { MAX_PLAYER_SLOTS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
+import { CONSUMABLE_CODE_BITS, CONSUMABLE_COUNT, MAX_PLAYER_SLOTS, SLOT_BITS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
 import {
   BLOOM_BITS,
   COOLDOWN_BITS,
@@ -43,8 +43,9 @@ import {
 } from "./events";
 import { MsgId } from "./ids";
 
-// 0x10, S→C datagram (netcode.md §6.5). Wire order: header, reliable events, shots, player hits, owner block (move,
-// weapon, vitals groups), entity list. Events come before the delta-coded body so they decode without the baseline.
+// 0x10, S→C datagram (netcode.md §6.5). Wire order: header, reliable events, shots, player hits, teammate vitals (v6),
+// owner block (move, weapon, vitals, items (v6) groups), entity list. Events and teammate vitals come before the delta-coded body so
+// they decode without the baseline.
 // Decoded structs carry quantized integers (mm, mm/s, angle steps) so baselines and deltas compare exactly;
 // dequantization lives in quantize.ts and codes.ts.
 
@@ -55,7 +56,7 @@ export const BASELINE_RING = 128;
 /** Player slots 0..19 (v3; the 5-bit slot-limit field allows up to 31). */
 export const MAX_ENTITY_SLOTS = MAX_PLAYER_SLOTS;
 
-export const SnapshotSection = { owner: 1, entities: 2, shots: 4, reliable: 8, throwables: 16, versions: 32, hits: 64 } as const;
+export const SnapshotSection = { owner: 1, entities: 2, shots: 4, reliable: 8, throwables: 16, versions: 32, hits: 64, teammates: 128 } as const;
 /** Weapon slots in the owner ammo group (3-bit count). */
 export const MAX_WEAPON_SLOTS = 7;
 
@@ -139,6 +140,45 @@ export interface OwnerVitalsBlock {
   readonly vestDurability: number;
 }
 
+/** Owner items group (v6, server-owned): the consumable in use and the carried consumable counts. */
+export interface OwnerItemsBlock {
+  /** `consumableCode` of the item in use, 0 when idle. */
+  readonly useItem: number;
+  /** Whole ticks into the current use, 10 bits; 0 when idle. */
+  readonly useTicks: number;
+  /** Carried count per consumable (index = code − 1), 7 bits each (saturating). */
+  readonly counts: readonly number[];
+}
+
+export const USE_TICKS_BITS = 10;
+export const CONSUMABLE_COUNT_BITS = 7;
+
+/** Teammates in one vitals group (squads of 4). */
+export const MAX_TEAMMATES = 3;
+/** Whole HP (rounded up), 0..100. */
+export const TEAMMATE_HEALTH_BITS = 7;
+/** Revive progress as a fraction of the revive time, 0..TEAMMATE_REVIVE_MAX. */
+export const TEAMMATE_REVIVE_BITS = 6;
+export const TEAMMATE_REVIVE_MAX = (1 << TEAMMATE_REVIVE_BITS) - 1;
+
+/**
+ * One teammate's vitals (protocol v6), sent only to members of the same team (never enemies: health is ESP). Absolute
+ * values, no baseline: the server sends the group while the recipient hasn't acked its current values, and as a keyframe.
+ */
+export interface TeammateVitals {
+  readonly slot: number;
+  /** `LifeCode`. */
+  readonly life: number;
+  /** Whole HP rounded up, 7 bits (0 while downed or dead). */
+  readonly health: number;
+  /** Downed pool, whole HP rounded up, 7 bits; only carried while downed (0 otherwise). */
+  readonly downedHealth: number;
+  /** Revive progress × TEAMMATE_REVIVE_MAX / revive time (rounded up, so a started revive is ≥ 1); only while downed. */
+  readonly reviveQ: number;
+  /** The recipient is the one reviving this teammate; only while downed. */
+  readonly reviverIsMe: boolean;
+}
+
 export const EntityPresence = { absent: 0, full: 1, audibleOnly: 2, removed: 3 } as const;
 export type EntityPresence = (typeof EntityPresence)[keyof typeof EntityPresence];
 
@@ -172,11 +212,15 @@ export interface Snapshot {
   readonly weapon?: OwnerWeaponBlock | null;
   /** Owner vitals group; only sent with `owner`. */
   readonly vitals?: OwnerVitalsBlock | null;
+  /** Owner items group (v6); only sent with `owner`. */
+  readonly items?: OwnerItemsBlock | null;
   /** Tier U, oldest first (the size cap drops from the front). */
   readonly shots?: readonly ShotEvent[];
   readonly hits?: readonly PlayerHitEvent[];
   /** Tier R, ascending seq (netcode ReliableEventSender.select). */
   readonly reliable?: readonly ReliableEvent[];
+  /** Recipient's teammates (≤ MAX_TEAMMATES, sorted by slot). Absent = unchanged since the last group received. */
+  readonly teammates?: readonly TeammateVitals[];
 }
 
 // ---- Mutable storage (decode targets, baseline rings) -----------------------------------------------------------
@@ -189,15 +233,21 @@ export interface MutableOwnerWeaponBlock extends Omit<Mutable<OwnerWeaponBlock>,
   readonly slotReserve: number[];
 }
 
+export interface MutableOwnerItemsBlock extends Omit<Mutable<OwnerItemsBlock>, "counts"> {
+  readonly counts: number[];
+}
+
 export interface MutableSnapshot {
   header: Mutable<SnapshotHeader>;
   owner: Mutable<OwnerMoveBlock> | null;
   entities: Mutable<EntityState>[];
   weapon: MutableOwnerWeaponBlock | null;
   vitals: Mutable<OwnerVitalsBlock> | null;
+  items: MutableOwnerItemsBlock | null;
   shots: Mutable<ShotEvent>[];
   hits: Mutable<PlayerHitEvent>[];
   reliable: ReliableEvent[];
+  teammates: Mutable<TeammateVitals>[];
   /**
    * Set by the decoder once the event sections parsed, even if the body then failed (e.g. baseline unavailable), so a
    * client may still deliver `reliable` from an otherwise dropped snapshot.
@@ -208,10 +258,13 @@ export interface MutableSnapshot {
   readonly entityPool: Mutable<EntityState>[];
   readonly weaponStore: MutableOwnerWeaponBlock;
   readonly vitalsStore: Mutable<OwnerVitalsBlock>;
+  readonly itemsStore: MutableOwnerItemsBlock;
   /** Event pools grow on demand (steady state allocates nothing). */
   readonly shotPool: Mutable<ShotEvent>[];
   readonly hitPool: Mutable<PlayerHitEvent>[];
   readonly reliablePool: ReliableEventStore[];
+  /** MAX_TEAMMATES entries behind `teammates`. */
+  readonly teammatePool: Mutable<TeammateVitals>[];
 }
 
 function createOwner(): Mutable<OwnerMoveBlock> {
@@ -255,6 +308,14 @@ export function createOwnerVitalsBlock(): Mutable<OwnerVitalsBlock> {
   return { life: 0, healthQ: 1000, boost: 0, downedHealthQ: 0, reviveTicks: 0, helmetLevel: 0, helmetDurability: 0, vestLevel: 0, vestDurability: 0 };
 }
 
+export function createOwnerItemsBlock(): MutableOwnerItemsBlock {
+  return { useItem: 0, useTicks: 0, counts: new Array<number>(CONSUMABLE_COUNT).fill(0) };
+}
+
+export function createTeammateVitals(): Mutable<TeammateVitals> {
+  return { slot: 0, life: 0, health: 100, downedHealth: 0, reviveQ: 0, reviverIsMe: false };
+}
+
 function createEntity(): Mutable<EntityState> {
   return { slot: 0, presence: 0, xMm: 0, yMm: 0, zMm: 0, yawQ: 0, pitchQ: 0, vxQ: 0, vyQ: 0, vzQ: 0, flags: 0, noiseClass: 0 };
 }
@@ -262,6 +323,8 @@ function createEntity(): Mutable<EntityState> {
 export function createSnapshotBuffer(): MutableSnapshot {
   const entityPool: Mutable<EntityState>[] = [];
   for (let i = 0; i < MAX_ENTITY_SLOTS; i++) entityPool.push(createEntity());
+  const teammatePool: Mutable<TeammateVitals>[] = [];
+  for (let i = 0; i < MAX_TEAMMATES; i++) teammatePool.push(createTeammateVitals());
   return {
     header: {
       serverTick: 0,
@@ -276,17 +339,21 @@ export function createSnapshotBuffer(): MutableSnapshot {
     entities: [],
     weapon: null,
     vitals: null,
+    items: null,
     shots: [],
     hits: [],
     reliable: [],
+    teammates: [],
     eventsValid: false,
     ownerStore: createOwner(),
     entityPool,
     weaponStore: createOwnerWeaponBlock(),
     vitalsStore: createOwnerVitalsBlock(),
+    itemsStore: createOwnerItemsBlock(),
     shotPool: [],
     hitPool: [],
     reliablePool: [],
+    teammatePool,
   };
 }
 
@@ -350,6 +417,41 @@ export function copyOwnerVitals(src: OwnerVitalsBlock, dst: Mutable<OwnerVitalsB
   dst.helmetDurability = src.helmetDurability;
   dst.vestLevel = src.vestLevel;
   dst.vestDurability = src.vestDurability;
+}
+
+export function copyOwnerItems(src: OwnerItemsBlock, dst: MutableOwnerItemsBlock): void {
+  dst.useItem = src.useItem;
+  dst.useTicks = src.useItem !== 0 ? src.useTicks : 0;
+  for (let i = 0; i < CONSUMABLE_COUNT; i++) dst.counts[i] = src.counts[i] ?? 0;
+}
+
+/** Use fields equal (ticks only count while an item is in use). */
+export function ownerItemsUseEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
+  return a.useItem === b.useItem && (a.useItem === 0 || a.useTicks === b.useTicks);
+}
+
+export function ownerItemsCountsEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
+  for (let i = 0; i < CONSUMABLE_COUNT; i++) if ((a.counts[i] ?? 0) !== (b.counts[i] ?? 0)) return false;
+  return true;
+}
+
+export function copyTeammateVitals(src: TeammateVitals, dst: Mutable<TeammateVitals>): void {
+  dst.slot = src.slot;
+  dst.life = src.life;
+  dst.health = src.health;
+  dst.downedHealth = src.downedHealth;
+  dst.reviveQ = src.reviveQ;
+  dst.reviverIsMe = src.reviverIsMe;
+}
+
+/** Equality of what the wire carries (downed-only fields count only while downed). */
+export function teammateVitalsEqual(a: TeammateVitals, b: TeammateVitals): boolean {
+  return (
+    a.slot === b.slot &&
+    a.life === b.life &&
+    a.health === b.health &&
+    (a.life !== LIFE_DOWNED || (a.downedHealth === b.downedHealth && a.reviveQ === b.reviveQ && a.reviverIsMe === b.reviverIsMe))
+  );
 }
 
 /** Core fields (phase, timers, trigger, bloom, ADS, shot counter) equal. */
@@ -432,11 +534,25 @@ export function copySnapshot(src: Snapshot, dst: MutableSnapshot, copyEvents = t
     copyOwnerVitals(src.vitals, dst.vitalsStore);
     dst.vitals = dst.vitalsStore;
   }
+  if (src.items === null || src.items === undefined || src.owner === null) dst.items = null;
+  else {
+    copyOwnerItems(src.items, dst.itemsStore);
+    dst.items = dst.itemsStore;
+  }
   dst.shots.length = 0;
   dst.hits.length = 0;
   dst.reliable.length = 0;
+  dst.teammates.length = 0;
   dst.eventsValid = true;
   if (!copyEvents) return;
+  const teammates = src.teammates;
+  if (teammates !== undefined) {
+    const count = Math.min(teammates.length, MAX_TEAMMATES);
+    for (let i = 0; i < count; i++) {
+      copyTeammateVitals(teammates[i]!, dst.teammatePool[i]!);
+      dst.teammates.push(dst.teammatePool[i]!);
+    }
+  }
   const shots = src.shots;
   if (shots !== undefined) {
     for (let i = 0; i < shots.length; i++) {
@@ -703,6 +819,37 @@ function writeOwnerVitals(w: BitWriter, o: OwnerVitalsBlock, base: OwnerVitalsBl
   if (o.vestLevel !== 0) w.write(o.vestDurability, 8);
 }
 
+// Items group: [changed 1 with a baseline] use: item 3 (+ ticks 10 while in use); [changed 1 with a baseline] counts:
+// 7 bits per consumable.
+function writeOwnerItems(w: BitWriter, o: OwnerItemsBlock, base: OwnerItemsBlock | null): void {
+  const useSame = base !== null && ownerItemsUseEqual(o, base);
+  if (base !== null) w.writeBool(!useSame);
+  if (!useSame) {
+    w.write(o.useItem, CONSUMABLE_CODE_BITS);
+    if (o.useItem !== 0) w.write(o.useTicks, USE_TICKS_BITS);
+  }
+  const countsSame = base !== null && ownerItemsCountsEqual(o, base);
+  if (base !== null) w.writeBool(!countsSame);
+  if (!countsSame) for (let i = 0; i < CONSUMABLE_COUNT; i++) w.write(o.counts[i] ?? 0, CONSUMABLE_COUNT_BITS);
+}
+
+function readOwnerItems(r: BitReader, o: MutableOwnerItemsBlock, base: OwnerItemsBlock | null): boolean {
+  if (base === null || r.readBool()) {
+    o.useItem = r.read(CONSUMABLE_CODE_BITS);
+    o.useTicks = o.useItem !== 0 ? r.read(USE_TICKS_BITS) : 0;
+    if (o.useItem > CONSUMABLE_COUNT) return false;
+  } else {
+    o.useItem = base.useItem;
+    o.useTicks = base.useItem !== 0 ? base.useTicks : 0;
+  }
+  if (base === null || r.readBool()) {
+    for (let i = 0; i < CONSUMABLE_COUNT; i++) o.counts[i] = r.read(CONSUMABLE_COUNT_BITS);
+  } else {
+    for (let i = 0; i < CONSUMABLE_COUNT; i++) o.counts[i] = base.counts[i] ?? 0;
+  }
+  return true;
+}
+
 function readOwnerVitals(r: BitReader, o: Mutable<OwnerVitalsBlock>, base: OwnerVitalsBlock | null): boolean {
   if (base !== null && !r.readBool()) {
     copyOwnerVitals(base, o);
@@ -719,6 +866,44 @@ function readOwnerVitals(r: BitReader, o: Mutable<OwnerVitalsBlock>, base: Owner
   o.vestLevel = r.read(2);
   o.vestDurability = o.vestLevel !== 0 ? r.read(8) : 0;
   return o.life !== 3;
+}
+
+// Teammate vitals section: count 2 (1..3); per teammate slot 5, life 2, health 7, (downed: downedHealth 7, revive 6,
+// reviverIsMe 1). Alive 14 bits, downed 28 bits.
+function writeTeammateVitals(w: BitWriter, list: readonly TeammateVitals[]): void {
+  if (list.length > MAX_TEAMMATES) throw new RangeError(`at most ${MAX_TEAMMATES} teammates per snapshot`);
+  w.write(list.length, 2);
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i]!;
+    w.write(m.slot, SLOT_BITS);
+    w.write(m.life, 2);
+    w.write(m.health, TEAMMATE_HEALTH_BITS);
+    if (m.life === LIFE_DOWNED) {
+      w.write(m.downedHealth, TEAMMATE_HEALTH_BITS);
+      w.write(m.reviveQ, TEAMMATE_REVIVE_BITS);
+      w.writeBool(m.reviverIsMe);
+    }
+  }
+}
+
+function readTeammateVitals(r: BitReader, out: MutableSnapshot): boolean {
+  const n = r.read(2);
+  if (n === 0) return false;
+  let previous = -1;
+  for (let i = 0; i < n; i++) {
+    const m = out.teammatePool[i]!;
+    m.slot = r.read(SLOT_BITS);
+    m.life = r.read(2);
+    m.health = r.read(TEAMMATE_HEALTH_BITS);
+    const downed = m.life === LIFE_DOWNED;
+    m.downedHealth = downed ? r.read(TEAMMATE_HEALTH_BITS) : 0;
+    m.reviveQ = downed ? r.read(TEAMMATE_REVIVE_BITS) : 0;
+    m.reviverIsMe = downed ? r.readBool() : false;
+    if (r.overflowed || m.life === 3 || m.slot >= MAX_PLAYER_SLOTS || m.slot <= previous) return false;
+    previous = m.slot;
+    out.teammates.push(m);
+  }
+  return true;
 }
 
 function entityEqual(a: EntityState, b: EntityState): boolean {
@@ -836,13 +1021,14 @@ export interface SnapshotEncodeStats {
   shotsBits: number;
   hitsBits: number;
   reliableBits: number;
+  teammatesBits: number;
   ownerBits: number;
   /** Bits per entry of `snapshot.entities`, same order. */
   readonly entityBits: Int32Array;
 }
 
 export function createSnapshotEncodeStats(): SnapshotEncodeStats {
-  return { shotsBits: 0, hitsBits: 0, reliableBits: 0, ownerBits: 0, entityBits: new Int32Array(MAX_ENTITY_SLOTS) };
+  return { shotsBits: 0, hitsBits: 0, reliableBits: 0, teammatesBits: 0, ownerBits: 0, entityBits: new Int32Array(MAX_ENTITY_SLOTS) };
 }
 
 /** Section bits the encoder derives from the content. */
@@ -852,7 +1038,8 @@ export function snapshotSections(snapshot: Snapshot): number {
     (snapshot.entities.length > 0 ? SnapshotSection.entities : 0) |
     ((snapshot.shots?.length ?? 0) > 0 ? SnapshotSection.shots : 0) |
     ((snapshot.reliable?.length ?? 0) > 0 ? SnapshotSection.reliable : 0) |
-    ((snapshot.hits?.length ?? 0) > 0 ? SnapshotSection.hits : 0)
+    ((snapshot.hits?.length ?? 0) > 0 ? SnapshotSection.hits : 0) |
+    ((snapshot.teammates?.length ?? 0) > 0 ? SnapshotSection.teammates : 0)
   );
 }
 
@@ -896,6 +1083,9 @@ export function encodeSnapshot(w: BitWriter, snapshot: Snapshot, baselineIn: Sna
     for (let i = 0; i < hits.length; i++) writePlayerHitEvent(w, hits[i]!);
   }
   if (stats) stats.hitsBits = w.bitLength - mark;
+  mark = w.bitLength;
+  if ((sections & SnapshotSection.teammates) !== 0) writeTeammateVitals(w, snapshot.teammates!);
+  if (stats) stats.teammatesBits = w.bitLength - mark;
 
   mark = w.bitLength;
   if (snapshot.owner !== null) {
@@ -906,6 +1096,9 @@ export function encodeSnapshot(w: BitWriter, snapshot: Snapshot, baselineIn: Sna
     const vitals = snapshot.vitals ?? null;
     w.writeBool(vitals !== null);
     if (vitals !== null) writeOwnerVitals(w, vitals, baseline?.vitals ?? null);
+    const items = snapshot.items ?? null;
+    w.writeBool(items !== null);
+    if (items !== null) writeOwnerItems(w, items, baseline?.items ?? null);
   }
   if (stats) stats.ownerBits = w.bitLength - mark;
   if (entities.length > 0) {
@@ -958,7 +1151,7 @@ function removeAt<T>(list: T[], index: number): void {
 /**
  * Encodes within `capBytes` (netcode.md §6.6: min(1,000 B, maxDatagramSize)). Over the cap it trims `snapshot` in
  * place and re-encodes, dropping in order: `Shot` events (oldest first), `PlayerHit`, audible-only entities, then full
- * entities farthest from the owner. Reliable events, the header and the owner block are never dropped; `fits` is false
+ * entities farthest from the owner. Reliable events, teammate vitals, the header and the owner block are never dropped; `fits` is false
  * when they alone exceed the cap. Record the trimmed snapshot as the baseline (dropped entities then re-send in full).
  */
 export function encodeSnapshotCapped(
@@ -1035,7 +1228,8 @@ function farthestEntity(snapshot: Snapshot): number {
   return best;
 }
 
-const KNOWN_SECTIONS = SnapshotSection.owner | SnapshotSection.entities | SnapshotSection.shots | SnapshotSection.reliable | SnapshotSection.hits;
+const KNOWN_SECTIONS =
+  SnapshotSection.owner | SnapshotSection.entities | SnapshotSection.shots | SnapshotSection.reliable | SnapshotSection.hits | SnapshotSection.teammates;
 
 /** Reads only the header (tooling, and clients that must look up the baseline before decoding). */
 export function decodeSnapshotHeader(r: BitReader, referenceTick: number, out: Mutable<SnapshotHeader>): boolean {
@@ -1057,6 +1251,7 @@ function readEventSections(r: BitReader, sections: number, out: MutableSnapshot)
   out.shots.length = 0;
   out.hits.length = 0;
   out.reliable.length = 0;
+  out.teammates.length = 0;
   if ((sections & SnapshotSection.reliable) !== 0) {
     if (!readReliableSection(r, out.reliablePool, out.reliable) || out.reliable.length === 0) return false;
   }
@@ -1080,6 +1275,7 @@ function readEventSections(r: BitReader, sections: number, out: MutableSnapshot)
       out.hits.push(e);
     }
   }
+  if ((sections & SnapshotSection.teammates) !== 0 && !readTeammateVitals(r, out)) return false;
   return !r.overflowed;
 }
 
@@ -1099,6 +1295,7 @@ export function decodeSnapshotInto(
   out.shots.length = 0;
   out.hits.length = 0;
   out.reliable.length = 0;
+  out.teammates.length = 0;
   if (!decodeSnapshotHeader(r, referenceTick, h)) return false;
   if ((h.sections & ~KNOWN_SECTIONS) !== 0) return false;
   if (!readEventSections(r, h.sections, out)) return false;
@@ -1110,6 +1307,7 @@ export function decodeSnapshotInto(
   }
   out.weapon = null;
   out.vitals = null;
+  out.items = null;
   if ((h.sections & SnapshotSection.owner) !== 0) {
     if (!readOwner(r, out.ownerStore, baseline?.owner ?? null)) return false;
     out.owner = out.ownerStore;
@@ -1120,6 +1318,10 @@ export function decodeSnapshotInto(
     if (r.readBool()) {
       if (!readOwnerVitals(r, out.vitalsStore, baseline?.vitals ?? null)) return false;
       out.vitals = out.vitalsStore;
+    }
+    if (r.readBool()) {
+      if (!readOwnerItems(r, out.itemsStore, baseline?.items ?? null)) return false;
+      out.items = out.itemsStore;
     }
   } else {
     out.owner = null;

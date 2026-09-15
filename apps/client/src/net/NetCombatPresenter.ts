@@ -59,6 +59,8 @@ export interface NetMatchHooks {
   ownDeath(kill: NetKill | null): void;
   /** Our confirmed damage on someone else. */
   confirmedDamage(victim: number, amount: number): void;
+  /** Server revive progress (0..1) of the teammate we are reviving (teammate vitals, protocol v6), or −1 when none. */
+  reviveProgress?(): number;
 }
 
 export interface NetCombatPresenterDeps {
@@ -434,7 +436,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     player.camera.rotation.set(pitch, yaw, 0);
   }
 
-  /** Local estimate of a revive in progress (the server reports progress only to the downed player). */
+  /** Revive ring: the server's progress once the teammate vitals report us as the reviver, a local estimate until then. */
   private updateReviving(dt: number): void {
     const { input, roster, player } = this.deps;
     const holding = this.life === "alive" && input.isLocked && input.isActionDown("interact");
@@ -461,7 +463,8 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
       return;
     }
     this.reviveHeld += dt;
-    this.banner.showReviving(this.reviveHeld / REVIVE_SECONDS, this.nameOf(target));
+    const server = this.matchHooks?.reviveProgress?.() ?? -1;
+    this.banner.showReviving(server >= 0 ? server : this.reviveHeld / REVIVE_SECONDS, this.nameOf(target));
     if (this.reviveHeld >= REVIVE_SECONDS + 0.5) this.reviveHeld = REVIVE_SECONDS + 0.5;
   }
 }

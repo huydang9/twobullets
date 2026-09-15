@@ -83,6 +83,7 @@ export class NetMatch {
       confirmedDamage: (victim, amount) => {
         if (view.teamOf(victim) !== view.ownTeam) view.addOwnDamage(amount);
       },
+      reviveProgress: () => (view.reviveTargetSlot >= 0 ? view.reviveProgress : -1),
     });
     this.unsubscribeLanguage = onLanguageChange(() => this.labels.invalidate());
     window.addEventListener("keydown", this.handleKey);
