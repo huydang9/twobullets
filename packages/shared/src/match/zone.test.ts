@@ -18,14 +18,14 @@ const spec = DEFAULT_ZONE_SPEC;
 const START = 300;
 
 describe("zone schedule", () => {
-  it("closes at 10:55 of combat", () => {
-    expect(zoneCloseSeconds(spec)).toBe(655);
+  it("closes at 6:55 of combat", () => {
+    expect(zoneCloseSeconds(spec)).toBe(415);
     const phases = scheduleZonePhases(spec, 1, START);
     expect(phases).toHaveLength(7);
-    expect(phases[6]!.shrinkEndTick - START).toBe(655 * 60);
-    // Table: phase 1 announced 1:00, shrink 3:00–4:00; phase 3 shrink 6:30–7:10.
-    expect([phases[0]!.waitStartTick, phases[0]!.shrinkStartTick, phases[0]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([60, 180, 240]);
-    expect([phases[2]!.shrinkStartTick, phases[2]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([390, 430]);
+    expect(phases[6]!.shrinkEndTick - START).toBe(415 * 60);
+    // Table: phase 1 announced 0:30, shrink 1:40–2:20; phase 3 shrink 3:55–4:20.
+    expect([phases[0]!.waitStartTick, phases[0]!.shrinkStartTick, phases[0]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([30, 100, 140]);
+    expect([phases[2]!.shrinkStartTick, phases[2]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([235, 260]);
     expect(phases.map((p) => p.to.r)).toEqual([400, 250, 150, 90, 45, 20, 0]);
     expect(phases.map((p) => p.dps)).toEqual([1, 2, 3, 5, 8, 12, 20]);
   });
@@ -66,8 +66,8 @@ describe("zone schedule", () => {
 
   it("timeScale scales every duration", () => {
     const quarter = scheduleZonePhases(spec, 3, 0, 0.25);
-    expect(quarter[6]!.shrinkEndTick).toBe(secondsToTicks(655, 0.25));
-    expect(quarter[0]!.shrinkStartTick).toBe(secondsToTicks(180, 0.25));
+    expect(quarter[6]!.shrinkEndTick).toBe(secondsToTicks(415, 0.25));
+    expect(quarter[0]!.shrinkStartTick).toBe(secondsToTicks(100, 0.25));
     // Centers don't depend on timing.
     expect(quarter.map((p) => p.to)).toEqual(scheduleZonePhases(spec, 3, 0).map((p) => p.to));
   });
@@ -86,7 +86,7 @@ describe("zoneAt", () => {
     expect(z.current).toEqual(spec.initial);
     expect(z.dps).toBe(0);
     expect(z.next).toBeNull();
-    expect(z.ticksToChange).toBe(60 * 60 - 10);
+    expect(z.ticksToChange).toBe(30 * 60 - 10);
   });
 
   it("waiting → shrinking → next waiting → closed, with the phase's damage from the announcement on", () => {

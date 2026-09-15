@@ -13,7 +13,7 @@ import type { ActorConfig, BrEndReason, BrMatchConfig, BrRules, BrTimings, KillC
 
 export const DEFAULT_BR_RULES: BrRules = { friendlyFire: true, reviveSeconds: 5, bodyBlocking: true };
 
-export const DEFAULT_BR_TIMINGS: BrTimings = { countdownSeconds: 5, landingSeconds: 0, glideSeconds: 0, timeCapSeconds: 720, endLingerSeconds: 8 };
+export const DEFAULT_BR_TIMINGS: BrTimings = { countdownSeconds: 5, landingSeconds: 0, glideSeconds: 0, timeCapSeconds: 480, endLingerSeconds: 8 };
 
 export interface BrMatchConfigOptions {
   readonly seed: number;

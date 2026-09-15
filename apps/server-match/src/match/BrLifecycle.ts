@@ -41,7 +41,7 @@ export interface BrLifecycleOptions {
   /** B3 hooks. Default 0. */
   readonly landingSeconds?: number;
   readonly glideSeconds?: number;
-  /** Combat start → forced end (shared default 720). */
+  /** Combat start → forced end (shared default 480). */
   readonly timeCapSeconds?: number;
   /** End → sessions closed, s. Default 8. */
   readonly endLingerSeconds?: number;

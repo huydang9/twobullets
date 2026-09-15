@@ -8,8 +8,8 @@ export const VITALS = {
   maxBoost: 100,
   /** Knocked players get a separate pool that bleeds out and that enemies (or teammates) can shoot down. */
   downedHealth: 100,
-  /** Bleed-out per second for the 1st, 2nd and 3rd+ knock in one life: 25 s, ~17 s, ~11 s. */
-  bleedPerSecond: [4, 6, 9],
+  /** Bleed-out per second for the 1st, 2nd and 3rd+ knock in one life: 60 s, 40 s, 25 s. */
+  bleedPerSecond: [100 / 60, 100 / 40, 100 / 25],
   reviveSeconds: 5,
   /** Health after a revive. */
   reviveHealth: 10,

@@ -8,19 +8,19 @@ import type { ZoneCircle, ZonePhase, ZoneSpec, ZoneStage, ZoneState } from "./ty
 /** Playable half extent the zone centers are clamped to, m (Map v1: 1 km square). */
 export const ZONE_PLAYABLE_HALF_EXTENT = 500;
 
-/** Map v1 zone tuning (design.md §8.2 table). The circle closes at 10:55 of combat. */
+/** Map v1 zone tuning (design.md §8.2 table, sped up 2026-09-15). The circle closes at 6:55 of combat. */
 export const DEFAULT_ZONE_SPEC: ZoneSpec = {
   initial: { cx: 0, cz: 0, r: 710 },
   phases: [
-    { waitSeconds: 120, shrinkSeconds: 60, radius: 400, dps: 1 },
-    { waitSeconds: 60, shrinkSeconds: 45, radius: 250, dps: 2 },
-    { waitSeconds: 45, shrinkSeconds: 40, radius: 150, dps: 3 },
-    { waitSeconds: 40, shrinkSeconds: 30, radius: 90, dps: 5 },
-    { waitSeconds: 30, shrinkSeconds: 30, radius: 45, dps: 8 },
-    { waitSeconds: 25, shrinkSeconds: 25, radius: 20, dps: 12 },
-    { waitSeconds: 20, shrinkSeconds: 25, radius: 0, dps: 20 },
+    { waitSeconds: 70, shrinkSeconds: 40, radius: 400, dps: 1 },
+    { waitSeconds: 35, shrinkSeconds: 30, radius: 250, dps: 2 },
+    { waitSeconds: 30, shrinkSeconds: 25, radius: 150, dps: 3 },
+    { waitSeconds: 25, shrinkSeconds: 20, radius: 90, dps: 5 },
+    { waitSeconds: 20, shrinkSeconds: 20, radius: 45, dps: 8 },
+    { waitSeconds: 20, shrinkSeconds: 15, radius: 20, dps: 12 },
+    { waitSeconds: 20, shrinkSeconds: 15, radius: 0, dps: 20 },
   ],
-  firstAnnounceSeconds: 60,
+  firstAnnounceSeconds: 30,
   damageIntervalTicks: 6,
   edgeMargin: 40,
 };

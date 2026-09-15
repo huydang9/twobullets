@@ -30,7 +30,7 @@ describe("match config", () => {
     expect(config.actors[0]).toMatchObject({ kind: "human", difficulty: null });
     expect(config.actors[1]).toMatchObject({ kind: "bot", difficulty: "hard", team: 0 });
     expect(config.rules).toEqual({ friendlyFire: true, reviveSeconds: 5, bodyBlocking: true });
-    expect(config.timings.timeCapSeconds).toBe(720);
+    expect(config.timings.timeCapSeconds).toBe(480);
   });
 
   it("teammate=none leaves the human's team with one slot", () => {
@@ -41,7 +41,7 @@ describe("match config", () => {
 
   it("phase schedule with countdown, zero landing/glide and time scale", () => {
     const s = brPhaseSchedule(createBrMatchConfig({ seed: 1, timeScale: 0.5 }), 100);
-    expect(s).toEqual({ warmupStartTick: 100, warmupEndTick: 250, landingEndTick: 250, combatStartTick: 250, timeCapTick: 250 + 360 * 60 });
+    expect(s).toEqual({ warmupStartTick: 100, warmupEndTick: 250, landingEndTick: 250, combatStartTick: 250, timeCapTick: 250 + 240 * 60 });
   });
 });
 

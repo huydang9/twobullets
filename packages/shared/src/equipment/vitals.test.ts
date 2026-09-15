@@ -153,13 +153,14 @@ describe("bleed-out, revive and team wipes", () => {
     return applyDamage(base, NO_ARMOR, bullet(500, "body", 9), KNOCKABLE).vitals;
   };
 
-  it("bleeds out in 25 s on the first knock and faster on later ones", () => {
-    const first = runVitals(downed(), 24.9);
+  it("bleeds out in 60 s on the first knock and faster on later ones", () => {
+    const first = runVitals(downed(), 59.9);
     expect(first.vitals.life).toBe("downed");
     const out = runVitals(first.vitals, 0.2);
     expect(out.vitals.life).toBe("dead");
     expect(out.events).toEqual(["bledOut"]);
-    expect(runVitals(downed(2), 12).vitals.life).toBe("dead");
+    expect(runVitals(downed(2), 24).vitals.life).toBe("downed");
+    expect(runVitals(downed(2), 25.2).vitals.life).toBe("dead");
   });
 
   it("revives after 5 s of holding, pausing the bleed-out, to 10 HP", () => {
