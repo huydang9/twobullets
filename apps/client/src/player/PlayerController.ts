@@ -158,6 +158,10 @@ export class PlayerController {
     this.camera = new TargetCamera("playerCamera", Vector3.Zero(), scene);
     this.camera.minZ = 0.05;
     this.camera.fov = verticalFovFromHorizontal(CAMERA.fovDegrees);
+    // TargetCamera re-derives `upVector` from yaw+pitch+roll only on frames where rotation.z changes. After a punch or
+    // shake roll settles, that cached up keeps the old pitch in the old heading, and turning rolls the view by up to
+    // that pitch (test/player/cameraRoll.test.ts). Derive it from the full rotation every view update instead.
+    this.camera.updateUpVectorFromRotation = true;
     const [x, y, z] = spawn.position;
     this.body = new CharacterBody(scene, { x, y, z });
     if (this.spawnAuthority === "local") this.respawn();
