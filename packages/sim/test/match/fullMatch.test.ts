@@ -73,12 +73,16 @@ describe("headless bots-only match", () => {
     console.info(
       `[headless match, real brain] ${summary.reason} winner ${summary.winnerTeam} after ${summary.combatSeconds.toFixed(0)} s: ${summary.kills} kills (${summary.zoneDeaths} zone), ${summary.shots} shots, ` +
         `armed at end ${armed}, stuck ${summary.stuck.length} (longest ${summary.longestStuckSeconds} s ${JSON.stringify(summary.stuck.map((i) => [i.slot, Math.round(i.x), Math.round(i.z), i.seconds]))}); ` +
-        `tick ms p50 ${summary.tickMs.p50.toFixed(3)} p99 ${summary.tickMs.p99.toFixed(3)}; brain p50 ${summary.brainMs.p50.toFixed(3)} p99 ${summary.brainMs.p99.toFixed(3)}`,
+        `tick ms p50 ${summary.tickMs.p50.toFixed(3)} p99 ${summary.tickMs.p99.toFixed(3)}; brain+nav p50 ${summary.brainMs.p50.toFixed(3)} p99 ${summary.brainMs.p99.toFixed(3)} ` +
+        `(brains p99 ${summary.brainOnlyMs.p99.toFixed(3)}, nav.update p99 ${summary.navMs.p99.toFixed(3)})`,
     );
     expect(["lastTeam", "allDead", "timeCap"]).toContain(summary.reason);
     expect(summary.nanPositions).toBe(0);
     expect(summary.belowKillY).toBe(0);
-    expect(summary.brainMs.p99).toBeLessThan(1);
+    // Brains alone get the 1 ms budget (design.md §7). nav.update is a time slice bounded by its 1,500-expansion
+    // budget, so it gets its own gate; brain+nav is printed above.
+    expect(summary.brainOnlyMs.p99).toBeLessThan(1);
+    expect(summary.navMs.p99).toBeLessThan(1.5);
   }, 120_000);
 
   it("is deterministic: the same seed twice gives the same events and final positions", async () => {

@@ -139,12 +139,15 @@ export interface MatchSimOptions {
 
 export interface MatchSimStats {
   ticks: number;
-  /** Last tick's brain time, sim time (everything else), ms. */
+  /** Last tick's brain time (brains and nav.update), sim time (everything else), ms. */
   brainMs: number;
   simMs: number;
+  /** The nav.update part of `brainMs`, ms. */
+  navMs: number;
   /** Totals since start, ms. */
   brainTotalMs: number;
   simTotalMs: number;
+  navTotalMs: number;
   shots: number;
   projectilesAlive: number;
 }
@@ -346,7 +349,7 @@ export class MatchSim implements MatchView {
   readonly config: BrMatchConfig;
   readonly state: MatchState;
   readonly schedule: BrPhaseSchedule;
-  readonly stats: MatchSimStats = { ticks: 0, brainMs: 0, simMs: 0, brainTotalMs: 0, simTotalMs: 0, shots: 0, projectilesAlive: 0 };
+  readonly stats: MatchSimStats = { ticks: 0, brainMs: 0, simMs: 0, navMs: 0, brainTotalMs: 0, simTotalMs: 0, navTotalMs: 0, shots: 0, projectilesAlive: 0 };
   /** Last 256 events, oldest first (DEV `events(n)`). */
   readonly recentEvents: MatchEvent[] = [];
 
@@ -667,6 +670,7 @@ export class MatchSim implements MatchView {
       if (frozen) freezeInput(actor.out);
     }
     // Time-sliced path searches for every bot together (design.md §3.3); results are read by next tick's brains.
+    const tNav = this.profile ? performance.now() : 0;
     this.ports.nav.update(this.navBudget);
     const t2 = this.profile ? performance.now() : 0;
 
@@ -700,6 +704,8 @@ export class MatchSim implements MatchView {
     if (this.profile) {
       const t3 = performance.now();
       this.stats.brainMs = t2 - t1;
+      this.stats.navMs = t2 - tNav;
+      this.stats.navTotalMs += this.stats.navMs;
       this.stats.simMs = t3 - t0 - (t2 - t1);
       this.stats.brainTotalMs += this.stats.brainMs;
       this.stats.simTotalMs += this.stats.simMs;

@@ -48,8 +48,94 @@ interface ControllerHiddenState {
   _body: PhysicsBody;
 }
 
-/** Exposes the protected manifold refresh so hidden solver state can be rebuilt from the position alone (R5). */
+/** Babylon's controller private fields the lazy proximity query needs (characterController.js, 9.26.0). */
+interface ControllerQueryState {
+  _scene: Scene;
+  _shape: PhysicsShape;
+  _orientation: Quaternion;
+  _startCollector: unknown;
+  _body: PhysicsBody;
+}
+
+interface HavokQueryNative {
+  HP_World_ShapeProximityWithCollector(world: unknown, collector: unknown, query: unknown[]): void;
+}
+
+/**
+ * Exposes the protected manifold refresh so hidden solver state can be rebuilt from the position alone (R5).
+ *
+ * Also makes the start-contact proximity query lazy. Babylon runs one with every cast inside integrate(), but only
+ * `_updateManifold` reads its result, and the recast's is always overwritten before being read. The query runs when
+ * `_updateManifold` needs it, and not at all when the collector already holds the result for the same position and
+ * shape (the refresh at the start of a step). The static world doesn't change between queries, so manifolds are
+ * bit-identical to Babylon's order (see test/characterBodyFastPaths.test.ts).
+ */
 class ReplayableController extends PhysicsCharacterController {
+  private proximityPending = false;
+  private readonly pendingPosition = new Vector3();
+  private pendingShape: PhysicsShape | null = null;
+  private collectorValid = false;
+  private readonly collectorPosition = new Vector3();
+  private collectorShape: PhysicsShape | null = null;
+  /** Proximity queries actually run / skipped (tests and benches). */
+  proximityQueries = 0;
+  proximitySkipped = 0;
+
+  protected override _castWithCollectors(startPos: Vector3, endPos: Vector3, castCollector: unknown, startCollector?: unknown): void {
+    const self = this as unknown as ControllerQueryState;
+    if (CharacterBody.fastPaths && startCollector != null && startCollector === self._startCollector) {
+      if (this.proximityPending) this.proximitySkipped++;
+      this.proximityPending = true;
+      this.pendingPosition.copyFrom(startPos);
+      this.pendingShape = self._shape;
+      super._castWithCollectors(startPos, endPos, castCollector);
+      return;
+    }
+    super._castWithCollectors(startPos, endPos, castCollector, startCollector);
+  }
+
+  protected override _updateManifold(startCollector: unknown, castCollector: unknown, castPath: Vector3): number {
+    if (startCollector === (this as unknown as ControllerQueryState)._startCollector) this.flushProximity();
+    return super._updateManifold(startCollector, castCollector, castPath);
+  }
+
+  protected override _refreshManifoldAtPosition(position: Vector3): void {
+    this.proximityPending = false;
+    this.proximityQueries++;
+    super._refreshManifoldAtPosition(position);
+    this.collectorValid = true;
+    this.collectorPosition.copyFrom(position);
+    this.collectorShape = (this as unknown as ControllerQueryState)._shape;
+  }
+
+  private flushProximity(): void {
+    if (!this.proximityPending) return;
+    this.proximityPending = false;
+    const p = this.pendingPosition;
+    const shape = this.pendingShape!;
+    const c = this.collectorPosition;
+    if (this.collectorValid && this.collectorShape === shape && c.x === p.x && c.y === p.y && c.z === p.z) {
+      this.proximitySkipped++;
+      return;
+    }
+    // The same query as PhysicsCharacterController._castWithCollectors.
+    const self = this as unknown as ControllerQueryState;
+    const hk = self._scene.getPhysicsEngine()!.getPhysicsPlugin() as unknown as { _hknp: HavokQueryNative; world: unknown };
+    const o = self._orientation;
+    hk._hknp.HP_World_ShapeProximityWithCollector(hk.world, self._startCollector, [
+      shape._pluginData,
+      [p.x, p.y, p.z],
+      [o.x, o.y, o.z, o.w],
+      this.keepDistance + this.keepContactTolerance,
+      false,
+      [(self._body._pluginData as { hpBodyId: unknown[] }).hpBodyId[0]],
+    ]);
+    this.proximityQueries++;
+    this.collectorValid = true;
+    c.copyFrom(p);
+    this.collectorShape = shape;
+  }
+
   resetHiddenState(): void {
     const self = this as unknown as ControllerHiddenState;
     self._stepUpSavedManifold.length = 0;
@@ -90,6 +176,12 @@ class ReplayableController extends PhysicsCharacterController {
  * separation path first (netcode.md §1.3) and measure corrections.
  */
 export class CharacterBody {
+  /**
+   * The bit-identical shortcuts (rest steps, lazy proximity queries). Tests turn them off to compare against Babylon's
+   * plain path.
+   */
+  static fastPaths = true;
+
   private readonly controller: ReplayableController;
   private readonly plugin: HavokPlugin;
   private readonly capsules: Readonly<Record<Stance, PhysicsShapeCapsule>>;
@@ -148,6 +240,9 @@ export class CharacterBody {
     this.headProbe.filterCollideMask = MOVEMENT_COLLIDE_MASK;
     this.rayQuery = { ignoreBody: cc.body, collideWith: MOVEMENT_COLLIDE_MASK };
     this.syncFeet();
+    this.restFeet.x = this.feetValue.x;
+    this.restFeet.y = this.feetValue.y;
+    this.restFeet.z = this.feetValue.z;
   }
 
   /** Feet (ground contact) position after the last step or restore. */
@@ -186,6 +281,10 @@ export class CharacterBody {
     this.feetValue.x = feet.x;
     this.feetValue.y = feet.y;
     this.feetValue.z = feet.z;
+    this.restState = null;
+    this.restFeet.x = feet.x;
+    this.restFeet.y = feet.y;
+    this.restFeet.z = feet.z;
   }
 
   /**
@@ -201,6 +300,74 @@ export class CharacterBody {
    * step/snap fixups. Returns the next state carrying the collision-resolved velocity.
    */
   step(state: MoveState, input: MoveInput, dt: number): MoveState {
+    // A body at rest whose last step changed nothing, stepped again from the same state with the same input, would
+    // compute the same thing again: the step is a pure function of feet, state, input and dt against static geometry.
+    if (this.restState !== null && state === this.restState && CharacterBody.fastPaths && this.sameRestInput(input, dt)) {
+      this.restSkips++;
+      return state;
+    }
+    const next = this.stepBody(state, input, dt);
+    const f = this.feetValue;
+    const feetBefore = this.restFeet;
+    if (f.x === feetBefore.x && f.y === feetBefore.y && f.z === feetBefore.z && sameMoveState(state, next)) {
+      this.restState = next;
+      this.saveRestInput(input, dt);
+    } else {
+      this.restState = null;
+    }
+    feetBefore.x = f.x;
+    feetBefore.y = f.y;
+    feetBefore.z = f.z;
+    return next;
+  }
+
+  /** Steps skipped at rest; proximity queries run and skipped (tests and benches). */
+  get queryStats(): { readonly restSkips: number; readonly proximityQueries: number; readonly proximitySkipped: number } {
+    return { restSkips: this.restSkips, proximityQueries: this.controller.proximityQueries, proximitySkipped: this.controller.proximitySkipped };
+  }
+
+  private restSkips = 0;
+  /** The state a rest step returned (unchanged from its input), or null when the last step moved something. */
+  private restState: MoveState | null = null;
+  /** Feet before the last step. */
+  private readonly restFeet = { x: NaN, y: NaN, z: NaN };
+  private readonly restInput = { forward: 0, right: 0, jump: false, sprint: false, crouch: false, speedScale: 0, allowJump: true as boolean | undefined, crawl: false as boolean | undefined, yaw: 0, wishX: 0, wishZ: 0, dt: 0 };
+
+  private saveRestInput(input: MoveInput, dt: number): void {
+    const r = this.restInput;
+    r.forward = input.forward;
+    r.right = input.right;
+    r.jump = input.jump;
+    r.sprint = input.sprint;
+    r.crouch = input.crouch;
+    r.speedScale = input.speedScale;
+    r.allowJump = input.allowJump;
+    r.crawl = input.crawl;
+    r.yaw = input.yaw;
+    const s = Math.sin(input.yaw);
+    const c = Math.cos(input.yaw);
+    r.wishX = input.forward * s + input.right * c;
+    r.wishZ = input.forward * c - input.right * s;
+    r.dt = dt;
+  }
+
+  /**
+   * Same movement input as the saved rest step. Yaw (and pitch, which movement never reads) only matter through the
+   * wish direction; with no move keys that is a signed zero, so a still bot turning to aim keeps its rest state as long
+   * as the zeros' signs match.
+   */
+  private sameRestInput(input: MoveInput, dt: number): boolean {
+    const r = this.restInput;
+    if (!Object.is(r.forward, input.forward) || !Object.is(r.right, input.right) || r.jump !== input.jump || r.sprint !== input.sprint || r.crouch !== input.crouch) return false;
+    if (!Object.is(r.speedScale, input.speedScale) || r.allowJump !== input.allowJump || r.crawl !== input.crawl || !Object.is(r.dt, dt)) return false;
+    if (Object.is(r.yaw, input.yaw)) return true;
+    if (input.forward !== 0 || input.right !== 0) return false;
+    const s = Math.sin(input.yaw);
+    const c = Math.cos(input.yaw);
+    return Object.is(r.wishX, input.forward * s + input.right * c) && Object.is(r.wishZ, input.forward * c - input.right * s);
+  }
+
+  private stepBody(state: MoveState, input: MoveInput, dt: number): MoveState {
     const cc = this.controller;
     // The stance and body can be out of step with `state` after a restore from another source; the state wins.
     if (state.stance !== this.currentStance) this.setStance(state.stance);
@@ -362,6 +529,23 @@ export class CharacterBody {
 }
 
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Bitwise-equal movement states (signed zeros differ). */
+function sameMoveState(a: MoveState, b: MoveState): boolean {
+  return (
+    Object.is(a.velocity.x, b.velocity.x) &&
+    Object.is(a.velocity.y, b.velocity.y) &&
+    Object.is(a.velocity.z, b.velocity.z) &&
+    a.stance === b.stance &&
+    a.grounded === b.grounded &&
+    a.sprinting === b.sprinting &&
+    a.jumpHeld === b.jumpHeld &&
+    Object.is(a.coyoteTimer, b.coyoteTimer) &&
+    Object.is(a.jumpBufferTimer, b.jumpBufferTimer) &&
+    Object.is(a.groundIgnoreTimer, b.groundIgnoreTimer) &&
+    Object.is(a.fallSpeed, b.fallSpeed)
+  );
+}
 
 /** Feet to capsule center height for a stance (the controller's footOffset plus the skin), m. */
 function centerHeight(stance: Stance): number {

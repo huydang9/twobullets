@@ -45,6 +45,10 @@ const CLOSED = -2;
 const INF = 3.4e38;
 const OCTILE = Math.SQRT2 - 1;
 const TIE_BREAK = 1 - 1e-4;
+/** Cost multiplier on road cells. */
+const ROAD_MULTIPLIER = 0.95;
+/** `nbIndex` marker: resolve the neighbour's window index and position through the generic accessors. */
+const GENERIC_NEIGHBOR = -3;
 /** lineWalkable's end must be within this height of the target point, m (rejects the room right above or below). */
 const LINE_FLOOR_TOLERANCE = 1;
 /** Unit directions for sampleRing (deterministic sin/cos, no per-call math). */
@@ -57,40 +61,47 @@ for (let i = 0; i < RING_DIRECTIONS; i++) {
   RING_COS[i] = cos;
 }
 
-/** Binary min-heap of scratch indices keyed by `key[idx]`, with positions for decrease-key. */
+/**
+ * Binary min-heap of scratch indices with positions for decrease-key. Keys live next to their indices by heap position
+ * (`keys[i]` belongs to `heap[i]`), so sifting never chases an index to find its key.
+ */
 class IndexHeap {
   readonly heap: Int32Array;
-  readonly key: Float32Array;
+  /** Float32 key of the index at each heap position. */
+  readonly keys: Float32Array;
   /** Heap position per index, -1 not queued, CLOSED expanded. Valid only when the owner's stamp matches. */
   readonly pos: Int32Array;
   size = 0;
 
   constructor(capacity: number) {
     this.heap = new Int32Array(capacity);
-    this.key = new Float32Array(capacity);
+    this.keys = new Float32Array(capacity);
     this.pos = new Int32Array(capacity);
   }
 
   push(idx: number, key: number): void {
-    this.key[idx] = key;
-    let i = this.size++;
+    const i = this.size++;
     this.heap[i] = idx;
+    this.keys[i] = key;
     this.pos[idx] = i;
     this.up(i);
   }
 
   decrease(idx: number, key: number): void {
-    this.key[idx] = key;
-    this.up(this.pos[idx]!);
+    const i = this.pos[idx]!;
+    this.keys[i] = key;
+    this.up(i);
   }
 
   pop(): number {
     const heap = this.heap;
     const top = heap[0]!;
-    const last = heap[--this.size]!;
-    if (this.size > 0) {
-      heap[0] = last;
-      this.pos[last] = 0;
+    const last = --this.size;
+    if (last > 0) {
+      const idx = heap[last]!;
+      heap[0] = idx;
+      this.keys[0] = this.keys[last]!;
+      this.pos[idx] = 0;
       this.down(0);
     }
     this.pos[top] = CLOSED;
@@ -99,39 +110,53 @@ class IndexHeap {
 
   private up(i: number): void {
     const heap = this.heap;
-    const key = this.key;
+    const keys = this.keys;
+    const pos = this.pos;
     const idx = heap[i]!;
-    const k = key[idx]!;
+    const k = keys[i]!;
     while (i > 0) {
       const parent = (i - 1) >> 1;
+      const pk = keys[parent]!;
+      if (pk <= k) break;
       const p = heap[parent]!;
-      if (key[p]! <= k) break;
       heap[i] = p;
-      this.pos[p] = i;
+      keys[i] = pk;
+      pos[p] = i;
       i = parent;
     }
     heap[i] = idx;
-    this.pos[idx] = i;
+    keys[i] = k;
+    pos[idx] = i;
   }
 
   private down(i: number): void {
     const heap = this.heap;
-    const key = this.key;
+    const keys = this.keys;
+    const pos = this.pos;
     const n = this.size;
     const idx = heap[i]!;
-    const k = key[idx]!;
+    const k = keys[i]!;
     for (;;) {
       let child = 2 * i + 1;
       if (child >= n) break;
-      if (child + 1 < n && key[heap[child + 1]!]! < key[heap[child]!]!) child++;
+      let ck = keys[child]!;
+      if (child + 1 < n) {
+        const rk = keys[child + 1]!;
+        if (rk < ck) {
+          child++;
+          ck = rk;
+        }
+      }
+      if (ck >= k) break;
       const c = heap[child]!;
-      if (key[c]! >= k) break;
       heap[i] = c;
-      this.pos[c] = i;
+      keys[i] = ck;
+      pos[c] = i;
       i = child;
     }
     heap[i] = idx;
-    this.pos[idx] = i;
+    keys[i] = k;
+    pos[idx] = i;
   }
 }
 
@@ -185,6 +210,10 @@ export class GridNavQuery implements NavQuery {
   private readonly coarse: SearchScratch;
   private readonly nbRefs = new Int32Array(64);
   private readonly nbCosts = new Float32Array(64);
+  /** Per neighbour: window index (-1 outside), or GENERIC_NEIGHBOR to resolve through indexOf/nodeX/nodeZ. */
+  private readonly nbIndex = new Int32Array(64);
+  private readonly nbX = new Float64Array(64);
+  private readonly nbZ = new Float64Array(64);
 
   // Requests (structure of arrays).
   private readonly code = new Uint8Array(NAV_QUERY_LIMITS.maxRequests);
@@ -630,7 +659,7 @@ export class GridNavQuery implements NavQuery {
 
   private multiplier(flags: number, x: number, z: number): number {
     let m = 1;
-    if ((flags & NavFlag.road) !== 0) m *= 0.95;
+    if ((flags & NavFlag.road) !== 0) m *= ROAD_MULTIPLIER;
     if (this.aCover > 0 && (flags & (NavFlag.vegetation | NavFlag.nearObstacle)) !== 0) m *= 1 - 0.3 * this.aCover;
     if (this.aHasZone) {
       const dx = x - this.aZoneX;
@@ -889,6 +918,21 @@ export class GridNavQuery implements NavQuery {
     const heap = s.heap;
     const refs = this.nbRefs;
     const costs = this.nbCosts;
+    const nbIndex = this.nbIndex;
+    const nbX = this.nbX;
+    const nbZ = this.nbZ;
+    const terrainNodes = d.terrainNodes;
+    const terrainFlags = d.terrainFlags;
+    const crouch = this.aCrouch;
+    const g0 = s.g;
+    const parent = s.parent;
+    const pos = heap.pos;
+    // Constant while this call runs (a finished or failed leg returns right away).
+    const targetX = this.targetX;
+    const targetZ = this.targetZ;
+    const hScale = this.hScale;
+    /** Only the road discount applies: the multiplier is 1 or 0.95, exactly as `multiplier` computes it. */
+    const plainCost = this.aCover <= 0 && !this.aHasZone && this.aAvoidCount === 0;
     let used = 0;
     while (used < budget) {
       if (heap.size === 0) {
@@ -912,29 +956,147 @@ export class GridNavQuery implements NavQuery {
         this.legBestH = h;
         this.legBest = ref;
       }
-      const g = s.g[idx]!;
-      const n = d.neighbors(ref, refs, costs);
+      const g = g0[idx]!;
+      const n = ref < terrainNodes ? this.terrainNeighbors(idx, ref) : this.genericNeighbors(ref);
       for (let i = 0; i < n; i++) {
         const nb = refs[i]!;
-        const flags = d.flagsOf(nb);
-        if (!this.aCrouch && (flags & NavFlag.crouchOnly) !== 0) continue;
-        const ni = this.indexOf(nb);
+        const flags = nb < terrainNodes ? terrainFlags[nb]! : d.flagsOf(nb);
+        if (!crouch && (flags & NavFlag.crouchOnly) !== 0) continue;
+        let ni = nbIndex[i]!;
+        const generic = ni === GENERIC_NEIGHBOR;
+        if (generic) ni = this.indexOf(nb);
         if (ni < 0 || !s.touch(ni)) continue;
-        const x = d.nodeX(nb);
-        const z = d.nodeZ(nb);
-        const ng = g + costs[i]! * this.multiplier(flags, x, z);
-        if (ng >= s.g[ni]!) continue;
-        s.g[ni] = ng;
-        s.parent[ni] = idx;
-        const dx = Math.abs(x - this.targetX);
-        const dz = Math.abs(z - this.targetZ);
+        const x = generic ? d.nodeX(nb) : nbX[i]!;
+        const z = generic ? d.nodeZ(nb) : nbZ[i]!;
+        const m = plainCost ? ((flags & NavFlag.road) !== 0 ? ROAD_MULTIPLIER : 1) : this.multiplier(flags, x, z);
+        const ng = g + costs[i]! * m;
+        if (ng >= g0[ni]!) continue;
+        g0[ni] = ng;
+        parent[ni] = idx;
+        const dx = Math.abs(x - targetX);
+        const dz = Math.abs(z - targetZ);
         // Ties on f prefer the deeper node (open ground has wide plateaus of equal f).
-        const f = ng * TIE_BREAK + (dx > dz ? dx + OCTILE * dz : dz + OCTILE * dx) * this.hScale;
-        if (heap.pos[ni]! >= 0) heap.decrease(ni, f);
+        const f = ng * TIE_BREAK + (dx > dz ? dx + OCTILE * dz : dz + OCTILE * dx) * hScale;
+        if (pos[ni]! >= 0) heap.decrease(ni, f);
         else heap.push(ni, f);
       }
     }
     return used;
+  }
+
+  /** `NavGridData.neighbors` for any node, every entry resolved later through `indexOf`/`nodeX`/`nodeZ`. */
+  private genericNeighbors(ref: number): number {
+    const n = this.data.neighbors(ref, this.nbRefs, this.nbCosts);
+    this.nbIndex.fill(GENERIC_NEIGHBOR, 0, n);
+    return n;
+  }
+
+  /**
+   * `NavGridData.neighbors` for a terrain node inside the window, in the same order and with the same Float32 costs,
+   * plus each terrain neighbour's window index and cell center from the expanded cell's column and row (no division
+   * per neighbour). Link targets stay generic.
+   */
+  private terrainNeighbors(idx: number, ref: number): number {
+    const d = this.data;
+    const refs = this.nbRefs;
+    const costs = this.nbCosts;
+    const nbIndex = this.nbIndex;
+    const nbX = this.nbX;
+    const nbZ = this.nbZ;
+    const w = d.width;
+    const flags = d.terrainFlags;
+    const cs = d.cellSize;
+    const diag = cs * Math.SQRT2;
+    const winW = this.winW;
+    const lx = idx % winW;
+    const lz = (idx - lx) / winW;
+    const ix = this.wx0 + lx;
+    const iz = this.wz0 + lz;
+    const e = ix + 1 < w && (flags[ref + 1]! & PASSABLE) !== 0;
+    const west = ix > 0 && (flags[ref - 1]! & PASSABLE) !== 0;
+    const north = iz + 1 < d.depth && (flags[ref + w]! & PASSABLE) !== 0;
+    const south = iz > 0 && (flags[ref - w]! & PASSABLE) !== 0;
+    // Window-relative neighbour rows and columns are in range when these hold.
+    const inE = lx + 1 < winW;
+    const inW = lx > 0;
+    const inN = lz + 1 < this.winD;
+    const inS = lz > 0;
+    const x0 = d.originX + (ix + 0.5) * cs;
+    const xE = d.originX + (ix + 1 + 0.5) * cs;
+    const xW = d.originX + (ix - 1 + 0.5) * cs;
+    const z0 = d.originZ + (iz + 0.5) * cs;
+    const zN = d.originZ + (iz + 1 + 0.5) * cs;
+    const zS = d.originZ + (iz - 1 + 0.5) * cs;
+    let n = 0;
+    if (e) {
+      refs[n] = ref + 1;
+      costs[n] = cs;
+      nbIndex[n] = inE ? idx + 1 : -1;
+      nbX[n] = xE;
+      nbZ[n++] = z0;
+    }
+    if (west) {
+      refs[n] = ref - 1;
+      costs[n] = cs;
+      nbIndex[n] = inW ? idx - 1 : -1;
+      nbX[n] = xW;
+      nbZ[n++] = z0;
+    }
+    if (north) {
+      refs[n] = ref + w;
+      costs[n] = cs;
+      nbIndex[n] = inN ? idx + winW : -1;
+      nbX[n] = x0;
+      nbZ[n++] = zN;
+    }
+    if (south) {
+      refs[n] = ref - w;
+      costs[n] = cs;
+      nbIndex[n] = inS ? idx - winW : -1;
+      nbX[n] = x0;
+      nbZ[n++] = zS;
+    }
+    if (e && north && (flags[ref + w + 1]! & PASSABLE) !== 0) {
+      refs[n] = ref + w + 1;
+      costs[n] = diag;
+      nbIndex[n] = inE && inN ? idx + winW + 1 : -1;
+      nbX[n] = xE;
+      nbZ[n++] = zN;
+    }
+    if (west && north && (flags[ref + w - 1]! & PASSABLE) !== 0) {
+      refs[n] = ref + w - 1;
+      costs[n] = diag;
+      nbIndex[n] = inW && inN ? idx + winW - 1 : -1;
+      nbX[n] = xW;
+      nbZ[n++] = zN;
+    }
+    if (e && south && (flags[ref - w + 1]! & PASSABLE) !== 0) {
+      refs[n] = ref - w + 1;
+      costs[n] = diag;
+      nbIndex[n] = inE && inS ? idx - winW + 1 : -1;
+      nbX[n] = xE;
+      nbZ[n++] = zS;
+    }
+    if (west && south && (flags[ref - w - 1]! & PASSABLE) !== 0) {
+      refs[n] = ref - w - 1;
+      costs[n] = diag;
+      nbIndex[n] = inW && inS ? idx - winW - 1 : -1;
+      nbX[n] = xW;
+      nbZ[n++] = zS;
+    }
+    const first = d.firstLink(ref);
+    if (first >= 0) {
+      const { linkFrom, linkTo, linkCost } = d.arrays;
+      const capacity = refs.length;
+      for (let i = first; i < linkFrom.length && linkFrom[i] === ref && n < capacity; i++) {
+        const to = linkTo[i]!;
+        if ((d.flagsOf(to) & PASSABLE) === 0) continue;
+        refs[n] = to;
+        costs[n] = linkCost[i]!;
+        nbIndex[n++] = GENERIC_NEIGHBOR;
+      }
+    }
+    return n;
   }
 
   private completeLeg(idx: number): void {

@@ -2,6 +2,7 @@ import { BOT_PROFILES } from "@twobullets/shared/bots/profiles/profiles";
 import type { BotBrainFactory, BotDifficulty, NavQuery } from "@twobullets/shared/bots/types";
 import { createArmorPiece } from "@twobullets/shared/equipment/armor";
 import { createInventory, type InventoryState } from "@twobullets/shared/equipment/inventory";
+import { createStartingInventory } from "@twobullets/shared/equipment/presets";
 import { createGroundLoot, generateLoot, type GroundLoot } from "@twobullets/shared/equipment/loot";
 import { MAP_V1 } from "@twobullets/shared/map/mapV1";
 import { createBrMatchConfig, type BrMatchConfigOptions } from "@twobullets/shared/match/rules";
@@ -20,8 +21,8 @@ export interface HeadlessMatchOptions {
   readonly brains: BotBrainFactory;
   readonly timeScale?: number;
   readonly difficulty?: BotDifficulty;
-  /** "armed": rifle, pistol, ammo, L1 armor, first aid (until bots loot); "empty": PUBG start. */
-  readonly loadout?: "armed" | "empty";
+  /** "armed": rifle, pistol, ammo, L1 armor, first aid (until bots loot); "empty": PUBG start; "starting": the offline client's kit. */
+  readonly loadout?: "armed" | "empty" | "starting";
   /** "grid" (default): the real Map v1 NavQuery; "straight": terrain straight lines; or a query of your own. */
   readonly nav?: NavQuery | "grid" | "straight";
   readonly profile?: boolean;
@@ -54,6 +55,12 @@ export function armedInventory(): InventoryState {
   });
 }
 
+/** MatchSim `inventoryFor` option for a harness loadout. */
+export function loadoutFor(loadout: HeadlessMatchOptions["loadout"]): { inventoryFor?: () => InventoryState } {
+  if (loadout === "empty") return {};
+  return { inventoryFor: loadout === "starting" ? () => createStartingInventory() : () => armedInventory() };
+}
+
 export async function createHeadlessMatch(havok: HavokModule, options: HeadlessMatchOptions): Promise<HeadlessMatch> {
   const map = await loadMapV1();
   const world = createMapSimWorld(havok, map);
@@ -75,7 +82,7 @@ export async function createHeadlessMatch(havok: HavokModule, options: HeadlessM
     spawns,
     killY: MAP_V1.bounds.killY,
     profile: options.profile ?? false,
-    ...(options.loadout === "empty" ? {} : { inventoryFor: () => armedInventory() }),
+    ...loadoutFor(options.loadout),
     ports: {
       raycastWorld: world.raycastWorld,
       nav,
@@ -128,7 +135,11 @@ export interface MatchSummary {
   readonly nanPositions: number;
   readonly belowKillY: number;
   readonly tickMs: { readonly p50: number; readonly p99: number; readonly max: number; readonly mean: number };
+  /** Brains plus nav.update per tick (MatchSim.stats.brainMs). */
   readonly brainMs: { readonly p50: number; readonly p99: number };
+  /** Brains alone, and the time-sliced nav.update alone (bounded by its expansion budget). */
+  readonly brainOnlyMs: { readonly p50: number; readonly p99: number };
+  readonly navMs: { readonly p50: number; readonly p99: number };
   readonly wallMs: number;
 }
 
@@ -149,6 +160,8 @@ export function runHeadlessMatch(match: HeadlessMatch, maxTicks: number): MatchS
   const stuck: StuckIncident[] = [];
   const tickTimes: number[] = [];
   const brainTimes: number[] = [];
+  const brainOnlyTimes: number[] = [];
+  const navTimes: number[] = [];
   let nanPositions = 0;
   let belowKillY = 0;
   let ticks = 0;
@@ -163,6 +176,8 @@ export function runHeadlessMatch(match: HeadlessMatch, maxTicks: number): MatchS
     sim.tick();
     tickTimes.push(performance.now() - t0);
     brainTimes.push(sim.stats.brainMs);
+    brainOnlyTimes.push(sim.stats.brainMs - sim.stats.navMs);
+    navTimes.push(sim.stats.navMs);
     const tick = sim.state.tick;
     const combat = sim.state.phase === "combat";
     for (const slot of slots) {
@@ -199,6 +214,8 @@ export function runHeadlessMatch(match: HeadlessMatch, maxTicks: number): MatchS
   const s = sim.state;
   const sorted = [...tickTimes].sort((a, b) => a - b);
   const sortedBrain = [...brainTimes].sort((a, b) => a - b);
+  const sortedBrainOnly = brainOnlyTimes.sort((a, b) => a - b);
+  const sortedNav = navTimes.sort((a, b) => a - b);
   const pct = (arr: number[], p: number) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] ?? 0;
   const endTick = events.find((e) => e.type === "matchEnded")?.tick ?? s.tick;
   return {
@@ -219,6 +236,8 @@ export function runHeadlessMatch(match: HeadlessMatch, maxTicks: number): MatchS
     belowKillY,
     tickMs: { p50: pct(sorted, 0.5), p99: pct(sorted, 0.99), max: sorted.at(-1) ?? 0, mean: tickTimes.reduce((a, b) => a + b, 0) / Math.max(1, tickTimes.length) },
     brainMs: { p50: pct(sortedBrain, 0.5), p99: pct(sortedBrain, 0.99) },
+    brainOnlyMs: { p50: pct(sortedBrainOnly, 0.5), p99: pct(sortedBrainOnly, 0.99) },
+    navMs: { p50: pct(sortedNav, 0.5), p99: pct(sortedNav, 0.99) },
     wallMs: performance.now() - started,
   };
 }
