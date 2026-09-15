@@ -1,6 +1,7 @@
 {
   "name": "@twobullets/client",
   "private": true,
+  "author": "Huy Dang",
   "type": "module",
   "scripts": {
     "dev": "vite",

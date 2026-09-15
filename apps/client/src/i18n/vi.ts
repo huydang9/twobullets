@@ -355,6 +355,7 @@ export const vi = {
   "menu.practiceHint": "Chơi offline ngay trên máy của bạn, không cần máy chủ.",
   "menu.settings": "Cài đặt",
   "menu.credits": "Ghi công",
+  "menu.author": "Tác giả: {name}",
   "menu.creditsIntro": "Tài nguyên miễn phí dùng trong game",
   "menu.homeTitle": "Sẵn sàng nhảy dù",
   "menu.homeHint": "Chơi nhanh để ghép trận ngay, hoặc tạo phòng để chơi cùng bạn bè.",

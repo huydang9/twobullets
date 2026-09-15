@@ -335,6 +335,7 @@ export class MenuView {
 
   private creditsPanel(content: HTMLElement): void {
     el("h2", "tb-menu__heading", t("menu.credits"), content);
+    el("p", "tb-menu__author", t("menu.author", { name: "Huy Dang" }), content);
     el("p", "tb-menu__hint", t("menu.creditsIntro"), content);
     if (this.credits === null) {
       el("p", "tb-menu__hint", t("menu.loading"), content);
