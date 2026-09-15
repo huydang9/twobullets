@@ -169,7 +169,8 @@ export class NetGame {
       this.clientValue?.onPredictedTick(tick.playerInput);
     });
     if (this.config.debugHitboxes) this.overlay = new HitboxOverlay(scene, this.hitboxes, remotes);
-    this.hud = new NetDebugHud(deps.hudRoot, input);
+    // Hidden by default (F6 toggles); DEV `?netDebug=1` opens it at start.
+    this.hud = new NetDebugHud(deps.hudRoot, input, { visible: import.meta.env.DEV && new URLSearchParams(window.location.search).get("netDebug") === "1" });
     window.addEventListener("beforeunload", () => this.clientValue?.disconnect());
   }
 
