@@ -19,6 +19,7 @@ interface Arm {
   yaw: number;
   bornAt: number;
   strength: number;
+  shown: boolean;
 }
 
 function wrap(a: number): number {
@@ -46,7 +47,7 @@ export class DamageDirectionIndicator {
       arc.style.cssText = INDICATOR_ARC_STYLE;
       node.appendChild(arc);
       this.root.appendChild(node);
-      this.arms.push({ node, yaw: 0, bornAt: -Infinity, strength: 0 });
+      this.arms.push({ node, yaw: 0, bornAt: -Infinity, strength: 0, shown: false });
     }
   }
 
@@ -73,9 +74,13 @@ export class DamageDirectionIndicator {
     for (const arm of this.arms) {
       const age = now - arm.bornAt;
       if (age >= INDICATOR_MS) {
-        if (arm.node.style.opacity !== "0") arm.node.style.opacity = "0";
+        if (arm.shown) {
+          arm.shown = false;
+          arm.node.style.opacity = "0";
+        }
         continue;
       }
+      arm.shown = true;
       const fade = 1 - age / INDICATOR_MS;
       arm.node.style.opacity = (arm.strength * fade * fade).toFixed(3);
       arm.node.style.transform = `rotate(${wrap(arm.yaw - cameraYaw).toFixed(4)}rad)`;

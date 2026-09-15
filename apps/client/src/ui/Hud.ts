@@ -10,6 +10,7 @@ import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEqui
 import { MapHud, type MapHudOptions, type MapViewSource } from "./map";
 import { PlayOverlay, type MatchSetup } from "./PlayOverlay";
 import { StatsPanel } from "./StatsPanel";
+import { StatsStrip, type StatsStripNet } from "./StatsStrip";
 import "./hud.css";
 
 export interface HudState {
@@ -54,6 +55,7 @@ export class Hud {
   private readonly overlay: PlayOverlay;
   private readonly crosshair: Crosshair;
   private readonly stats: StatsPanel;
+  private readonly strip: StatsStrip;
   private readonly container: HTMLDivElement;
   private readonly inspectorTag: HTMLDivElement;
   private combat: CombatHud | undefined;
@@ -71,6 +73,7 @@ export class Hud {
 
   constructor(root: HTMLDivElement, handlers: HudHandlers) {
     this.container = el("div", "tb-hud", undefined, root);
+    this.strip = new StatsStrip(this.container);
     this.stats = new StatsPanel(this.container, import.meta.env.DEV);
     this.crosshair = new Crosshair(this.container);
     this.overlay = new PlayOverlay(this.container, handlers.onPlayClick);
@@ -130,6 +133,16 @@ export class Hud {
     return this.mapHud;
   }
 
+  /** Online: ping and packet loss for the top-left stats strip (read about 4 times per second); null shows FPS only. */
+  setNetStats(source: (() => StatsStripNet | null) | null): void {
+    this.strip.setNet(source);
+  }
+
+  /** The F3 panel is open (it reads `HudState.player`; callers may skip building it otherwise). */
+  get statsVisible(): boolean {
+    return this.stats.visible;
+  }
+
   /** Toggles the debug stats panel (F3). */
   toggleStats(): void {
     this.stats.visible = !this.stats.visible;
@@ -181,6 +194,7 @@ export class Hud {
 
     this.combat?.update(now);
     this.crosshair.update(dt);
+    this.strip.update(now, state.fps, dt);
     this.stats.update(state.fps, state.player);
     this.mapHud?.update(now);
   }

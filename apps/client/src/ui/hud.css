@@ -62,6 +62,52 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 
+/* ---------- Stats strip (FPS, ping, loss) ---------- */
+
+.tb-strip {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  font: 400 12px/1.4 var(--tb-font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--tb-text-dim);
+  pointer-events: none;
+}
+
+.tb-strip__item + .tb-strip__item::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--tb-text-faint);
+}
+
+.tb-strip__label {
+  margin-right: 4px;
+  color: var(--tb-text-faint);
+}
+
+.tb-strip__value {
+  color: var(--tb-text);
+}
+
+.tb-strip__value[data-tier="good"] {
+  color: #9fd8a4;
+}
+.tb-strip__value[data-tier="ok"] {
+  color: var(--tb-amber);
+}
+.tb-strip__value[data-tier="bad"] {
+  color: var(--tb-red);
+}
+
+.tb-hud--inspector .tb-strip {
+  display: none;
+}
+
 /* ---------- Debug stats ---------- */
 
 .tb-stats {
@@ -75,6 +121,11 @@
   font: 11px/1.6 var(--tb-mono);
   font-variant-numeric: tabular-nums;
   text-shadow: none;
+}
+
+/* Below the stats strip when both show. */
+.tb-strip:not([hidden]) ~ .tb-stats {
+  top: 32px;
 }
 
 .tb-hud--inspector .tb-stats {

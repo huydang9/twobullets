@@ -4,6 +4,7 @@ import type { BotDifficulty } from "@twobullets/shared";
 import { getLanguage, LANGUAGES, onLanguageChange, setLanguage, t, type Language, type MessageKey } from "../i18n";
 import { el } from "../ui/dom";
 import { MapPicker } from "../ui/mapPicker";
+import { loadStatsStripEnabled, saveStatsStripEnabled } from "../ui/StatsStrip";
 import { loadCreditLines } from "./credits";
 import { mapLabel, mapPreviewUrl, unavailableNetworkMaps } from "./maps";
 import type { MenuController } from "./MenuController";
@@ -324,6 +325,12 @@ export class MenuView {
       });
       el("div", "tb-menu__hint", t("settings.graphicsHint"), cell);
     });
+    this.row(content, "settings.statsStrip", (cell) =>
+      this.segmented(cell, [{ value: "on", label: t("settings.on") }, { value: "off", label: t("settings.off") }], loadStatsStripEnabled() ? "on" : "off", (value) => {
+        saveStatsStripEnabled(value === "on");
+        this.rerender();
+      }),
+    );
   }
 
   private creditsPanel(content: HTMLElement): void {

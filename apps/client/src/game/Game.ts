@@ -1,6 +1,6 @@
 import { Engine, HavokPlugin, Scene, Vector3 } from "@babylonjs/core";
 import HavokPhysics from "@babylonjs/havok";
-import { ARENA_LEVEL, MOVEMENT } from "@twobullets/shared";
+import { ARENA_LEVEL, MOVEMENT, type PlayerDebugState } from "@twobullets/shared";
 import { buildLevel } from "@twobullets/sim";
 import { AssetLibrary, installAssetDevTools, type AssetLoadProgress, type Credit } from "../assets";
 import { CombatSystem } from "../combat/CombatSystem";
@@ -36,6 +36,8 @@ import { resolveLaunch, type GameLaunch } from "./launch";
  */
 export class Game {
   private net: NetGame | null = null;
+  /** Reused every frame; the player's debug state is rebuilt only while the F3 panel shows it. */
+  private hudState: { fps: number; player: PlayerDebugState } | null = null;
 
   private constructor(
     private readonly engine: Engine,
@@ -158,6 +160,7 @@ export class Game {
       life.dispose();
       net.attach({ scene, player, input, hudRoot, hud, combat, presentation, equipment, soldiers: { assets, environment }, world, mapId: mapDefinition?.id ?? "arena" });
       game.net = net;
+      hud.setNetStats(() => net.client?.stats ?? null);
       void net.connect();
     }
     if (import.meta.env.DEV) {
@@ -170,6 +173,7 @@ export class Game {
   }
 
   private start(): void {
+    this.hudState = { fps: 0, player: this.player.getDebugState() };
     // A throwing frame would stop Babylon's loop silently (a frozen picture): stop on purpose and say what failed.
     this.engine.runRenderLoop(() => {
       try {
@@ -200,7 +204,10 @@ export class Game {
     this.scene.render();
     perf?.afterRender();
     this.hud.setFlashWhiteout(this.presentation.equipment.flashWhiteout);
-    this.hud.update({ fps: this.engine.getFps(), player: this.player.getDebugState() });
+    const hudState = this.hudState!;
+    hudState.fps = this.engine.getFps();
+    if (this.hud.statsVisible) hudState.player = this.player.getDebugState();
+    this.hud.update(hudState);
     this.inventory.update();
     this.input.endFrame();
     this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());

@@ -39,6 +39,72 @@ export function netInputButtons(buttons: number, life: number): number {
   return life === LifeCode.alive ? buttons : buttons & ~COMBAT_BUTTONS;
 }
 
+/** Local equipment has the hands (M4 doesn't network equipment): a throwable out in any phase, or a heal/boost in use. */
+export function netHandsBusy(throwPhase: string, usingItem: boolean): boolean {
+  return throwPhase !== "idle" || usingItem;
+}
+
+/**
+ * The equipment weapon gate (shared `gateCombatInput`) applied to the wire buttons, so local prediction, the server and
+ * replays all step the same cleared input: while the hands are busy fire, aim and reload are dropped, and fire stays
+ * dropped after they free up until the trigger is released (the click that throws never also fires). One per player,
+ * called once per live tick.
+ */
+export class NetHandsGate {
+  private fireLatched = false;
+
+  apply(buttons: number, handsBusy: boolean): number {
+    if (handsBusy) {
+      this.fireLatched = true;
+      return buttons & ~COMBAT_BUTTONS;
+    }
+    if (this.fireLatched) {
+      if ((buttons & Btn.fire) !== 0) return buttons & ~Btn.fire;
+      this.fireLatched = false;
+    }
+    return buttons;
+  }
+
+  reset(): void {
+    this.fireLatched = false;
+  }
+}
+
+/** What the networked tick input reads besides the local weapons (NetGame wiring). */
+export interface NetCombatInputSources {
+  /** Local equipment has the hands (`netHandsBusy`). */
+  handsBusy(): boolean;
+  /** Interact held with pointer lock (revive). */
+  interactHeld(): boolean;
+  /** Owner life code from the server. */
+  life(): number;
+}
+
+/**
+ * The player's combat link in networked play: the local weapons' tick input with the hands gate, the revive button and
+ * the downed/dead clearing applied, in that order. The result is what the local prediction steps, what replays step and
+ * what the server receives.
+ */
+export function netCombatLink(
+  combat: { readonly weaponState: WeaponState; takeCombatInput(out: { buttons: number; select: number }): void },
+  sources: NetCombatInputSources,
+): { readonly weaponState: WeaponState; takeCombatInput(out: { buttons: number; select: number }): void } {
+  const hands = new NetHandsGate();
+  return {
+    get weaponState() {
+      return combat.weaponState;
+    },
+    takeCombatInput(out) {
+      combat.takeCombatInput(out);
+      out.buttons = hands.apply(out.buttons, sources.handsBusy());
+      if (sources.interactHeld()) out.buttons |= REVIVE_BUTTON;
+      const life = sources.life();
+      out.buttons = netInputButtons(out.buttons, life);
+      out.select = netInputSelect(out.select, life);
+    },
+  };
+}
+
 /** While downed (or dead) the server steps `select = 0`. */
 export function netInputSelect(select: number, life: number): number {
   return life === LifeCode.alive ? select : 0;

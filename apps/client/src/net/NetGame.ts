@@ -19,7 +19,7 @@ import { LocalPlayerNet } from "./LocalPlayerNet";
 import { NetClient } from "./NetClient";
 import { NetClock, WS_BUFFER_TICKS } from "./NetClock";
 import { NetCombat } from "./NetCombat";
-import { createNetWeaponState, netInputButtons, netInputSelect, REVIVE_BUTTON } from "./netCombatRules";
+import { createNetWeaponState, netCombatLink, netHandsBusy } from "./netCombatRules";
 import { NetCombatPresenter } from "./NetCombatPresenter";
 import { NetMatch } from "./NetMatch";
 import { NET_MOVEMENT, NetMovement } from "./netMovement";
@@ -105,19 +105,17 @@ export class NetGame {
     this.movement.weaponSource = () => combat.weaponState;
     const local = (this.local = new LocalPlayerNet(new NetPlayerBody(player, combat)));
 
-    // Tick input: combat bits cleared while downed or dead (the server steps them cleared), interact held for revives.
+    // Tick input: combat bits cleared while downed or dead (the server steps them cleared), and while local equipment has
+    // the hands (throwable out, item in use), so the click that throws never also fires; interact held for revives.
     const movement = this.movement;
-    player.setCombatLink({
-      get weaponState() {
-        return combat.weaponState;
-      },
-      takeCombatInput(out) {
-        combat.takeCombatInput(out);
-        if (input.isLocked && input.isActionDown("interact")) out.buttons |= REVIVE_BUTTON;
-        out.buttons = netInputButtons(out.buttons, movement.life);
-        out.select = netInputSelect(out.select, movement.life);
-      },
-    });
+    const equipment = deps.equipment;
+    player.setCombatLink(
+      netCombatLink(combat, {
+        handsBusy: () => netHandsBusy(equipment.throwState.phase, equipment.use !== null),
+        interactHeld: () => input.isLocked && input.isActionDown("interact"),
+        life: () => movement.life,
+      }),
+    );
     // Recoil, flash, tracer and sound only for shot ids never shown (R11): a correction that rewinds the shot counter
     // makes the next live ticks fire ids that were already presented.
     combat.onShot.add(

@@ -136,7 +136,7 @@ export class NetMatch {
     this.hudView.update();
     const announced = state.phase === "combat" && state.zonePhases.length > 0;
     this.zoneWall.update(dt, announced ? state.zone.current : null, camera.position.x, camera.position.z);
-    this.labels.update(view.ownSlot, (slot) => view.teamOf(slot) === view.ownTeam, (slot) => this.nameOf(slot));
+    this.labels.update(view.ownSlot, this.isTeammate, this.labelName);
   }
 
   dispose(): void {
@@ -148,6 +148,9 @@ export class NetMatch {
     this.labels.dispose();
     this.zoneWall.dispose();
   }
+
+  private readonly isTeammate = (slot: number): boolean => this.view.teamOf(slot) === this.view.ownTeam;
+  private readonly labelName = (slot: number): string => this.nameOf(slot);
 
   private nameOf(slot: number): string {
     return this.view.nameOf(slot) || netPlayerName(slot);

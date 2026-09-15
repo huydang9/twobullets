@@ -41,6 +41,15 @@ const CRAWL_TURN_SPEED = 0.3;
 const LYING_TURN_RATE = 3;
 const TAU = Math.PI * 2;
 
+/** Pauses or resumes a soldier's started clips in place (the animator's started/stopped bookkeeping is unchanged). */
+function setAnimationsPaused(soldier: SoldierCharacter, paused: boolean): void {
+  for (const group of soldier.model.animations.values()) {
+    if (!group.isStarted) continue;
+    if (paused) group.pause();
+    else group.restart();
+  }
+}
+
 function wrapAngle(a: number): number {
   let d = (a + Math.PI) % TAU;
   if (d < 0) d += TAU;
@@ -137,6 +146,8 @@ export class RemotePlayers implements FootstepEmitterSource {
         if (avatar?.enabled) {
           avatar.root.setEnabled(false);
           avatar.enabled = false;
+          // Babylon keeps evaluating started groups on disabled bones; park them until the slot shows again.
+          if (avatar.soldier) setAnimationsPaused(avatar.soldier, true);
         }
         continue;
       }
@@ -147,6 +158,7 @@ export class RemotePlayers implements FootstepEmitterSource {
       if (!avatar.enabled) {
         avatar.root.setEnabled(true);
         avatar.enabled = true;
+        if (avatar.soldier) setAnimationsPaused(avatar.soldier, false);
       }
       const pose = roster.poses[slot]!;
       const flags = pose.flags;
