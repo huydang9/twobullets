@@ -107,7 +107,43 @@ function compileFeature(feature: TerrainFeature, seed: number, natural: (x: numb
         return h + (floorBase - h) * level - depth * cut;
       };
     }
+    case "heightGrid": {
+      const { origin, spacing, columns, rows, heights } = feature;
+      if (heights.length !== columns * rows) throw new Error(`heightGrid expects ${columns * rows} heights, got ${heights.length}`);
+      const wx = [0, 0, 0, 0];
+      const wz = [0, 0, 0, 0];
+      return (x, z, _wx, _wz, h) => {
+        const gx = (x - origin[0]) / spacing;
+        const gz = (z - origin[1]) / spacing;
+        const ix = Math.floor(gx);
+        const iz = Math.floor(gz);
+        catmullRomWeights(gx - ix, wx);
+        catmullRomWeights(gz - iz, wz);
+        let sum = 0;
+        for (let j = 0; j < 4; j++) {
+          const row = clampIndex(iz + j - 1, rows) * columns;
+          let line = 0;
+          for (let i = 0; i < 4; i++) line += wx[i]! * heights[row + clampIndex(ix + i - 1, columns)]!;
+          sum += wz[j]! * line;
+        }
+        return h + sum;
+      };
+    }
   }
+}
+
+function clampIndex(i: number, count: number): number {
+  return i < 0 ? 0 : i >= count ? count - 1 : i;
+}
+
+/** Uniform Catmull-Rom weights of samples i-1..i+2 at fraction t (they sum to 1 and interpolate the samples). */
+function catmullRomWeights(t: number, out: number[]): void {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  out[0] = (-t3 + 2 * t2 - t) / 2;
+  out[1] = (3 * t3 - 5 * t2 + 2) / 2;
+  out[2] = (-3 * t3 + 4 * t2 + t) / 2;
+  out[3] = (t3 - t2) / 2;
 }
 
 /** Squared distance to the nearest point of a polyline. */

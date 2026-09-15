@@ -21,7 +21,7 @@ import { Hud } from "../ui/Hud";
 import { InventoryScreen } from "../ui/inventory";
 import { cameraMapSource } from "../ui/map";
 import { createEnvironment } from "../world/environment";
-import { MAP_FAR_PLANE, MapOverlay, MapRuntime } from "../world/mapRuntime";
+import { MAP_FAR_PLANE, MapOverlay, MapRuntime, resolveMapDefinition } from "../world/mapRuntime";
 
 /**
  * Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop.
@@ -68,22 +68,20 @@ export class Game {
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
-    // DEV: `?map=v1` loads the full Map v1; no query (or `?map=arena`) keeps the blockout arena.
-    // DEV: `?net=` joins a match server (arena only in M3).
+    // DEV: `?map=v1|<realMapId>` loads a full map; no query (or `?map=arena`) keeps the blockout arena.
+    // DEV: `?bench=v1` implies `?map=v1`; `?bots=1` implies `?map=v1` unless `map` names another map. `?net=` runs the arena.
     const netConfig = import.meta.env.DEV && !benchmark ? readNetConfig(params) : null;
-    // DEV: `?bots=1` runs the offline bot match (docs/bots/design.md §11); it implies `?map=v1`.
     const matchOptions = readOfflineMatchOptions(window.location.search);
     const botsMatch = import.meta.env.DEV && !benchmark && !netConfig && matchOptions.enabled;
-    const mapV1 = import.meta.env.DEV && !netConfig && (params.get("map") === "v1" || benchmark === "v1" || botsMatch);
-    if (netConfig && params.get("map") === "v1") console.warn("[net] ?map=v1 is ignored in networked play (the M3 server runs the arena)");
-    const environment = createEnvironment(scene, { largeWorld: mapV1 });
+    const mapId = !import.meta.env.DEV || netConfig ? null : benchmark === "v1" ? "v1" : (params.get("map") ?? (botsMatch ? "v1" : null));
+    if (netConfig && params.get("map")) console.warn("[net] ?map= is ignored in networked play (the server runs the arena)");
+    const mapDefinition = await resolveMapDefinition(mapId);
+    const environment = createEnvironment(scene, { largeWorld: mapDefinition !== null });
     // Models download while the map builds (its terrain comes from a worker) and the environment textures load.
     const assetsLoading = loadAssets(scene);
     // Thousands of meshes and light exclusions are added while loading; resync materials once at the end instead.
     scene.blockMaterialDirtyMechanism = OPTIMIZATIONS.blockMaterialDirtyOnLoad;
-    const world = mapV1
-      ? await MapRuntime.load(scene, environment, { bakeUrl: `${import.meta.env.BASE_URL}assets/map/mapV1.terrain.bin`, overlay: new MapOverlay() })
-      : null;
+    const world = mapDefinition ? await MapRuntime.load(scene, environment, { ...mapDefinition, overlay: new MapOverlay() }) : null;
     const levelData = world?.level ?? ARENA_LEVEL;
     const level = buildLevel(scene, levelData);
     environment.decorateLevel(level);

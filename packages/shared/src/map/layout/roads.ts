@@ -10,6 +10,8 @@ export interface RoadSpec {
   readonly points: readonly Vec2Tuple[];
   /** Keep straight segments between control points (town streets). Default false: Catmull-Rom curve. */
   readonly straight?: boolean;
+  /** Flat width, m. Default: the kind's `ROAD_STYLES` width (real-world maps set it per road class). */
+  readonly width?: number;
 }
 
 export const ROAD_STYLES: Readonly<Record<RoadKind, { width: number; falloff: number; surfaceFalloff: number }>> = {
@@ -25,7 +27,7 @@ export function roadFlatten(road: RoadSpec): FlattenRegion {
   return {
     shape: "polyline",
     points: road.straight ? road.points : catmullRom(road.points, CURVE_STEP),
-    width: style.width,
+    width: road.width ?? style.width,
     falloff: style.falloff,
     height: "auto",
     surface: road.kind === "asphalt" ? "road" : "dirt",

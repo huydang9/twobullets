@@ -3,11 +3,12 @@
  * with match length, kills, zone deaths, stuck incidents and per-tick CPU.
  *
  *   node tools/bench/bots/match.ts [--seed 1] [--matches 1] [--scale 1] [--brain fighter|wander|idle|real]
- *        [--difficulty normal] [--loadout armed|empty] [--nav grid|straight] [--players 10] [--teams solo|duo|squad]
+ *        [--difficulty normal] [--loadout armed|empty] [--nav grid|straight] [--players 10] [--teams solo|duo|squad] [--map v1|<realMapId>]
  *        [--out file.json]
  *   node tools/bench/bots/match.ts --mode duel [--brain real] [--ranges 30,80] [--seconds 40]
  *
- * `--brain real` uses shared/bots createBotBrain; nav is the real Map v1 grid unless `--nav straight`. The scripted
+ * `--brain real` uses shared/bots createBotBrain; nav is the real map grid unless `--nav straight`. `--map <id>` runs
+ * on a generated real-world map (packages/shared/src/map/real) through lib/mapMatch.ts; the default stays Map v1. The scripted
  * fighter brains only exist to exercise the simulation. `--mode duel` runs the §6 tuning duels (bot with a rifle vs a
  * strafing unarmored target) per difficulty and range: hit rate, time to first shot, median time to kill. One heavy process at a time; check
  * `sysctl vm.swapusage` first. Self-terminates after 20 minutes.
@@ -52,6 +53,7 @@ const loadout = arg("loadout", brainName === "real" ? "empty" : "armed") as "arm
 const navName = arg("nav", "grid");
 const mode = arg("mode", "match");
 const out = arg("out", "");
+const mapId = arg("map", "v1");
 const players = Number(arg("players", "10"));
 const teamMode = arg("teams", "duo") as "solo" | "duo" | "squad";
 
@@ -70,7 +72,11 @@ if (brainName === "real") {
 }
 
 const nav: "grid" | "straight" = navName === "straight" ? "straight" : "grid";
-if (nav === "grid") {
+const mapMatch = mapId === "v1" ? null : await import("./lib/mapMatch.ts");
+if (mapMatch) {
+  const loadedMap = await mapMatch.loadMap(mapId);
+  console.info(`[bots/match] map ${mapId}: ${loadedMap.map.pois.length} POIs, ${loadedMap.map.spawns.length} spawns, ${loadedMap.layout.buildings.length} buildings (terrain ${loadedMap.source})`);
+} else if (nav === "grid") {
   const { loadMapV1NavGrid } = await import("../../../packages/sim/test/match/mapV1World.ts");
   const built = await loadMapV1NavGrid();
   console.info(`[bots/match] nav grid ${built.grid.info.checksum} built in ${built.ms.toFixed(0)} ms`);
@@ -96,13 +102,15 @@ if (mode === "duel") {
 const results = [];
 for (let m = 0; m < matches; m++) {
   const matchSeed = seed + m;
-  const match = await createHeadlessMatch(havok, { seed: matchSeed, brains, timeScale: scale, difficulty, loadout, profile: true, nav, config: { maxPlayers: players, teamMode } });
+  const matchOptions = { seed: matchSeed, brains, timeScale: scale, difficulty, loadout, profile: true, nav, config: { maxPlayers: players, teamMode } } as const;
+  const match = mapMatch ? await mapMatch.createMapHeadlessMatch(havok, mapId, matchOptions) : await createHeadlessMatch(havok, matchOptions);
   const capTicks = match.sim.schedule.timeCapTick + 60 * 20;
   const summary = runHeadlessMatch(match, capTicks);
   const alive = match.sim.state.actors.filter((a) => a && a.life !== "dead").map((a) => a.slot);
   match.dispose();
   const line = {
     seed: matchSeed,
+    map: mapId,
     brain: brainName,
     players,
     teamMode,

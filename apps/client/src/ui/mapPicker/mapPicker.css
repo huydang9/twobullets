@@ -1,0 +1,162 @@
+/*
+ * Map picker: the HUD's language (thin strokes, translucent dark panels, light condensed text). Tokens fall back to
+ * the HUD values when mounted outside .tb-hud.
+ */
+
+.tb-mappicker {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+  padding: clamp(16px, 4vh, 40px) clamp(16px, 4vw, 48px);
+  overflow-y: auto;
+  pointer-events: auto;
+  cursor: default;
+  font-family: var(--tb-font, "Roboto Condensed", "Arial Narrow", Arial, system-ui, sans-serif);
+  color: var(--tb-text, rgba(242, 242, 238, 0.95));
+  background: rgba(6, 8, 10, 0.86);
+}
+
+.tb-mappicker__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tb-mappicker__subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--tb-text-dim, rgba(236, 236, 230, 0.66));
+}
+
+.tb-mappicker__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+
+.tb-mappicker__card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: var(--tb-panel-strong, rgba(10, 12, 14, 0.78));
+  border: 1px solid var(--tb-stroke, rgba(255, 255, 255, 0.2));
+  border-radius: 2px;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.tb-mappicker__card:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.tb-mappicker__card[aria-checked="true"] {
+  border-color: var(--tb-amber, #e8a640);
+  box-shadow: inset 0 0 0 1px var(--tb-amber, #e8a640);
+}
+
+.tb-mappicker__card:focus-visible {
+  outline: 2px solid var(--tb-stroke-strong, rgba(255, 255, 255, 0.7));
+  outline-offset: 2px;
+}
+
+.tb-mappicker__preview {
+  position: relative;
+  aspect-ratio: 1;
+  max-width: 100%;
+  background: #3a4230;
+}
+
+.tb-mappicker__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tb-mappicker__badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #111;
+  background: var(--tb-amber, #e8a640);
+}
+
+.tb-mappicker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 12px;
+}
+
+.tb-mappicker__name {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.tb-mappicker__place {
+  font-size: 13px;
+  color: var(--tb-text-dim, rgba(236, 236, 230, 0.66));
+}
+
+.tb-mappicker__stats {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--tb-text-faint, rgba(236, 236, 230, 0.4));
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-mappicker__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.tb-mappicker__credits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--tb-text-faint, rgba(236, 236, 230, 0.4));
+}
+
+.tb-mappicker__credit-link {
+  color: var(--tb-text-dim, rgba(236, 236, 230, 0.66));
+  text-decoration: none;
+}
+
+.tb-mappicker__credit-link:hover {
+  text-decoration: underline;
+}
+
+.tb-mappicker__confirm {
+  padding: 10px 24px;
+  font: inherit;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  color: var(--tb-text, rgba(242, 242, 238, 0.95));
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--tb-stroke-strong, rgba(255, 255, 255, 0.7));
+}
+
+.tb-mappicker__confirm:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

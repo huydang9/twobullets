@@ -30,9 +30,11 @@ import { createTrainingYard, type TrainingYardPlacement } from "./trainingYard";
 /** Camera far plane for 1 km views plus the horizon mountains, m. */
 export const MAP_FAR_PLANE = 4000;
 
+/** Load options; spread a `MapDefinition` (maps.ts) into them: `{ ...definition, overlay }`. */
 export interface MapRuntimeOptions {
   readonly map?: MapData;
-  readonly trainingYard?: TrainingYardPlacement;
+  /** The Training Yard arena; null for none (real-world maps). Default: Map v1's yard when `map` is omitted or Map v1. */
+  readonly trainingYard?: TrainingYardPlacement | null;
   /** Baked terrain for `map` (tools/map/build.ts). Stale or missing bakes fall back to generating in the worker. */
   readonly bakeUrl?: string;
   /** Already built terrain and layout (headless tools); skips the worker. */
@@ -58,7 +60,7 @@ const STAGES: Readonly<Record<MapWorldStage | "scene", { label: string; from: nu
 
 /**
  * Full map mode: terrain (worker-built or baked) with physics, chunked rendering and horizon; buildings; instanced props
- * and their colliders; grass around the camera; the Training Yard arena; spawns; out-of-bounds enforcement; and the
+ * and their colliders; grass around the camera; the Training Yard arena (Map v1); spawns; out-of-bounds enforcement; and the
  * audio hooks (terrain and building surfaces, room enclosure).
  */
 export class MapRuntime {
@@ -84,22 +86,23 @@ export class MapRuntime {
     readonly ready: Promise<void>,
     private readonly overlay: MapOverlay | undefined,
     readonly timings: Readonly<Record<string, number>>,
-    yard: ReturnType<typeof createTrainingYard>,
-    yardPlacement: TrainingYardPlacement,
+    yard: ReturnType<typeof createTrainingYard> | null,
+    yardPlacement: TrainingYardPlacement | null,
   ) {
     const spawnList = spawns;
     this.level = {
       name: map.name,
-      blocks: yard.blocks,
-      targets: yard.targets,
+      blocks: yard?.blocks ?? [],
+      targets: yard?.targets ?? [],
       killY: map.bounds.killY,
       get spawnPoints() {
         return spawnList.spawnPoints;
       },
     };
-    const [yx, yz] = yardPlacement.center;
     const arena = 37;
-    this.buildingAcoustics = new BuildingAcoustics(world.layout.buildings, [[yx - arena, yz - arena, yx + arena, yz + arena]]);
+    // The yard arena roofs the listener with level blocks, not buildings, so the probe's rays decide there.
+    const rayZones: [number, number, number, number][] = yardPlacement ? [[yardPlacement.center[0] - arena, yardPlacement.center[1] - arena, yardPlacement.center[0] + arena, yardPlacement.center[1] + arena]] : [];
+    this.buildingAcoustics = new BuildingAcoustics(world.layout.buildings, rayZones);
     this.outOfBounds = new OutOfBounds(map.terrain.playableHalfExtent, map.bounds.outOfBoundsGraceSeconds);
   }
 
@@ -113,7 +116,7 @@ export class MapRuntime {
 
   static async load(scene: Scene, environment: Environment, options: MapRuntimeOptions = {}): Promise<MapRuntime> {
     const map = options.map ?? MAP_V1;
-    const yardPlacement = options.trainingYard ?? MAP_V1_TRAINING_YARD;
+    const yardPlacement = options.trainingYard !== undefined ? options.trainingYard : map === MAP_V1 ? MAP_V1_TRAINING_YARD : null;
     const overlay = options.overlay;
     const progress = (stage: keyof typeof STAGES, fraction: number, detail = "") => {
       const { label, from, to } = STAGES[stage];
@@ -159,7 +162,7 @@ export class MapRuntime {
     const colliders = await step("prop colliders", 0.85, () => new PropColliders(scene, layout));
     const grass = await step("grass", 0.95, () => new GrassField(visuals, environment, detail, new ScatterContext(map, terrain, layout.buildings)));
     const spawns = new MapSpawns(map, terrain);
-    const yard = createTrainingYard(terrain, yardPlacement);
+    const yard = yardPlacement ? createTrainingYard(terrain, yardPlacement) : null;
     progress("scene", 1, "done");
     timings.total = performance.now() - started;
 

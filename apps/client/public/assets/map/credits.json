@@ -1,0 +1,46 @@
+{
+  "note": "Real-world maps (packages/shared/src/map/real) are generated from OpenStreetMap and elevation data. Show these credits wherever a real-world map is shown (map picker, credits screen). See docs/map/real-world.md.",
+  "retrieved": "2026-09-15",
+  "assets": [
+    {
+      "id": "openstreetmap",
+      "name": "Map data (roads, buildings, land use, water, names)",
+      "type": "map-data",
+      "authors": [{ "name": "OpenStreetMap contributors", "role": "All" }],
+      "license": "ODbL 1.0",
+      "licenseUrl": "https://opendatacommons.org/licenses/odbl/1-0/",
+      "attribution": "© OpenStreetMap contributors",
+      "url": "https://www.openstreetmap.org/copyright",
+      "sourceFiles": ["https://overpass-api.de/api/interpreter"],
+      "shareAlike": "The generated map modules and bakes are a derivative database. Internal release only today; a public release must offer them under the ODbL."
+    },
+    {
+      "id": "terrain-tiles",
+      "name": "Elevation (AWS Terrain Tiles, terrarium encoding)",
+      "type": "elevation",
+      "authors": [{ "name": "Tilezen / Mapzen terrain tiles on the Registry of Open Data on AWS", "role": "All" }],
+      "license": "Per data source (see attribution)",
+      "url": "https://registry.opendata.aws/terrain-tiles/",
+      "attributionUrl": "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+      "attribution": [
+        "ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National Science Foundation awards 1043681, 1559691, and 1542736",
+        "Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017",
+        "Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich",
+        "Canada terrain data contains information licensed under the Open Government Licence – Canada",
+        "Europe terrain data produced using Copernicus data and information funded by the European Union - EU-DEM layers",
+        "Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration",
+        "Mexico terrain data source: INEGI, Continental relief, 2016",
+        "New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New Zealand Government (All rights reserved)",
+        "Norway terrain data © Kartverket",
+        "United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights reserved",
+        "United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey"
+      ],
+      "sourceFiles": ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"]
+    }
+  ],
+  "maps": [
+    { "id": "cz-holasovice", "name": "Holašovice", "credits": ["openstreetmap", "terrain-tiles (SRTM/GMTED courtesy of the U.S. Geological Survey; EU-DEM, Copernicus)"], "osmSnapshot": "2026-09-15T03:54:20Z" },
+    { "id": "vn-camthanh", "name": "Hội An – Cẩm Thanh", "credits": ["openstreetmap"], "osmSnapshot": "2026-09-15T03:54:20Z", "note": "Flat relief: elevation data fetched but not used." },
+    { "id": "jp-shirakawago", "name": "Shirakawa-gō", "credits": ["openstreetmap", "terrain-tiles (SRTM/GMTED courtesy of the U.S. Geological Survey)"], "osmSnapshot": "2026-09-15T03:54:20Z" }
+  ]
+}

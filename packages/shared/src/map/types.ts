@@ -65,6 +65,18 @@ export type TerrainFeature =
       readonly floorRadius: number;
       readonly depth: number;
       readonly terraces: number;
+    }
+  /**
+   * Sampled relief (real-world elevation): `columns` × `rows` heights `spacing` m apart, row-major from `origin` (the
+   * south-west sample), added to the relief with a Catmull-Rom bicubic spline. Outside the grid the edge samples extend.
+   */
+  | {
+      readonly kind: "heightGrid";
+      readonly origin: Vec2Tuple;
+      readonly spacing: number;
+      readonly columns: number;
+      readonly rows: number;
+      readonly heights: readonly number[];
     };
 
 export interface TerrainSpec {
@@ -177,7 +189,7 @@ export interface PropScatter {
   readonly scaleRange?: readonly [min: number, max: number];
 }
 
-export type PoiKind = "town" | "farm" | "military" | "radar" | "quarry" | "forest" | "training";
+export type PoiKind = "town" | "farm" | "military" | "radar" | "quarry" | "forest" | "training" | "village";
 
 export interface PointOfInterest {
   readonly id: string;
