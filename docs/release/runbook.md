@@ -41,7 +41,7 @@ curl -s https://play.<domain>/readyz      # {"ok":true,...}
 ```bash
 cd /opt/twobullets
 git clone https://github.com/huydang9/twobullets.git src
-cp src/infra/docker-compose.yml . && cp src/infra/compose.build.override.yml compose.override.yml
+cp src/infra/docker-compose.yml . && cp src/infra/compose.build.override.yml docker-compose.override.yml
 cp src/infra/.env.example .env && chmod 600 .env   # TB_REGISTRY=local, TB_TAG=main (image tag label)
 cp src/infra/scripts/{backup,keys}.sh . && chmod +x backup.sh keys.sh
 docker compose build          # web build runs Vite: needs ~2–4 GB free RAM
