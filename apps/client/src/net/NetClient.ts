@@ -29,6 +29,7 @@ import { Btn, type PlayerInput } from "@twobullets/shared/input";
 import { t } from "../i18n";
 import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, helloFor, WELCOME_TIMEOUT_MS } from "./handshake";
 import type { LocalPlayerNet } from "./LocalPlayerNet";
+import type { NetLoot } from "./NetLoot";
 import type { NetEventSink } from "./NetCombat";
 import { RESYNC_RESETS_RELIABLE_EVENTS, viewOffset8 } from "./netCombatRules";
 import type { NetClock } from "./NetClock";
@@ -129,6 +130,8 @@ export interface NetClientOptions {
   readonly onMatchMessage?: (client: NetClient) => void;
   /** Roster (protocol v5): after Welcome and on every join, leave or bot fill; `client.matchRoster` is already updated. */
   readonly onRoster?: (roster: Roster, client: NetClient) => void;
+  /** Ground loot mirror (protocol v7 `LootUpdate` on the control stream). */
+  readonly loot?: NetLoot | null;
 }
 
 /**
@@ -174,6 +177,7 @@ export class NetClient {
   private readonly movement: { life: number } | null;
   private readonly onMatchMessage: ((client: NetClient) => void) | null;
   private readonly onRoster: ((roster: Roster, client: NetClient) => void) | null;
+  private readonly loot: NetLoot | null;
   private deliverTick = 0;
   private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
   private ownerLife: number = LifeCode.alive;
@@ -217,6 +221,7 @@ export class NetClient {
     this.movement = options.movement ?? null;
     this.onMatchMessage = options.onMatchMessage ?? null;
     this.onRoster = options.onRoster ?? null;
+    this.loot = options.loot ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
     this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
     this.stats = {
@@ -439,6 +444,9 @@ export class NetClient {
         this.onRoster?.(roster, this);
         break;
       }
+      case MsgId.LootUpdate:
+        this.loot?.apply(reader, bytes.length);
+        break;
       case MsgId.MatchEnd: {
         const end = decodeMatchEnd(reader);
         if (end === null) return;

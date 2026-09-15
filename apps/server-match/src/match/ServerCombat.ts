@@ -3,6 +3,7 @@ import { LagCompHistory } from "@twobullets/netcode";
 import { killFeedOf, writeDamageTaken, writeHitConfirm, writeKill } from "@twobullets/netcode/replication";
 import { createBitWriter, createReliableEventStore, encodeKillFeed, hitZoneMaskBit, type KillCause } from "@twobullets/protocol";
 import type { ArmorLoadout, DamageKind } from "@twobullets/shared/equipment/armor";
+import { withArmor } from "@twobullets/shared/equipment/inventory";
 import { applyDamage, eliminate, stepRevive, stepVitals, VITALS } from "@twobullets/shared/equipment/vitals";
 import type { HitPose } from "@twobullets/shared/hitreg/rig";
 import { stanceBlendOf } from "@twobullets/shared/hitreg/rig";
@@ -90,6 +91,8 @@ export class ServerCombat implements ProjectileHitSink {
   respawnEnabled = true;
   /** Damage dealt to a player (server bots' DamageTaken). `dirX/dirZ`: horizontal direction the damage travelled. */
   onDamage: ((victim: Player, attacker: number, amount: number, kind: DamageKind, dirX: number, dirZ: number) => void) | null = null;
+  /** A player died (any cause), after the kill events: the match drops their inventory (B5). */
+  onKilled: ((victim: Player) => void) | null = null;
   private readonly dt: number;
   private readonly respawnTicks: number;
   private readonly spawnArmor: (() => ArmorLoadout) | null;
@@ -290,7 +293,10 @@ export class ServerCombat implements ProjectileHitSink {
     const canBeKnocked = canActorBeKnocked(this.rules, v.slot, v.teamId, this.host!.slots);
     const outcome = applyDamage(v.vitals, v.armor, { amount, kind, zone, sourceId: attacker }, { canBeKnocked });
     v.vitals = outcome.vitals;
-    v.armor = outcome.armor;
+    if (outcome.armor !== v.armor) {
+      v.armor = outcome.armor;
+      v.inventory = withArmor(v.inventory, outcome.armor);
+    }
     r.dealt = outcome.dealt;
     r.absorbed = outcome.armorResult.absorbed;
     r.destroyed = outcome.armorResult.destroyed;
@@ -326,6 +332,7 @@ export class ServerCombat implements ProjectileHitSink {
     const killerPlayer = killer >= 0 ? this.host!.slots[killer] : null;
     if (killerPlayer && killer !== v.slot && killerPlayer.teamId !== v.teamId) killerPlayer.combat.kills++;
     this.emitKill(killer, v, cause, headshot, false, knockedBy, distance);
+    this.onKilled?.(v);
   }
 
   /** Downed members of teams with nobody standing are eliminated (credit to their knocker). */

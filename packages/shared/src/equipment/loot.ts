@@ -459,6 +459,35 @@ export function dropGroundItem(ground: GroundLoot, instance: ItemInstance, posit
   return item;
 }
 
+/**
+ * Puts an item with a known loot id on the ground (networked clients mirroring the server's loot); an item with the
+ * same id is replaced. Keeps `nextId` above every id.
+ */
+export function putGroundItem(ground: GroundLoot, item: LootItem): void {
+  const existing = ground.items.get(item.lootId);
+  if (existing) remove(ground, existing);
+  insert(ground, item);
+  if (item.lootId >= ground.nextId) ground.nextId = item.lootId + 1;
+  ground.version++;
+}
+
+/** Removes a ground item entirely; returns it, or null if it wasn't there. */
+export function removeGroundItem(ground: GroundLoot, lootId: number): LootItem | null {
+  const item = ground.items.get(lootId);
+  if (!item) return null;
+  remove(ground, item);
+  ground.version++;
+  return item;
+}
+
+/** Empties the ground (a networked client's loot reset). */
+export function clearGroundLoot(ground: GroundLoot): void {
+  if (ground.items.size === 0) return;
+  ground.items.clear();
+  ground.cells.clear();
+  ground.version++;
+}
+
 /** Replaces a ground item's quantity in place (partial pickups keep their loot id). */
 export function setGroundQuantity(ground: GroundLoot, lootId: number, quantity: number): void {
   const item = ground.items.get(lootId);

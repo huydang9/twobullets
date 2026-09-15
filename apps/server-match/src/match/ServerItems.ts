@@ -1,12 +1,10 @@
-import { createInventory, type InventoryState } from "@twobullets/shared/equipment/inventory";
 import { IDLE_ITEM_USE, stepItemUse } from "@twobullets/shared/equipment/itemUse";
 import { ITEM_IDS, ITEMS, type ConsumableItemId } from "@twobullets/shared/equipment/items";
-import { createOfflineInventory } from "@twobullets/shared/equipment/presets";
 import { stepVitals } from "@twobullets/shared/equipment/vitals";
 import { Btn, PlayerActionType, type PlayerInput } from "@twobullets/shared/input";
 import type { Player } from "./Player";
 
-// Server consumables (plan.md B5, minimal slice): humans carry the offline kit's heals and boosts; the `use` input action
+// Server consumables (plan.md B5): heals and boosts come from loot (ServerLoot) into `Player.inventory`; the `use` input action
 // (arg = u8 `itemCode`) starts the shared timed use, and the same interrupts as offline cancel it: the `cancel` action
 // (fire, reload, throwable or holster pressed while the client's hands gate clears the wire buttons), a weapon select,
 // fire/reload/jump pressed on the wire, or sprinting forward on the ground. Completion applies the effect to the server's
@@ -19,14 +17,7 @@ export interface ServerItemStats {
   rejected: number;
 }
 
-const CONSUMABLE_KIT: ReadonlySet<string> = new Set<ConsumableItemId>(["bandage", "first_aid", "medkit", "energy_drink", "painkiller"]);
 const PRESS_INTERRUPTS = Btn.fire | Btn.reload | Btn.jump;
-
-/** The offline kit's consumables (the rest of the kit isn't networked yet), with its backpack for capacity. */
-export function createNetConsumables(): InventoryState {
-  const kit = createOfflineInventory();
-  return createInventory({ backpack: kit.backpack, stacks: kit.stacks.filter((s) => CONSUMABLE_KIT.has(s.itemId)) });
-}
 
 /** A consumable's item id from the `use` action's u8 `itemCode` (MatchSim's table), or null. */
 export function consumableOfItemCode(code: number): ConsumableItemId | null {

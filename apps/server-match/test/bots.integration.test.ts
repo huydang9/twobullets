@@ -112,11 +112,15 @@ describe("server bots", () => {
       `[bots] v1 1+19 squads: nav ${match.navInfo!.buildMs.toFixed(0)} ms; first 8 s of combat (all alive, ${alive.length} ticks) tick p50 ${percentile(alive, 0.5).toFixed(2)} ms p99 ${percentile(alive, 0.99).toFixed(2)} ms; ` +
       `whole combat ${samples.length} ticks p50 ${percentile(sorted, 0.5).toFixed(2)} ms p99 ${percentile(sorted, 0.99).toFixed(2)} ms max ${sorted.at(-1)!.toFixed(1)} ms, ` +
       `brain avg ${(bots.stats.brainTotalMs / Math.max(1, bots.stats.ticks)).toFixed(2)} ms; bot shots ${bots.stats.shots}, hits ${combat.hits}, knocks ${combat.knocks}, kills ${combat.kills}, revives ${combat.revives}; ` +
-      `end ${lc.endReason} winner ${lc.winnerTeam}, zone phases ${lc.zonePhases.length}`;
+      `end ${lc.endReason} winner ${lc.winnerTeam}, zone phases ${lc.zonePhases.length}; ` +
+      `loot: ${match.loot!.stats.pickups} pickups (refused ${JSON.stringify(match.loot!.stats.rejected)}), ${match.loot!.stats.deathDrops} death piles, human ${human.lootBytes} B in ${human.lootMessages} messages`;
     console.log(line);
     // Loose guard only (shared machine); the budget is p99 < 12 ms.
     expect(percentile(alive, 0.99)).toBeLessThan(50);
     expect(bots.stats.shots).toBeGreaterThan(0);
+    // B5: bots loot the server's ground loot through the same pickup action, and deaths leave piles.
+    expect(match.loot!.stats.pickups).toBeGreaterThan(0);
+    expect(human.lootMalformed).toBe(0);
     expect(combat.hits).toBeGreaterThan(0);
     expect(combat.damageEvents).toBeGreaterThan(0);
     expect(lc.zonePhases.length).toBeGreaterThan(0);

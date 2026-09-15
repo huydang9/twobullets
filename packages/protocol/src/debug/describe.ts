@@ -5,6 +5,7 @@ import { decodeMatchEnd, decodePhaseChange, decodeZonePhase } from "../messages/
 import { decodeInputPacket } from "../messages/input";
 import { decodePing } from "../messages/ping";
 import { decodeRoster } from "../messages/roster";
+import { decodeLootUpdate } from "../messages/loot";
 import { createSnapshotBuffer, decodeSnapshotHeader, decodeSnapshotInto, type Snapshot } from "../messages/snapshot";
 
 // Debug decoding of one message to JSON-friendly data (ADR 0204: "debugging needs a decoder tool").
@@ -89,6 +90,11 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
     case MsgId.Roster:
       message = decodeRoster(r);
       break;
+    case MsgId.LootUpdate: {
+      const ops = decodeLootUpdate(r);
+      message = ops === null ? null : { ops };
+      break;
+    }
     case MsgId.Resync:
       message = bytes.length === 2 ? decodeResyncRequest(r) : decodeResyncResponse(r);
       break;

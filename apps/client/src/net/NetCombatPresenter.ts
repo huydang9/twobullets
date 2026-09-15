@@ -113,7 +113,7 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
 
   constructor(deps: NetCombatPresenterDeps) {
     this.deps = deps;
-    this.equipmentView = new NetEquipmentView(deps.equipment);
+    this.equipmentView = new NetEquipmentView(deps.equipment, undefined, () => deps.combat.weaponState);
     this.feed = new MatchFeed(deps.layer);
     this.indicator = new DamageDirectionIndicator(deps.layer);
     this.banner = new NetLifeBanner(deps.layer);
@@ -436,27 +436,36 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     player.camera.rotation.set(pitch, yaw, 0);
   }
 
-  /** Revive ring: the server's progress once the teammate vitals report us as the reviver, a local estimate until then. */
-  private updateReviving(dt: number): void {
-    const { input, roster, player } = this.deps;
-    const holding = this.life === "alive" && input.isLocked && input.isActionDown("interact");
+  /**
+   * Nearest downed remote player in revive reach (horizontal range and height band), or −1. `teammatesOnly`: skip slots
+   * known to be on another team (F loots instead of reviving an enemy).
+   */
+  downedInReach(teammatesOnly = false): number {
+    const { roster, player } = this.deps;
+    const feet = player.tickFeet;
+    let best = REVIVE_RANGE_M * REVIVE_RANGE_M;
     let target = -1;
-    if (holding) {
-      const feet = player.tickFeet;
-      let best = REVIVE_RANGE_M * REVIVE_RANGE_M;
-      for (let slot = 0; slot < MAX_ENTITY_SLOTS; slot++) {
-        if (roster.visible[slot] !== 1) continue;
-        const pose = roster.poses[slot]!;
-        if (remoteLifeCode(pose.flags) !== LifeCode.downed || Math.abs(pose.y - feet.y) > REVIVE_VERTICAL_RANGE_M) continue;
-        const dx = pose.x - feet.x;
-        const dz = pose.z - feet.z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 <= best) {
-          best = d2;
-          target = slot;
-        }
+    for (let slot = 0; slot < MAX_ENTITY_SLOTS; slot++) {
+      if (roster.visible[slot] !== 1) continue;
+      if (teammatesOnly && this.teams[slot]! >= 0 && this.teams[slot] !== this.ownTeam) continue;
+      const pose = roster.poses[slot]!;
+      if (remoteLifeCode(pose.flags) !== LifeCode.downed || Math.abs(pose.y - feet.y) > REVIVE_VERTICAL_RANGE_M) continue;
+      const dx = pose.x - feet.x;
+      const dz = pose.z - feet.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 <= best) {
+        best = d2;
+        target = slot;
       }
     }
+    return target;
+  }
+
+  /** Revive ring: the server's progress once the teammate vitals report us as the reviver, a local estimate until then. */
+  private updateReviving(dt: number): void {
+    const { input } = this.deps;
+    const holding = this.life === "alive" && input.isLocked && input.isActionDown("interact");
+    const target = holding ? this.downedInReach() : -1;
     if (target < 0) {
       this.reviveHeld = 0;
       this.banner.hideReviving();

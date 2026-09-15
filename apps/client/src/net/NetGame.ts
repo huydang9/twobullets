@@ -1,5 +1,6 @@
-import type { EventState, Scene } from "@babylonjs/core";
+import { Vector3, type EventState, type Scene } from "@babylonjs/core";
 import { LifeCode } from "@twobullets/protocol/codes";
+import { WorldRaycaster } from "@twobullets/sim";
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { ShotEvent } from "../combat/types";
@@ -77,6 +78,9 @@ export class NetGame {
   private clientValue: NetClient | null = null;
   private itemsTick = -1;
   private connecting = false;
+  /** F pressed during a frame, consumed by the next predicted tick's loot interaction. */
+  private interactPressed = false;
+  private input: InputManager | null = null;
 
   constructor(config: NetGameConfig) {
     this.config = config;
@@ -192,8 +196,35 @@ export class NetGame {
     });
     this.predictor = new CosmeticHitPredictor(this.hitboxes, presenter);
     const items = presenter.equipmentView;
+    this.input = input;
+    const lootRays = new WorldRaycaster(scene);
+    lootRays.ignoreBody = player.physicsBody;
+    const eye = new Vector3();
+    const viewDir = { x: 0, y: 0, z: 1 };
+    const feet = { x: 0, y: 0, z: 0 };
+    const lootTick = { eye: { x: 0, y: 0, z: 0 }, viewDir, feet, alive: true, interactPressed: false, reviveCandidate: false, raycast: lootRays.cast };
     player.onTick.add((tick: PlayerTick) => {
       if (movement.life === LifeCode.alive) this.predictor?.tick(combat.projectiles, tick.dt);
+      // Loot (B5): nearby server items, the F prompt, F and auto pickup, from the predicted eye.
+      player.getEyeToRef(eye);
+      const aim = player.getAim();
+      const cosPitch = Math.cos(aim.pitch);
+      viewDir.x = Math.sin(aim.yaw) * cosPitch;
+      viewDir.y = -Math.sin(aim.pitch);
+      viewDir.z = Math.cos(aim.yaw) * cosPitch;
+      const tickFeet = player.tickFeet;
+      feet.x = tickFeet.x;
+      feet.y = tickFeet.y;
+      feet.z = tickFeet.z;
+      lootTick.eye.x = eye.x;
+      lootTick.eye.y = eye.y;
+      lootTick.eye.z = eye.z;
+      lootTick.alive = movement.life === LifeCode.alive;
+      lootTick.interactPressed = this.interactPressed;
+      lootTick.reviveCandidate = presenter !== null && presenter.downedInReach(true) >= 0;
+      this.interactPressed = false;
+      lootRays.ignoreBody = player.physicsBody;
+      items.tickLoot(lootTick);
       // Item use/cancel rides this tick's input (the ring's entry, so redundant resends carry it).
       const action = items.takeAction();
       if (action !== null) (tick.playerInput as Mutable<PlayerInput>).action = action;
@@ -214,6 +245,7 @@ export class NetGame {
     this.clientValue?.disconnect();
     this.clientValue = null;
     this.itemsTick = -1;
+    this.presenter?.equipmentView.loot.clear();
     this.clock.stop();
     this.roster.clear();
     this.combatEvents?.clear();
@@ -232,6 +264,7 @@ export class NetGame {
         fallbackReason: transport.fallbackReason,
         events: this.combatEvents,
         movement: this.movement,
+        loot: this.presenter?.equipmentView.loot ?? null,
         onStateChange: (state, c) => console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}` : ""}`),
       });
       transport.onClose((code) => client.handleTransportClosed(code));
@@ -282,6 +315,8 @@ export class NetGame {
   }
 
   update(dt: number): void {
+    const input = this.input;
+    if (input !== null && input.isLocked && input.wasActionPressed("interact")) this.interactPressed = true;
     this.clientValue?.update(dt);
     // Rigs posed at this frame's render tick, before this frame's local ticks fly bullets through them.
     this.hitboxes.update(this.roster);

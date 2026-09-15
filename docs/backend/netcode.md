@@ -531,6 +531,8 @@ IDs are the first byte of every datagram and every stream frame. Datagram IDs 0x
 | 0x4A | `MatchEnd` | S→C | S | ~200 B | once |
 | 0x4B | `Resync` (request/response: full state, baseline reset) | both | S | 2 B / full | rare |
 | 0x4C | `Resume` (session resume token) | C→S | S | 36 B | reconnect |
+| 0x4D | `Roster` (v5: names, teams, bots, connection) | S→C | S | 2 B + 3 B/player + names | on change |
+| 0x4E | `LootUpdate` (v7: ground loot in the client's area of interest, §8.3) | S→C | S | ≤ ~1.1 KB per message (spawn 10–13 B) | join, moving, loot changes |
 | 0x4F | `Disconnect` (reason code) | both | S | 3 B | once |
 
 ### 6.5 Layouts
@@ -609,8 +611,8 @@ Events:
 | `Detonate` {seq, type, throwId 8, kind 3, pos 59} | R | 87 | 11 |
 | `AreaEffectStart` {seq, type, effectId 8, kind 3, center 59, radius u8 (0.05 m), seed 16, startTickOffset 4, duration 12} | R | 127 | 16 |
 | `AreaEffectEnd` {seq, type, effectId 8} | R | 25 | 4 |
-| `InventoryDelta` {seq, type, version 8, slot 6, itemType 8, qty 10} | R | 49 | 7 |
-| `LootDelta` {seq, type, lootId 16, op 2, [itemType 8, qty 10, pos 59]} | R | 35 / 112 | 5 / 14 |
+| `InventoryDelta` {seq, type, version 8, slot 6, itemType 8, qty 10} (superseded in v7 by the owner items group, §9.5) | R | 49 | 7 |
+| `LootDelta` {seq, type, lootId 16, op 2, [itemType 8, qty 10, pos 59]} (superseded in v7 by `LootUpdate`, §8.3) | R | 35 / 112 | 5 / 14 |
 | `ZoneWarning` {seq, type, phase 5, secondsLeft 8} | R | 30 | 4 |
 
 `Welcome` (0x41), 40 B:
@@ -653,7 +655,7 @@ With 10 players, bandwidth doesn't force culling. Information hiding does (ADR 0
 | Projectiles | Never replicated per tick; `Shot` event only to viewers for whom the shooter is visible or audible (else `AudioShot` or nothing) | M4 |
 | Throwables | `ThrowStart` + corrections to viewers within 150 m or with LOS to the grenade; `Detonate` to everyone within 300 m | M5 |
 | Area effects | Smoke/fire to everyone (visual obstruction at distance matters) | M5 |
-| Loot | Initial layout from `matchSeed` (0 B); `LootDelta` to all (low rate) | M5 |
+| Loot | v7 (B5): area of interest on a 32 m grid, ≥ 160 m around the player, streamed on the control stream (§8.3) | B5 ✅ |
 | Zone | Phase parameters to all | M5 |
 
 LOS cost: 90 viewer-enemy pairs × ≤ 10 rays at 20 Hz = up to 300 Havok rays/tick worst case, early-out on first clear ray. **Runtime to include in the tick budget.** Cap at 150 rays/tick by round-robin, never dropping a pair below 10 Hz.
@@ -791,11 +793,28 @@ stateDiagram-v2
 
 ### 8.3 Loot
 
-- **Initial layout:** `generateLoot(matchSeed, lootTableVersion, mapSpots)` runs identically on server and client → 0 B.
-  - Loot spawn positions are public game knowledge (the same for everyone); knowing them via a client hack is a low-value advantage, and **loot type by location** can be salted server-side later if it matters.
-  - `lootTableVersion` is part of `contentHash`.
-- **Changes:** `LootDelta` R events (removed 5 B, spawned/dropped 14 B). Death crates are `LootDelta` spawn batches.
-- **Consistency:** a `lootVersion` u16 in the snapshot "zone/loot version" section every 30 ticks. On mismatch the client sends `Resync{loot}`, and the server streams `LootResync` (≤ 2,000 items × 10 B, chunked).
+**Implemented in protocol v7 (plan.md B5).** The first design here sent nothing at join (clients ran `generateLoot` from the match seed) and `LootDelta` R events to everyone. B5 made the server the only generator and streams loot by area of interest instead, because clients shouldn't know the whole map's loot, a real map's client-side generation depends on the client's terrain build matching the server's, and 20 players don't need 3,000 items each.
+
+- **Generation (server only):** `MatchLevel.createLoot(matchSeed)` runs the shared `generateLoot(seed, pois, buildings, { flatten, terrain, layout })` on the server's map data, exactly practice's call (building piles, then roadside and POI-pad piles); the arena uses `createTestLoot`. `ServerLoot` drops throwables (the server doesn't simulate them) and keeps the generator's loot ids. Map v1, seed 1234: 2,242 items, 2,099 without throwables.
+- **Area of interest:** a 64 × 64 grid of 32 m cells over ±1,024 m (`packages/protocol/src/messages/loot.ts`). A client holds every item of each cell within 5 cells (Chebyshev) of its own cell, so at least 160 m in every direction, and forgets a cell past 6 cells (hysteresis). Cells come from the 1 cm wire position on both sides, so they agree at cell edges.
+  - Each tick, per connected client (`ServerLoot.replicate`): when the client's cell changed, cells past 6 are forgotten (`forgetCell`) and cells within 5 are queued, nearest first; queued cells stream up to **1,500 B per tick**, so a join or a fast move spreads over a few ticks.
+  - Item changes (pickup, partial pickup, drop, swap, death pile) go only to clients that already know the cell; a queued cell is sent with its current contents when its turn comes.
+  - Join, reconnect (new session) and the BR glide-start loot reset send `clear` and stream the area again.
+- **`LootUpdate` (0x4E, control stream):** type 8, then ops (op 3 + payload) until `end` (7):
+
+| Op | Payload | Bits |
+|---|---|---|
+| 0 spawn | lootId 16, item code 6, [stack: quantity 10], x 17, y 16, z 17 (1 cm; x/z ±655.36 m, y −64..591 m), [weapon: magazine 7], [helmet/vest: durability 0.1 pt 11], samePile 1 (else hasPile 1 + pileId 16), ownDrop 1 | 74–101 (10–13 B) |
+| 1 remove | lootId 16 | 19 |
+| 2 quantity | lootId 16, quantity 10 | 29 |
+| 3 forgetCell | cell 12 | 15 |
+| 4 clear | – | 3 |
+
+- **`ownDrop`** is per recipient: that client dropped or swapped out the item, so its auto pickup leaves it alone.
+- **Framing:** a message is closed at ~1,100 B. The stream is reliable and ordered, so there are no sequence numbers, versions or `LootResync`. A message that fails to decode is ignored whole (validate, then apply).
+- **Measured** (`apps/server-match/test/serverLoot.test.ts`, 20 clients roaming Map v1's generated loot for 5 minutes at sprint speed with a pickup every 2 s): join **mean 2.3 KB, max 4.2 KB**; roaming **mean 0.26 kbps, max 0.59 kbps** per client. Worst case, 3,000 items within 150 m: 38.7 KB over 23 ticks. Protocol sizes: `packages/protocol/test/loot.test.ts` (a 350-item POI area ≈ 4 KB).
+- **Loot ids:** a `pickup` arg keeps 14 bits for the id (ids 0–16,383); past that, drops reuse free ids.
+- **Death piles:** the whole inventory, around the body, pile id `0xFF00 + slot`, settled with a ray down.
 
 ---
 
@@ -864,13 +883,20 @@ export function stepThrowables(items: readonly Throwable[], dt: number, raycast:
 
 ### 9.5 Inventory and backpack
 
-- **Owner-only state.** Item types (u8), quantities (u10), ≤ 32 stacks; capacity = base 150 + backpack level (0–3) × 50 weight units (server rules).
-- **Messages:**
-  - `InventorySnapshot` (stream, ≤ 120 B) at spawn and on `Resync`.
-  - `InventoryDelta` R events carry `version` (u8, wraps). The client applies them in version order and holds out-of-order deltas (resend closes gaps within ~RTT). The owner block's `inventoryVersion` detects divergence → `Resync{inventory}`.
-- **Actions** (pickup `lootId`, drop `slot, qty`, use `slot`, equip attachment) ride in `Input` (§6.2). The server validates distance ≤ 3 m, LOS and capacity, then emits `LootDelta` + `InventoryDelta`.
-- **Pickups aren't predicted.** Item pops into the bag after ~RTT + 1 tick (≈ 60–110 ms in SEA). This is the PUBG model, and a mispredicted pickup (two players grabbing one item) is worse than a short delay. A "picking up" UI state shows instantly.
-- **Ammo pickup** updates `reserve` in the owner block weapon ammo group; weapon prediction uses the server's reserve.
+**Implemented in protocol v7 (B5); the delta design below was not needed.** The server's `Player.inventory` is the shared `InventoryState` (three weapon slots with magazines, helmet, vest, backpack, stacks), changed only by `ServerLoot` (actions, death), `ServerItems` (consumables) and `ServerCombat` (armor durability).
+
+- **Replication (owner only), all in the owner block, delta-coded against the baseline:**
+  - weapons and magazines: the owner weapon group (slot weapon code, magazine, reserve), unchanged since M4;
+  - helmet and vest level + durability: the owner vitals group;
+  - the owner items group: consumable in use and counts (v6), plus the **gear part (v7)**: backpack level 2 bits and rounds per ammo type (5.56, 7.62, 9 mm, 12 g) 10 bits each, behind one changed bit (3 bits when nothing changed, 45 when it did).
+- **Weapons follow the inventory on the server** (`ServerMatch.step`): `syncWeaponsFromInventory` before the step when the inventory changed, `commitWeaponsToInventory` after it (`ammoFromInventory`: reserve = the ammo in the bag; reloads consume it). The client keeps predicting weapons with the plain weapon step; a pickup that changes slots or reserve arrives as a weapon-group correction (§3.6).
+- **Actions** ride in `Input` (§6.2), one per tick:
+  - `pickup` (1): arg = loot id (14 bits) | (weapon slot + 1) << 14 (0 = the server's choice: an empty slot, else the primary in hand). Bots send the bare id plus their `replaceSlot` intent.
+  - `drop` (2): shared `encodeDropArg` (weapon slot, helmet, vest, backpack, or stack by item code with quantity ≤ 255, 0 = all). The client splits bigger partial drops over several ticks.
+  - `equipAttach` (5): arg 1 = swap primaries (no attachments exist yet).
+  - Server checks: alive, not reviving, eye-to-item ≤ **3.5 m** (reach 2.6 + 0.4 client slack + 0.5 prediction margin), a clear static-world ray to 0.15 m above the item, then the shared `pickUp` / `drop` / `swapWeapons` rules. Two players racing for one item: the first processed wins, the other is refused (`gone`).
+- **Pickups aren't predicted.** The client checks the shared rule on its copy of the server inventory first (a full bag fails at once), sends the action, and fires `picked` only when the loot stream shows the item taken. PUBG model, as planned.
+- **Starting kit** (join and respawn, humans and bots): `createNetStartingInventory()`, practice's kit without grenades: AR-4 30 + 60, P-9 12 + 24, Lv1 backpack. Heals and armor come from loot.
 
 ### 9.6 Armor
 
@@ -892,7 +918,7 @@ Assumptions: 10 players, ~1 throwable per player per 30 s, grenades live ~5 s, R
 | Frag/flash throw | `ThrowStart` 18 B × 4 + `ThrowableState` 11 B × 10 Hz × 5 s + `Detonate` 11 B × 4 ≈ 670 B | 0.33/s | **1.8** | 10 grenades in the air: **+9 kbps** |
 | Smoke | throw ≈ 500 B + `AreaEffectStart` 16 B × 4 | 0.1/s | 0.4 | |
 | Molotov | throw ≈ 300 B + `AreaEffectStart` + DoT `DamageTaken` 6 B/s × victims | 0.05/s | 0.2 | |
-| Inventory while looting | `InventoryDelta` 7 B × 4 + `LootDelta` 5–14 B × 4 per pickup | 1 pickup/s (early game) | 0.6 | death crate: 30 `LootDelta` spawns ≈ 1.7 KB once |
+| Inventory while looting (v7, measured) | `LootUpdate` remove/quantity 3–4 B to clients near the item + owner items gear part 6 B | pickups every 2 s + roaming | **0.26** (max 0.59) | join 2.3–4.2 KB on the stream; death pile ≈ 60 B |
 | Armor/backpack visuals, equipment group | 3 B on change | rare | ~0 | |
 | Owner vitals / throw / item groups | ≤ 7 B on change | while healing/throwing | ~0.3 | |
 | **Total** | | | **~3 kbps** | **≤ 15 kbps** |

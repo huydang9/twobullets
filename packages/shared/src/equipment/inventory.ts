@@ -285,6 +285,17 @@ export function wantsAutoPickup(inventory: InventoryState, itemId: ItemId): bool
   return isStackItem(itemId) && maxAddable(inventory, itemId) > 0;
 }
 
+/** Everything carried as ground items (death drops): weapons with magazines, helmet, vest, backpack, then stacks. */
+export function inventoryItems(inventory: InventoryState): ItemInstance[] {
+  const items: ItemInstance[] = [];
+  for (const weapon of inventory.weapons) if (weapon) items.push(weaponInstance(weapon));
+  if (inventory.helmet) items.push(armorInstance("helmet", inventory.helmet));
+  if (inventory.vest) items.push(armorInstance("vest", inventory.vest));
+  if (inventory.backpack > 0) items.push({ itemId: `backpack_${inventory.backpack as ArmorLevel}`, quantity: 1 });
+  for (const stack of inventory.stacks) if (stack.quantity > 0) items.push({ itemId: stack.itemId, quantity: stack.quantity });
+  return items;
+}
+
 export function weaponSlotOf(inventory: InventoryState, weaponId: WeaponId): WeaponSlot | null {
   const index = inventory.weapons.findIndex((w) => w?.weaponId === weaponId);
   return index < 0 ? null : (index as WeaponSlot);

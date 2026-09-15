@@ -15,6 +15,7 @@ Contents:
 9. [Wiring](#9-wiring)
 10. [Verification](#10-verification)
 11. [Risks and follow-ups](#11-risks-and-follow-ups)
+12. [Networked play (B5)](#12-networked-play-b5)
 
 ## 1. Code map
 
@@ -216,3 +217,24 @@ const inventory = new InventoryScreen(hudRoot, equipment, input);
 5. **Outline cost.** The highlight uses Babylon's outline renderer (an extra pass for one small mesh). Swap to an emissive pulse if it shows in profiles.
 6. **Drag and drop** uses HTML5 DnD: no custom drag image, and on macOS Ctrl+click is a right-click (use Shift+drag to split).
 7. **`groundLoot`** is never null any more; the phase 1 doc comment on `EquipmentView.groundLoot` still says "null outside map mode".
+
+## 12. Networked play (B5)
+
+Online matches use the same shared rules with the server as the only authority (protocol v7; wire details in [../backend/netcode.md](../backend/netcode.md) §8.3 and §9.5).
+
+| Piece | Where | What it does |
+|---|---|---|
+| Generation | `apps/server-match/src/level/serverLevel.ts` (`createLoot`) | The practice call, `generateLoot(seed, pois, buildings, { flatten, terrain, layout })`, on the server's map data (arena: `createTestLoot`). Clients never generate loot online. |
+| Ground loot and actions | `apps/server-match/src/match/ServerLoot.ts` | Drops throwables, validates `pickup`/`drop`/`equipAttach` actions (reach 3.5 m from the eye, sight ray, not reviving, shared `pickUp`/`drop`/`swapWeapons`), death piles, per-client area-of-interest streaming. |
+| Inventory on the server | `Player.inventory`, `ServerMatch.step` | Weapons follow it every tick (`syncWeaponsFromInventory`/`commitWeaponsToInventory`, reserve from ammo items); `Player.armor` mirrors its helmet and vest for `applyDamage`. |
+| Starting kit | `createNetStartingInventory()` (`presets.ts`) | Practice kit without grenades: AR-4, P-9, 60 + 24 spare rounds, Lv1 backpack. Join and every respawn, humans and bots. |
+| Server bots | `ServerBots` (`queryLoot`) | The shared bot brain's loot goals against server loot, through the same `pickup` action. |
+| Client mirror | `apps/client/src/net/NetLoot.ts` | Applies `LootUpdate` ops to a `GroundLoot`, remembers the player's own drops. |
+| Client view | `apps/client/src/net/NetEquipmentView.ts` | Inventory from the owner groups (weapons from the predicted weapon state), nearby items with a sight ray, F target and F, auto pickup, inventory-screen pickups/drops/swap as actions, `picked`/`dropped` events when the loot stream confirms. |
+| Rendering | `Game.ts` | `LootRenderer` runs online on the net view (`net.equipmentFor(equipment)`). |
+
+**Throwables are not online.** Frag, smoke, flash and molotov are left out of online loot, the starting kit and death piles because the match server doesn't simulate throwables (no flight, detonation, smoke or fire on the server). Offline practice keeps them. Networking them is the next B5 step (netcode.md §9.1–9.3).
+
+**Not predicted.** Pickups, drops and swaps apply when the server's result arrives (about one RTT). The client only refuses early what the shared rule already refuses on its copy of the server inventory (full bag, nothing to drop).
+
+**Gaps:** remote players show the generic rifle model for any held gun; a drop quantity above 255 goes out as several ground stacks; ids past 16,383 are reused for drops.

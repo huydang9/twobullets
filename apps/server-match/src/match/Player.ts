@@ -13,9 +13,10 @@ import type { PlayerBody } from "@twobullets/sim";
 import { ViewDelayEstimator } from "../hitreg/ViewDelay";
 import { ClientReplication, type ReplicatedPlayer } from "../snapshot/SnapshotBuilder";
 import type { BotSeat } from "../bots/ServerBots";
+import { LootViewer } from "./ServerLoot";
 
 // One slot's character and connection state on the match server. Movement/weapon state is predicted by the client;
-// vitals, armor and consumables are server-owned (replicated in the owner vitals and items groups and remote flags).
+// vitals, armor and the inventory are server-owned (replicated in the owner vitals and items groups and remote flags).
 
 export interface PlayerCombatStats {
   kills: number;
@@ -45,8 +46,15 @@ export class Player implements ReplicatedPlayer {
   state: PlayerState;
   vitals: Vitals = createVitals();
   armor: ArmorLoadout = NO_ARMOR;
-  /** Carried consumables (humans get the offline kit's; bots none) and the timed use in progress (ServerItems). */
+  /**
+   * Everything carried (B5): weapons with magazines, ammo, armor (mirrored in `armor`), backpack and consumables. Weapon
+   * slots and reserves follow it every tick (`syncWeaponsFromInventory`); ServerLoot and ServerItems change it.
+   */
   inventory: InventoryState = createInventory();
+  /** The inventory object the weapon state last matched (synced or committed); a different one triggers a sync. */
+  weaponInventory: InventoryState | null = null;
+  /** Loot area of interest of this player's client (ServerLoot). */
+  readonly lootView = new LootViewer();
   use: ItemUseState = IDLE_ITEM_USE;
   /** Buttons of the last input ServerItems saw (press edges). */
   itemButtons = 0;

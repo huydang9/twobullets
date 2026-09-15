@@ -70,6 +70,8 @@ export interface LifecycleHost {
   readonly isValidZoneCenter: ZoneCenterCheck | null;
   /** Team start, fresh loadout and vitals. */
   placeAtStart(p: Player): void;
+  /** Glide start: ground loot back to the generated layout (B5). */
+  resetLoot?(): void;
   /** Warmup is over: server bots take the slots nobody joined (`rules.fillWithBots`). Returns the bots added. */
   fillBots?(): number;
   /** Lifecycle phase for the host agent (contracts `MatchPhase`). */
@@ -270,6 +272,7 @@ export class BrLifecycle {
 
   /** B3 hook: spawn at altitude above the team's landing choice and glide. MVP: team starts on the ground. */
   private onGlideStart(): void {
+    this.host.resetLoot?.();
     const players = this.host.players;
     for (let i = 0; i < players.length; i++) this.host.placeAtStart(players[i]!);
   }

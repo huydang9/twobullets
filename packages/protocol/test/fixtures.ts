@@ -199,6 +199,8 @@ export function randomItemsBlock(rng: Rng): OwnerItemsBlock {
     useItem,
     useTicks: useItem !== 0 ? randInt(rng, 0, 1023) : 0,
     counts: Array.from({ length: 5 }, () => (rng() < 0.3 ? 0 : randInt(rng, 1, 127))),
+    backpack: randInt(rng, 0, 3),
+    ammo: Array.from({ length: 4 }, () => (rng() < 0.3 ? 0 : randInt(rng, 1, 999))),
   };
 }
 

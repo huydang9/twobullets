@@ -33,7 +33,8 @@ import { resolveLaunch, type GameLaunch } from "./launch";
  * Networked (`{ kind: "net" }`, DEV `?net=ws://localhost:7350/m/local[&map=v1]`, docs/release/local-stack.md): the
  * server is authoritative for movement, combat and the battle royale loop; the local player's movement and weapons are
  * predicted and reconciled, remote players are interpolated, and NetMatch draws phases, zone, names and results from
- * server messages. Local equipment stays (not networked until B5); ground loot and practice dummies are off.
+ * server messages. Ground loot, inventory, armor and heals are the server's (B5, through the net equipment view); local
+ * equipment still reads the use hotkeys; practice dummies are off.
  */
 export class Game {
   private net: NetGame | null = null;
@@ -108,8 +109,8 @@ export class Game {
     // Equipment ticks after combat. Its gates reach movement at tick time; vitals are the player's health.
     // Grenades go through the same soldier armor as bullets (`?targetArmor=1`).
     const targets = soldierTargets(combat.targets.dummies, combat.targetArmor);
-    // Networked: no ground loot until loot is on the wire (plan.md B5). Everyone starts with the starting kit (AR-4, P-9,
-    // a frag and a smoke); networked play leaves the grenades out, since the server doesn't simulate throwables yet.
+    // Networked (B5): ground loot is the server's (no local loot here); everyone starts with the networked starting kit
+    // (AR-4, P-9, spare rounds, Lv1 backpack), without grenades since the server doesn't simulate throwables.
     const equipment = new EquipmentSystem(scene, input, player, {
       ...(world && !net ? { map: { pois: world.map.pois, buildings: world.layout.buildings, outdoor: { flatten: world.map.flatten, terrain: world.terrain, layout: world.layout } } } : {}),
       ...(net ? { loot: [], inventory: createNetLocalInventory() } : {}),
@@ -125,8 +126,9 @@ export class Game {
     presentation.audio.attachEquipment(equipment);
     // Networked: the server owns out-of-bounds, so the map doesn't respawn the player locally.
     world?.attach(net ? null : player, presentation.audio.probe);
-    // Ground loot shares the presentation's throwable and consumable meshes (and their materials).
-    const loot = net ? null : new LootRenderer(scene, equipment, { assets, skyFill: environment.skyFill, models: presentationLootModels(presentation.itemMeshes) });
+    // Ground loot shares the presentation's throwable and consumable meshes (and their materials). Networked: the server's
+    // loot through the net equipment view (created in `net.attach`).
+    const loot = new LootRenderer(scene, net ? net.equipmentFor(equipment) : equipment, { assets, skyFill: environment.skyFill, models: presentationLootModels(presentation.itemMeshes) });
 
     const hud = new Hud(hudRoot, { onPlayClick: () => input.requestLock() });
     input.onLockChange((locked) => hud.setLocked(locked));

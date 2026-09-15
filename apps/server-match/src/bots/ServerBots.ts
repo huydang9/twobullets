@@ -1,4 +1,4 @@
-import { DEFAULT_BOT_DIFFICULTY, NET_WEAPON_LOADOUT, type BotDifficulty } from "@twobullets/contracts";
+import { DEFAULT_BOT_DIFFICULTY, type BotDifficulty } from "@twobullets/contracts";
 import type { LagCompHistory } from "@twobullets/netcode";
 import { dequantizePitch, dequantizeYaw, quantizePitch, quantizeYaw } from "@twobullets/shared/aim";
 import { createBotBrain } from "@twobullets/shared/bots/brain/brain";
@@ -19,7 +19,8 @@ import {
 } from "@twobullets/shared/bots/types";
 import type { DamageKind } from "@twobullets/shared/equipment/armor";
 import { createPlayerEquipment, deriveEquipmentModifiers, type EquipmentModifiers, type PlayerEquipmentState } from "@twobullets/shared/equipment/equipmentStep";
-import { createInventory, withArmor, type InventoryState } from "@twobullets/shared/equipment/inventory";
+import type { InventoryState } from "@twobullets/shared/equipment/inventory";
+import type { LootItem } from "@twobullets/shared/equipment/loot";
 import type { SmokeCloud } from "@twobullets/shared/equipment/smoke";
 import type { LifeState } from "@twobullets/shared/equipment/vitals";
 import type { MutableRigHit } from "@twobullets/shared/hitreg/rig";
@@ -29,14 +30,14 @@ import { eyeHeightFor } from "@twobullets/shared/movement/movement";
 import type { Vec3 } from "@twobullets/shared/movement/types";
 import type { SimEvent } from "@twobullets/sim";
 import type { AimedShot, RaycastFn, WeaponId } from "@twobullets/shared/weapons/types";
-import { WEAPONS } from "@twobullets/shared/weapons/weapons";
 import type { Player } from "../match/Player";
 
 // Server bots (plan.md B6, docs/bots/design.md §2.5): the offline bot brain as another input source. Every tick, before
 // players step, each bot's brain reads a BotWorldView built from server state and writes one PlayerInput into that
 // bot's ServerInputBuffer; ServerMatch then takes it and runs the exact human path (stepPlayer with weapons,
 // ServerProjectiles, ServerCombat). Noises (shots, footsteps, landings, reloads, near misses) and damage taken are fed
-// from the same hooks. No loot on the wire yet (B5): bots carry the M4 fixed loadout and never find loot.
+// from the same hooks. Loot (B5): bots start with the networked starting kit like humans, see the server's ground loot
+// through `queryLoot` and pick up with the same `pickup` action ServerLoot validates for everyone.
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableVec3 = { x: number; y: number; z: number };
@@ -75,7 +76,7 @@ export class BotSeat {
   readonly others: ActorSnapshot[] = [];
   readonly damageTaken: MutableDamageTaken[] = [];
   private readonly damagePool: MutableDamageTaken[] = [];
-  /** Loadout mirror for the brain's equipment decisions; armor follows `Player.armor`. */
+  /** `Player.inventory` as the brain last saw it (equipment decisions). */
   inventory: InventoryState;
   equip: PlayerEquipmentState;
   modifiers: EquipmentModifiers;
@@ -124,6 +125,8 @@ export interface ServerBotsOptions {
   /** Current zone (the lifecycle's, or the level's initial circle). */
   readonly zone: () => ZoneState;
   readonly brainFactory?: BotBrainFactory;
+  /** Server ground loot within a radius, nearest first (ServerLoot.queryLoot); absent = none. */
+  readonly queryLoot?: (center: Vec3, radius: number, out: LootItem[]) => number;
   /** A* node expansions per tick for every bot together. */
   readonly navExpansionsPerTick?: number;
 }
@@ -149,12 +152,6 @@ export function botDisplayName(accountId: string): string {
   return `Bot ${id}`;
 }
 
-/** The weapon inventory matching `NET_WEAPON_LOADOUT` (magazines full). */
-function loadoutInventory(): InventoryState {
-  const weapons = NET_WEAPON_LOADOUT.map((id) => (id === null ? null : { weaponId: id, magazine: WEAPONS[id].magazineSize }));
-  return createInventory({ weapons: [weapons[0] ?? null, weapons[1] ?? null, weapons[2] ?? null] });
-}
-
 export class ServerBots {
   readonly nav: NavQuery;
   readonly difficulty: BotDifficulty;
@@ -176,7 +173,8 @@ export class ServerBots {
   private teamsInPlay = 0;
   private actorsInPlay = 0;
   private botCount = 0;
-  private readonly queryLoot = (_center: Vec3, _radius: number, out: unknown[]): number => {
+  private readonly queryLoot = (center: Vec3, radius: number, out: LootItem[]): number => {
+    if (this.o.queryLoot) return this.o.queryLoot(center, radius, out);
     out.length = 0;
     return 0;
   };
@@ -210,7 +208,7 @@ export class ServerBots {
   attach(p: Player): BotSeat {
     const profile = BOT_PROFILES[this.difficulty];
     const brain = this.brainFactory({ slot: p.slot, team: p.teamId, seed: this.o.matchSeed >>> 0, profile });
-    const inventory = withArmor(loadoutInventory(), p.armor);
+    const inventory = p.inventory;
     const equip = createPlayerEquipment(inventory);
     const views = this.actors[p.slot]!;
     const self: Mutable<BotSelfView> = {
@@ -246,7 +244,7 @@ export class ServerBots {
       actorsInPlay: 0,
       raycast: this.o.raycastWorld,
       nav: this.o.nav,
-      queryLoot: this.queryLoot as BotWorldView["queryLoot"],
+      queryLoot: this.queryLoot,
       actorOnSegment: this.actorOnSegment,
     };
     const seat = new BotSeat(brain, botDisplayName(p.accountId), view, self, inventory, equip);
@@ -465,7 +463,7 @@ export class ServerBots {
     const views = this.actors[p.slot]!;
     self.eye = views.eye;
     self.velocity = views.velocity;
-    const inventory = withArmor(seat.inventory, p.armor);
+    const inventory = p.inventory;
     if (inventory !== seat.inventory) {
       seat.inventory = inventory;
       seat.equip = { ...seat.equip, inventory };

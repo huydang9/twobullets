@@ -1,5 +1,7 @@
 import {
   actorCode,
+  AMMO_COUNT,
+  AMMO_IDS,
   CONSUMABLE_COUNT,
   CONSUMABLE_IDS_BY_CODE,
   consumableCode,
@@ -29,6 +31,7 @@ import {
 import {
   EntityPresence,
   MAX_WEAPON_SLOTS,
+  AMMO_COUNT_BITS,
   CONSUMABLE_COUNT_BITS,
   USE_TICKS_BITS,
   TEAMMATE_HEALTH_BITS,
@@ -258,6 +261,12 @@ export function writeOwnerItems(use: ItemUseState, inventory: InventoryState, ou
   for (let i = 0; i < CONSUMABLE_COUNT; i++) {
     const count = countItem(inventory, CONSUMABLE_IDS_BY_CODE[i + 1]!);
     out.counts[i] = count > max ? max : count;
+  }
+  out.backpack = inventory.backpack;
+  const ammoMax = (1 << AMMO_COUNT_BITS) - 1;
+  for (let i = 0; i < AMMO_COUNT; i++) {
+    const rounds = countItem(inventory, AMMO_IDS[i]!);
+    out.ammo[i] = rounds > ammoMax ? ammoMax : rounds;
   }
 }
 

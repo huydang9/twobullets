@@ -69,6 +69,14 @@ export function createStartingInventory(options: { readonly throwables?: boolean
   });
 }
 
+/**
+ * Networked starting kit (protocol v7): the practice kit without throwables (the server doesn't simulate them), keeping
+ * the level 1 backpack: AR-4 and P-9 with loaded magazines, 60 5.56 mm and 24 9 mm spare rounds.
+ */
+export function createNetStartingInventory(): InventoryState {
+  return createInventory({ ...createStartingInventory({ throwables: false }), backpack: STARTING_KIT.backpack });
+}
+
 /** What each arena test pile holds: the shotgun (no longer in the kit), its shells and one of each gear family. */
 const TEST_PILE: readonly ItemInstance[] = [
   { itemId: "weapon_shotgun", quantity: 1, magazine: 0 },

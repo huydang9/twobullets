@@ -1,5 +1,5 @@
 import type { DamageKind } from "@twobullets/shared/equipment/armor";
-import type { ConsumableItemId } from "@twobullets/shared/equipment/items";
+import type { AmmoItemId, ConsumableItemId } from "@twobullets/shared/equipment/items";
 import type { LifeState } from "@twobullets/shared/equipment/vitals";
 import type { HitZone, WeaponId, WeaponPhase } from "@twobullets/shared/weapons/types";
 import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
@@ -58,6 +58,10 @@ export function consumableCode(id: ConsumableItemId | null | undefined): number 
 export function consumableIdOfCode(code: number): ConsumableItemId | null {
   return CONSUMABLE_IDS_BY_CODE[code] ?? null;
 }
+
+/** Owner items group gear part (v7): carried rounds per ammo type, in this order. */
+export const AMMO_IDS: readonly AmmoItemId[] = ["ammo_556", "ammo_762", "ammo_9mm", "ammo_12g"];
+export const AMMO_COUNT = AMMO_IDS.length;
 
 /** 2 bits. */
 export const WeaponPhaseCode = { ready: 0, equipping: 1, reloading: 2 } as const;

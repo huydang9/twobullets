@@ -11,6 +11,7 @@ import { StraightNav } from "../../../../packages/sim/test/match/straightNav";
 import { EquipmentSystem, type EquipmentInputSource, type EquipmentPlayer } from "../../src/equipment/EquipmentSystem";
 import { createOfflineMatchConfig, createOfflineMatchSim } from "../../src/match/createOfflineMatchSim";
 import { readOfflineMatchOptions } from "../../src/match/options";
+import { createNetStartingInventory } from "@twobullets/shared/equipment/presets";
 import { createNetLocalInventory } from "../../src/net/NetEquipmentView";
 
 // Starting kit per mode: the offline human (EquipmentSystem's default and respawn loadout, which OfflineMatch also
@@ -89,11 +90,15 @@ describe("starting kit", () => {
     sim.dispose();
   });
 
-  it("networked local inventory: the server's guns and consumables, no grenades", () => {
+  it("networked local inventory: the server's starting kit (B5): guns, spare rounds, Lv1 backpack, no grenades or heals", () => {
     const inventory = createNetLocalInventory();
+    expect(inventory).toEqual(createNetStartingInventory());
     expect(inventory.weapons.map((w) => w?.weaponId ?? null)).toEqual(["rifle", null, "pistol"]);
-    expect(inventory.stacks.some((s) => s.itemId === "frag" || s.itemId === "smoke" || s.itemId === "flash" || s.itemId === "molotov")).toBe(false);
+    expect(inventory.stacks).toEqual([
+      { itemId: "ammo_556", quantity: 60 },
+      { itemId: "ammo_9mm", quantity: 24 },
+    ]);
+    expect(inventory.backpack).toBe(1);
     expect(inventory.selectedThrowable).toBeNull();
-    expect(inventory.stacks.find((s) => s.itemId === "medkit")?.quantity).toBe(1);
   });
 });

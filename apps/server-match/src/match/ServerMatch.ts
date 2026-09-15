@@ -25,7 +25,10 @@ import {
   type RosterPlayer,
 } from "@twobullets/protocol";
 import { MOVEMENT } from "@twobullets/shared/constants";
+import { withArmor } from "@twobullets/shared/equipment/inventory";
 import { IDLE_ITEM_USE } from "@twobullets/shared/equipment/itemUse";
+import { createNetStartingInventory } from "@twobullets/shared/equipment/presets";
+import { commitWeaponsToInventory, syncWeaponsFromInventory, weaponStateFromInventory, type WeaponLoadoutOptions } from "@twobullets/shared/equipment/weaponLoadout";
 import { createVitals, VITALS } from "@twobullets/shared/equipment/vitals";
 import { Btn, PlayerActionType, type MoveGates, type PlayerInput } from "@twobullets/shared/input";
 import { createMoveState, fallDamage } from "@twobullets/shared/movement/movement";
@@ -44,7 +47,8 @@ import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
 import { BrLifecycle, type BrLifecycleOptions, type LifecycleHost } from "./BrLifecycle";
 import { freshPlayerState, Player } from "./Player";
 import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
-import { createNetConsumables, ServerItems } from "./ServerItems";
+import { ServerItems } from "./ServerItems";
+import { ServerLoot } from "./ServerLoot";
 import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
@@ -53,6 +57,9 @@ import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slo
 // runs (BrLifecycle): Warmup → LandingSelect → Glide → Combat → Ended/Cancelled, then the match closes itself.
 // Server bots (ServerBots) take the roster's `bot:<n>` seats when the world is ready and, with `rules.fillWithBots` in a BR
 // match, every slot still empty when warmup ends; their brains write into the same input buffers humans' packets do.
+// Loot and inventory (B5, ServerLoot): the level's generated loot minus throwables, replicated per client by area of
+// interest; everyone (bots too) spawns with the networked starting kit, and weapon slots, magazines and reserves follow
+// the inventory every tick. A death drops the inventory as a pile; BR glide start restores the generated loot.
 // Roster: a joining session gets it right after Welcome; any other change (join, leave, bot fill, grace expiry) bumps a
 // revision that is sent once at the end of the tick to every session behind it.
 
@@ -109,6 +116,8 @@ const INTERP_FLOOR_WS_MS = 50;
 const INTERP_FLOOR_WT_MS = 25;
 const MAX_REWIND_MS = 200;
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+/** Reserve = the weapon's ammo in the inventory; reloads consume it (offline MatchSim's LOADOUT). */
+const NET_LOADOUT: WeaponLoadoutOptions = { ammoFromInventory: true };
 const BOT_PHASE: Readonly<Record<BrLifecycle["phase"], BrPhase>> = { Warmup: "warmup", LandingSelect: "landing", Glide: "glide", Combat: "combat", End: "ended" };
 const PHASE_CODES = { Warmup: PhaseCode.Warmup, LandingSelect: PhaseCode.LandingSelect, Glide: PhaseCode.Glide, Combat: PhaseCode.Combat, End: PhaseCode.End } as const;
 
@@ -122,6 +131,8 @@ export class ServerMatch implements Match, CombatHost {
   readonly items = new ServerItems(TICK_SECONDS);
   /** Null until the sim world is ready. */
   combat: ServerCombat | null = null;
+  /** Ground loot and inventory actions; null until the sim world is ready. */
+  loot: ServerLoot | null = null;
   /** Null in the sandbox and until the world is ready. */
   lifecycle: BrLifecycle | null = null;
   /** Null when the match has no bot seats (and can't fill any), and until the world is ready. */
@@ -181,6 +192,9 @@ export class ServerMatch implements Match, CombatHost {
       const combat = new ServerCombat({ ...options.combat, rules: options.config.rules, maxSlots, raycastWorld: world.raycastWorld, tickRate: options.tickRate });
       combat.attach(this, teamCount, teamSize);
       this.combat = combat;
+      const loot = new ServerLoot({ items: this.level.createLoot?.(options.config.matchSeed >>> 0) ?? [], raycastWorld: world.raycastWorld, players: () => this.active, seed: options.config.matchSeed >>> 0 });
+      this.loot = loot;
+      combat.onKilled = (victim) => loot.dropInventory(victim);
       if (this.phaseValue !== "Booting") return;
       if (this.needsBots()) this.startBots(world, combat);
       if (options.lifecycle) {
@@ -244,8 +258,7 @@ export class ServerMatch implements Match, CombatHost {
     if (!choice.ok) return { ok: false, reason: choice.reason === "matchFull" ? DisconnectReason.matchFull : DisconnectReason.notAssigned };
     const spawn = this.spawnFor(choice.slot);
     const player = new Player(choice.slot, choice.teamId, claims.sub, this.world.createBody(spawn.feet), spawn);
-    player.armor = this.combat!.armorForSpawn();
-    player.inventory = createNetConsumables();
+    this.equip(player);
     this.slots[choice.slot] = player;
     this.byAccount.set(claims.sub, player);
     this.rebuildActive();
@@ -291,6 +304,7 @@ export class ServerMatch implements Match, CombatHost {
       p.buttons = input.buttons;
       this.step(p, input, combat);
       this.items.step(p, input);
+      this.loot?.act(p, input);
       if (p.body.feet.y < killY) combat.outOfBounds(p);
     }
     if (!frozen) combat.endTick(tick);
@@ -298,6 +312,7 @@ export class ServerMatch implements Match, CombatHost {
     this.next = tick + 1;
     if (this.closed) return;
     this.flushRoster();
+    this.loot?.replicate(players);
     const now = this.clock.now();
     this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
@@ -394,6 +409,7 @@ export class ServerMatch implements Match, CombatHost {
       zone: this.level.zone,
       isValidZoneCenter: this.level.isValidZoneCenter,
       placeAtStart: (p) => this.respawn(p),
+      resetLoot: () => this.loot?.reset(),
       fillBots: () => this.fillEmptySlotsWithBots(),
       lifecyclePhase: (phase) => this.setPhase(phase),
       result: (result) => this.options.onResult?.(result),
@@ -406,8 +422,7 @@ export class ServerMatch implements Match, CombatHost {
     p.body.restore(p.spawn.feet, ZERO, "stand");
     p.state = freshPlayerState();
     p.vitals = createVitals();
-    p.armor = this.combat!.armorForSpawn();
-    if (p.bot === null) p.inventory = createNetConsumables();
+    this.equip(p);
     p.use = IDLE_ITEM_USE;
     p.deathTick = -1;
     p.reviveTarget = -1;
@@ -415,6 +430,14 @@ export class ServerMatch implements Match, CombatHost {
     p.poseDiscontinuous = true;
     this.combat!.history.clear(p.slot);
     this.bots?.reset(p);
+  }
+
+  /** Spawn armor (tests), the networked starting kit and a weapon state drawn from it. */
+  private equip(p: Player): void {
+    p.armor = this.combat!.armorForSpawn();
+    p.inventory = withArmor(createNetStartingInventory(), p.armor);
+    p.state = { move: p.state.move, weapon: weaponStateFromInventory(p.inventory, NET_LOADOUT) };
+    p.weaponInventory = p.inventory;
   }
 
   private needsBots(): boolean {
@@ -438,6 +461,7 @@ export class ServerMatch implements Match, CombatHost {
       history: combat.history,
       zone: () => lifecycleZone() ?? idleZone,
       brainFactory: this.options.botBrainFactory,
+      queryLoot: (center, radius, out) => this.loot?.queryLoot(center, radius, out) ?? 0,
     });
     this.bots = bots;
     combat.onDamage = (victim, attacker, amount, kind, dirX, dirZ) => bots.onDamage(victim, attacker, amount, kind, dirX, dirZ);
@@ -455,7 +479,7 @@ export class ServerMatch implements Match, CombatHost {
   private addBot(slot: number, accountId: string): Player {
     const spawn = this.spawnFor(slot);
     const player = new Player(slot, Math.floor(slot / matchTeamSize(this.config)), accountId, this.world!.createBody(spawn.feet), spawn);
-    player.armor = this.combat!.armorForSpawn();
+    this.equip(player);
     this.slots[slot] = player;
     this.byAccount.set(accountId, player);
     this.rebuildActive();
@@ -502,8 +526,19 @@ export class ServerMatch implements Match, CombatHost {
       effective = gated;
       p.buttons = gated.buttons;
     }
+    // Loot actions changed the inventory since the weapons last matched it: slots, magazines and reserves follow.
+    if (p.inventory !== p.weaponInventory) {
+      const synced = syncWeaponsFromInventory(p.state.weapon, p.inventory, NET_LOADOUT).state;
+      if (synced !== p.state.weapon) p.state = { move: p.state.move, weapon: synced };
+    }
+    const before = p.state.weapon;
     const result = stepPlayer(p.body, p.state, effective, TICK_SECONDS, options);
     p.state = result.state;
+    // Magazines and spent reserve go back to the inventory; a changed inventory re-syncs next tick (two guns sharing an
+    // ammo type see the rounds a reload took).
+    const committed = commitWeaponsToInventory(before, result.state.weapon, p.inventory, NET_LOADOUT);
+    if (committed === p.inventory) p.weaponInventory = committed;
+    p.inventory = committed;
     const shots = result.shots;
     for (let k = 0; k < shots.length; k++) combat.fire(p, shots[k]!, input.viewOffset8);
     const events = result.events;
@@ -533,6 +568,7 @@ export class ServerMatch implements Match, CombatHost {
     player.inputs.reset();
     player.net.reset(this.next - 1);
     player.viewDelay.reset();
+    player.lootView.reset();
     player.name = typeof claims.nick === "string" && claims.nick.length > 0 ? claims.nick : claims.sub;
     this.bySession.set(session, player);
     session.onDatagram((bytes, recvMs) => this.onDatagram(player, session, bytes, recvMs));

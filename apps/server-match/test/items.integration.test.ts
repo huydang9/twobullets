@@ -2,14 +2,16 @@ import { consumableCode, type OwnerItemsBlock } from "@twobullets/protocol";
 import { NET_RESPAWN_SECONDS } from "@twobullets/contracts";
 import { createInventory } from "@twobullets/shared/equipment/inventory";
 import { itemCode, ITEMS, type ConsumableItemId } from "@twobullets/shared/equipment/items";
+import { createOfflineInventory } from "@twobullets/shared/equipment/presets";
 import { Btn, PlayerActionType } from "@twobullets/shared/input";
 import type { HavokModule } from "@twobullets/sim";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./harness";
 
-// Networked consumables (plan.md B5 slice): the `use` input action runs the shared timed use on the server's vitals, the
-// same interrupts as offline cancel it, and the owner items group reports use progress and counts.
+// Networked consumables (plan.md B5): the `use` input action runs the shared timed use on the server's vitals, the
+// same interrupts as offline cancel it, and the owner items group reports use progress and counts. Heals come from loot
+// now, so each test hands the player the offline kit's consumables.
 
 let havok: HavokModule;
 
@@ -35,6 +37,9 @@ async function setup() {
   };
   h.run(300);
   const player = h.match.player(client.playerSlot)!;
+  const heals = createOfflineInventory().stacks.filter((stack) => ITEMS[stack.itemId].category === "heal" || ITEMS[stack.itemId].category === "boost");
+  player.inventory = createInventory({ ...player.inventory, stacks: [...player.inventory.stacks, ...heals] });
+  h.run(100);
   const use = (id: ConsumableItemId) => (pending.action = { type: PlayerActionType.use, arg: itemCode(id) });
   const cancel = () => (pending.action = { type: PlayerActionType.cancel, arg: 0 });
   const count = (id: ConsumableItemId) => items!.counts[consumableCode(id) - 1];
@@ -117,7 +122,7 @@ describe("networked consumables", () => {
     await h.dispose();
   }, 60_000);
 
-  it("starting kit at join and respawn: AR-4 and P-9 loaded, the heal kit, no grenades (throwables aren't simulated online)", async () => {
+  it("starting kit at join and respawn: AR-4 and P-9 loaded with 60/24 spare rounds, a level 1 backpack, no grenades or heals", async () => {
     const { h, player, count } = await setup();
     const expectKit = () => {
       expect(player.state.weapon.slots.map((slot) => (slot ? { id: slot.id, magazine: slot.magazine } : null))).toEqual([
@@ -125,21 +130,25 @@ describe("networked consumables", () => {
         null,
         { id: "pistol", magazine: 12 },
       ]);
-      expect(player.state.weapon.slots[0]!.reserve).toBeGreaterThan(0);
-      expect(player.state.weapon.slots[2]!.reserve).toBeGreaterThan(0);
-      expect(player.inventory.stacks.map((s) => s.itemId).sort()).toEqual(["bandage", "energy_drink", "first_aid", "medkit", "painkiller"]);
-      expect(player.inventory.stacks.some((s) => ITEMS[s.itemId].category === "throwable")).toBe(false);
+      expect(player.state.weapon.slots[0]!.reserve).toBe(60);
+      expect(player.state.weapon.slots[2]!.reserve).toBe(24);
+      expect(player.inventory.stacks).toEqual([
+        { itemId: "ammo_556", quantity: 60 },
+        { itemId: "ammo_9mm", quantity: 24 },
+      ]);
+      expect(player.inventory.backpack).toBe(1);
     };
+    h.match.respawn(player);
+    h.run(100);
     expectKit();
-    expect(count("medkit")).toBe(1);
+    expect(count("medkit")).toBe(0);
 
     h.match.combat!.zoneDamage(player, 100);
     expect(player.life).toBe("dead");
-    player.inventory = createInventory();
+    expect(player.inventory.stacks).toEqual([]);
     h.run(NET_RESPAWN_SECONDS * 1000 + 500);
     expect(player.life).toBe("alive");
     expectKit();
-    expect(count("medkit")).toBe(1);
     await h.dispose();
   }, 60_000);
 });

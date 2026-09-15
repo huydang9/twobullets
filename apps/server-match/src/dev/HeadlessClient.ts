@@ -2,6 +2,10 @@ import { ClientSnapshotStore, createSeededRng, ReliableEventReceiver, type Clock
 import {
   CONTENT_HASH,
   createBitReader,
+  createLootUpdateBuffer,
+  decodeLootUpdateInto,
+  lootCellOfQ,
+  LootOpCode,
   createBitWriter,
   createMutablePlayerInput,
   decodeDisconnect,
@@ -19,6 +23,7 @@ import {
   PROTOCOL_VERSION,
   type Disconnect,
   type KillFeed,
+  type LootOp,
   type MatchEnd,
   type PhaseChange,
   type ZonePhaseMessage,
@@ -86,6 +91,12 @@ export class HeadlessClient {
   killFeeds = 0;
   shotsSeen = 0;
   hitsSeen = 0;
+  /** Ground loot as the server streamed it (protocol v7 LootUpdate), by loot id; copies of the decoded spawn ops. */
+  readonly loot = new Map<number, LootOp>();
+  lootMessages = 0;
+  lootBytes = 0;
+  lootMalformed = 0;
+  private readonly lootBuffer = createLootUpdateBuffer();
   /** View offsets (1/8 tick) sent with fire, newest last (tests; capped). */
   readonly viewOffsets: number[] = [];
   private newestRecvMs = 0;
@@ -293,6 +304,31 @@ export class HeadlessClient {
     } else if (bytes[0] === MsgId.Disconnect) {
       this.disconnect = decodeDisconnect(r);
       this.closedByServer = true;
+    } else if (bytes[0] === MsgId.LootUpdate) {
+      this.applyLoot(bytes);
+    }
+  }
+
+  private applyLoot(bytes: Uint8Array): void {
+    this.lootMessages++;
+    this.lootBytes += bytes.length;
+    const buf = this.lootBuffer;
+    if (!decodeLootUpdateInto(this.reader, buf)) {
+      this.lootMalformed++;
+      return;
+    }
+    const loot = this.loot;
+    for (let i = 0; i < buf.count; i++) {
+      const op = buf.ops[i]!;
+      if (op.op === LootOpCode.spawn) loot.set(op.lootId, { ...op });
+      else if (op.op === LootOpCode.remove) loot.delete(op.lootId);
+      else if (op.op === LootOpCode.quantity) {
+        const item = loot.get(op.lootId);
+        if (item) item.quantity = op.quantity;
+      } else if (op.op === LootOpCode.clear) loot.clear();
+      else if (op.op === LootOpCode.forgetCell) {
+        for (const [id, item] of loot) if (lootCellOfQ(item.xCm, item.zCm) === op.cell) loot.delete(id);
+      }
     }
   }
 

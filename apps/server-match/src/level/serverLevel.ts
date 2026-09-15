@@ -2,6 +2,8 @@ import { FakeNavQuery, type FakeNavBox } from "@twobullets/shared/bots/brain/fak
 import { buildNavGrid } from "@twobullets/shared/bots/nav/buildNavGrid";
 import { createNavQuery } from "@twobullets/shared/bots/nav/navQuery";
 import type { NavGrid, NavQuery } from "@twobullets/shared/bots/types";
+import { generateLoot, type LootItem } from "@twobullets/shared/equipment/loot";
+import { createTestLoot } from "@twobullets/shared/equipment/presets";
 import type { LevelData } from "@twobullets/shared/level/types";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
 import { buildMapLayout, type MapLayout } from "@twobullets/shared/map/layout/mapLayout";
@@ -43,6 +45,12 @@ export interface MatchLevel {
    * later matches on the same map in this process. Absent: an open fake nav.
    */
   readonly createNav?: () => MatchNav;
+  /**
+   * Ground loot for a match seed (B5): the offline generator on this level, exactly what practice spawns (map: building
+   * piles plus roadside and pad piles; arena: a test pile in front of every spawn). The match filters what it can't
+   * simulate (throwables). Absent: no loot.
+   */
+  readonly createLoot?: (seed: number) => readonly LootItem[];
 }
 
 export interface MatchNav {
@@ -88,6 +96,7 @@ export function arenaMatchLevel(level: LevelData = ARENA_LEVEL, zone: ZoneSpec =
     loadMs: 0,
     source: "arena",
     createNav: () => ({ nav: arenaNav(level, zone), buildMs: 0, kind: "fake" }),
+    createLoot: () => createTestLoot(level.spawnPoints),
   };
 }
 
@@ -215,5 +224,6 @@ export async function resolveServerLevel(mapId: string, options: ResolveLevelOpt
       data.navGrid = buildNavGrid({ map, terrain, layout });
       return { nav: createNavQuery(data.navGrid), buildMs: performance.now() - started, kind: "grid" };
     },
+    createLoot: (seed) => generateLoot(seed, map.pois, layout.buildings, { flatten: map.flatten, terrain, layout }).items,
   };
 }

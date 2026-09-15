@@ -1,5 +1,5 @@
 import type { BitReader, BitWriter } from "../bits";
-import { CONSUMABLE_CODE_BITS, CONSUMABLE_COUNT, MAX_PLAYER_SLOTS, SLOT_BITS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
+import { AMMO_COUNT, CONSUMABLE_CODE_BITS, CONSUMABLE_COUNT, MAX_PLAYER_SLOTS, SLOT_BITS, WEAPON_CODE_BITS, WEAPON_IDS_BY_CODE } from "../codes";
 import {
   BLOOM_BITS,
   COOLDOWN_BITS,
@@ -44,7 +44,7 @@ import {
 import { MsgId } from "./ids";
 
 // 0x10, S→C datagram (netcode.md §6.5). Wire order: header, reliable events, shots, player hits, teammate vitals (v6),
-// owner block (move, weapon, vitals, items (v6) groups), entity list. Events and teammate vitals come before the delta-coded body so
+// owner block (move, weapon, vitals, items (v6; gear part v7) groups), entity list. Events and teammate vitals come before the delta-coded body so
 // they decode without the baseline.
 // Decoded structs carry quantized integers (mm, mm/s, angle steps) so baselines and deltas compare exactly;
 // dequantization lives in quantize.ts and codes.ts.
@@ -140,7 +140,10 @@ export interface OwnerVitalsBlock {
   readonly vestDurability: number;
 }
 
-/** Owner items group (v6, server-owned): the consumable in use and the carried consumable counts. */
+/**
+ * Owner items group (v6, server-owned): the consumable in use and the carried consumable counts; v7 adds the gear part
+ * (backpack level and rounds per ammo type). Weapons and magazines ride the weapon group, armor the vitals group.
+ */
 export interface OwnerItemsBlock {
   /** `consumableCode` of the item in use, 0 when idle. */
   readonly useItem: number;
@@ -148,10 +151,15 @@ export interface OwnerItemsBlock {
   readonly useTicks: number;
   /** Carried count per consumable (index = code − 1), 7 bits each (saturating). */
   readonly counts: readonly number[];
+  /** v7: backpack level 0..3 (2 bits). Absent reads 0. */
+  readonly backpack?: number;
+  /** v7: carried rounds per `AMMO_IDS` entry, 10 bits each (≤ 999). Absent reads 0. */
+  readonly ammo?: readonly number[];
 }
 
 export const USE_TICKS_BITS = 10;
 export const CONSUMABLE_COUNT_BITS = 7;
+export const AMMO_COUNT_BITS = 10;
 
 /** Teammates in one vitals group (squads of 4). */
 export const MAX_TEAMMATES = 3;
@@ -233,8 +241,10 @@ export interface MutableOwnerWeaponBlock extends Omit<Mutable<OwnerWeaponBlock>,
   readonly slotReserve: number[];
 }
 
-export interface MutableOwnerItemsBlock extends Omit<Mutable<OwnerItemsBlock>, "counts"> {
+export interface MutableOwnerItemsBlock extends Omit<Mutable<OwnerItemsBlock>, "counts" | "backpack" | "ammo"> {
   readonly counts: number[];
+  backpack: number;
+  readonly ammo: number[];
 }
 
 export interface MutableSnapshot {
@@ -309,7 +319,7 @@ export function createOwnerVitalsBlock(): Mutable<OwnerVitalsBlock> {
 }
 
 export function createOwnerItemsBlock(): MutableOwnerItemsBlock {
-  return { useItem: 0, useTicks: 0, counts: new Array<number>(CONSUMABLE_COUNT).fill(0) };
+  return { useItem: 0, useTicks: 0, counts: new Array<number>(CONSUMABLE_COUNT).fill(0), backpack: 0, ammo: new Array<number>(AMMO_COUNT).fill(0) };
 }
 
 export function createTeammateVitals(): Mutable<TeammateVitals> {
@@ -423,6 +433,8 @@ export function copyOwnerItems(src: OwnerItemsBlock, dst: MutableOwnerItemsBlock
   dst.useItem = src.useItem;
   dst.useTicks = src.useItem !== 0 ? src.useTicks : 0;
   for (let i = 0; i < CONSUMABLE_COUNT; i++) dst.counts[i] = src.counts[i] ?? 0;
+  dst.backpack = src.backpack ?? 0;
+  for (let i = 0; i < AMMO_COUNT; i++) dst.ammo[i] = src.ammo?.[i] ?? 0;
 }
 
 /** Use fields equal (ticks only count while an item is in use). */
@@ -432,6 +444,13 @@ export function ownerItemsUseEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): bool
 
 export function ownerItemsCountsEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
   for (let i = 0; i < CONSUMABLE_COUNT; i++) if ((a.counts[i] ?? 0) !== (b.counts[i] ?? 0)) return false;
+  return true;
+}
+
+/** v7 gear part (backpack, ammo counts) equal. */
+export function ownerItemsGearEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
+  if ((a.backpack ?? 0) !== (b.backpack ?? 0)) return false;
+  for (let i = 0; i < AMMO_COUNT; i++) if ((a.ammo?.[i] ?? 0) !== (b.ammo?.[i] ?? 0)) return false;
   return true;
 }
 
@@ -820,7 +839,7 @@ function writeOwnerVitals(w: BitWriter, o: OwnerVitalsBlock, base: OwnerVitalsBl
 }
 
 // Items group: [changed 1 with a baseline] use: item 3 (+ ticks 10 while in use); [changed 1 with a baseline] counts:
-// 7 bits per consumable.
+// 7 bits per consumable; (v7) [changed 1 with a baseline] gear: backpack 2, 10 bits per ammo type.
 function writeOwnerItems(w: BitWriter, o: OwnerItemsBlock, base: OwnerItemsBlock | null): void {
   const useSame = base !== null && ownerItemsUseEqual(o, base);
   if (base !== null) w.writeBool(!useSame);
@@ -831,6 +850,12 @@ function writeOwnerItems(w: BitWriter, o: OwnerItemsBlock, base: OwnerItemsBlock
   const countsSame = base !== null && ownerItemsCountsEqual(o, base);
   if (base !== null) w.writeBool(!countsSame);
   if (!countsSame) for (let i = 0; i < CONSUMABLE_COUNT; i++) w.write(o.counts[i] ?? 0, CONSUMABLE_COUNT_BITS);
+  const gearSame = base !== null && ownerItemsGearEqual(o, base);
+  if (base !== null) w.writeBool(!gearSame);
+  if (!gearSame) {
+    w.write(o.backpack ?? 0, 2);
+    for (let i = 0; i < AMMO_COUNT; i++) w.write(o.ammo?.[i] ?? 0, AMMO_COUNT_BITS);
+  }
 }
 
 function readOwnerItems(r: BitReader, o: MutableOwnerItemsBlock, base: OwnerItemsBlock | null): boolean {
@@ -846,6 +871,13 @@ function readOwnerItems(r: BitReader, o: MutableOwnerItemsBlock, base: OwnerItem
     for (let i = 0; i < CONSUMABLE_COUNT; i++) o.counts[i] = r.read(CONSUMABLE_COUNT_BITS);
   } else {
     for (let i = 0; i < CONSUMABLE_COUNT; i++) o.counts[i] = base.counts[i] ?? 0;
+  }
+  if (base === null || r.readBool()) {
+    o.backpack = r.read(2);
+    for (let i = 0; i < AMMO_COUNT; i++) o.ammo[i] = r.read(AMMO_COUNT_BITS);
+  } else {
+    o.backpack = base.backpack ?? 0;
+    for (let i = 0; i < AMMO_COUNT; i++) o.ammo[i] = base.ammo?.[i] ?? 0;
   }
   return true;
 }

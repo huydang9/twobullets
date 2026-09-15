@@ -13,9 +13,12 @@
  * v6: snapshot teammate vitals section (bit 128): health, life, downed health and revive progress of the recipient's
  * teammates only, sent on change until acked and as a keyframe. Owner items group after vitals (consumable in use, use
  * ticks, consumable counts); the `use`/`cancel` input actions are honoured.
+ * v7: networked ground loot (plan.md B5): `LootUpdate` (0x4E) on the control stream streams the items in the client's
+ * area of interest; the owner items group gains a gear part (backpack level, ammo counts); `pickup` (loot id + weapon
+ * slot), `drop` (shared `encodeDropArg`) and `equipAttach` (inventory ops: swap primaries) input actions are honoured.
  */
-export const PROTOCOL_VERSION = 6;
-export const CONTENT_HASH = 0xb1eab561;
+export const PROTOCOL_VERSION = 7;
+export const CONTENT_HASH = 0x4bc5f495;
 
 export interface CompatKey {
   /** u16 */

@@ -23,6 +23,8 @@ export const MsgId = {
   Resume: 0x4c,
   /** v5: who is in the match (names, teams, bots, connection). */
   Roster: 0x4d,
+  /** v7: ground loot in the client's area of interest (spawn, remove, quantity, forget cell, clear). */
+  LootUpdate: 0x4e,
   Disconnect: 0x4f,
 } as const;
 export type MsgId = (typeof MsgId)[keyof typeof MsgId];
