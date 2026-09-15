@@ -83,6 +83,7 @@ export class PlayOverlay {
     const header = el("header", "tb-title", undefined, panel);
     el("h1", "tb-title__name", "TWOBULLETS", header);
     elT("div", "tb-title__tagline", "overlay.tagline", header);
+    elT("div", "tb-title__byline", "menu.author", header);
 
     this.play = elT("div", "tb-play", "overlay.clickToPlay", panel);
     this.hint = elT("div", "tb-hint", "overlay.lockBlocked", panel);

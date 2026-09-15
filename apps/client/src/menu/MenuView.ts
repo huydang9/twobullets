@@ -170,6 +170,7 @@ export class MenuView {
     const title = el("div", "tb-menu__hero", undefined, panel);
     el("h1", "tb-menu__title", "TWOBULLETS", title);
     el("div", "tb-menu__tagline", t("overlay.tagline"), title);
+    el("div", "tb-menu__byline", t("menu.author"), title);
 
     const form = el("form", "tb-menu__form", undefined, panel);
     const nickname = this.input(form, "login.nickname", "nickname", this.drafts.nickname, (value) => (this.drafts.nickname = value));
@@ -235,6 +236,7 @@ export class MenuView {
       case "home": {
         el("h2", "tb-menu__heading", t("menu.homeTitle"), content);
         el("p", "tb-menu__text", t("menu.homeHint"), content);
+        el("div", "tb-menu__byline", t("menu.author"), content);
         if (!state.catalog) el("p", "tb-menu__text tb-menu__warn", t("menu.serverDown"), content);
         const actions = el("div", "tb-menu__actions", undefined, content);
         this.button(actions, "menu.quickPlay", "tb-menu__primary", () => this.controller.openPanel("quickPlay"), state.busy);
@@ -335,7 +337,7 @@ export class MenuView {
 
   private creditsPanel(content: HTMLElement): void {
     el("h2", "tb-menu__heading", t("menu.credits"), content);
-    el("p", "tb-menu__author", t("menu.author", { name: "Huy Dang" }), content);
+    el("p", "tb-menu__author", t("menu.author"), content);
     el("p", "tb-menu__hint", t("menu.creditsIntro"), content);
     if (this.credits === null) {
       el("p", "tb-menu__hint", t("menu.loading"), content);

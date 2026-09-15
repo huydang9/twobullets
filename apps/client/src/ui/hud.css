@@ -247,6 +247,12 @@
   color: var(--tb-text-faint);
 }
 
+.tb-title__byline {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--tb-text-faint);
+}
+
 .tb-play {
   padding: 10px 34px;
   font-size: 14px;

@@ -353,7 +353,7 @@ export const en: Messages = {
   "menu.practiceHint": "Offline on your own computer, no server needed.",
   "menu.settings": "Settings",
   "menu.credits": "Credits",
-  "menu.author": "Game by {name}",
+  "menu.author": "Game by Huy Dang",
   "menu.creditsIntro": "Free assets used in the game",
   "menu.homeTitle": "Ready to drop",
   "menu.homeHint": "Quick play finds a match now. Create a lobby to play with friends.",
