@@ -133,6 +133,8 @@ export class BotBody {
     this.currentYaw = this.previousYaw = state.yaw;
     this.hasTick = true;
     this.shownDead = false;
+    // A reused body starts its new life standing (the animator would otherwise ignore the next death).
+    if (this.soldier.dead) this.soldier.revive();
     this.bodyYaw = state.yaw;
     this.yawOwned = false;
     this.lastInventory = match.inventoryOf(this.slot);

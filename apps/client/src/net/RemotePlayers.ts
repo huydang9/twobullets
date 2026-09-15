@@ -153,6 +153,8 @@ export class RemotePlayers implements FootstepEmitterSource {
         }
         continue;
       }
+      // First sight of the slot, or back in view: a death that happened unseen shows the body already lying.
+      const appeared = !avatar?.enabled;
       if (!avatar) {
         avatar = this.avatars[slot] = this.createAvatar(slot);
         this.onAvatarCreated?.(slot, avatar.soldier);
@@ -185,7 +187,7 @@ export class RemotePlayers implements FootstepEmitterSource {
         if (dead) {
           if (!avatar.shownDead) {
             avatar.shownDead = true;
-            soldier.die(avatar.hitDirection);
+            soldier.die(avatar.hitDirection, appeared);
           }
           motion.velocityX = motion.velocityZ = 0;
           motion.downed = false;

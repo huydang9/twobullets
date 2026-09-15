@@ -56,6 +56,8 @@ class FakeGroup {
   mask: unknown = null;
   private loop = false;
   private frame = 0;
+  /** Frame a speed-0 group re-evaluates on its next advance (Babylon ignores goToFrame while speedRatio is 0). */
+  private stoppedAt: number | null = null;
 
   constructor(
     readonly name: CharacterClipName,
@@ -66,6 +68,7 @@ class FakeGroup {
 
   start(loop: boolean, speed: number, from: number): void {
     this.isStarted = true;
+    this.stoppedAt = null;
     this.loop = loop;
     this.speedRatio = speed;
     this.frame = from;
@@ -76,6 +79,7 @@ class FakeGroup {
   }
 
   goToFrame(frame: number): void {
+    if (this.speedRatio === 0) this.stoppedAt ??= this.frame;
     this.frame = frame;
   }
 
@@ -86,6 +90,8 @@ class FakeGroup {
   /** Babylon's per-render advance. */
   advance(dt: number): void {
     if (!this.isStarted) return;
+    if (this.stoppedAt !== null && this.speedRatio === 0) this.frame = this.stoppedAt;
+    this.stoppedAt = null;
     this.frame += dt * FPS * this.speedRatio;
     if (this.frame > this.to) this.frame = this.loop ? this.frame % this.to : this.to;
   }
@@ -126,7 +132,7 @@ function rig(): Rig {
 /** Clip time (s) of a group. */
 const clipTime = (group: FakeGroup) => group.getCurrentFrame() / FPS;
 /** Weighted groups still animating (a corpse must lie completely still). */
-const moving = (r: Rig) => [...r.groups.values()].filter((g) => g.isStarted && g.influence > 1e-3 && g.speedRatio !== 0).map((g) => g.name);
+const moving = (r: Rig) => [...r.groups.values()].filter((g) => g.isStarted && g.influence > 1e-3 && g.speedRatio > 1e-3).map((g) => g.name);
 
 /** Crawl clip seconds from `t` to the nearest planted frame, either direction. */
 const restDistance = (t: number) => {

@@ -47,6 +47,13 @@ const POSTURE_RATE = 6;
 /** Standing activities are full body below this speed and upper body only above it, m/s. */
 const ACTIVITY_WALK_SPEED = 0.8;
 const EPSILON = 1e-3;
+/**
+ * Babylon ignores `goToFrame` on a speedRatio-0 animatable (the next pass re-evaluates the frame it stopped on), so a
+ * hold seeks at this negligible speed and drops to 0 once Babylon has evaluated the new frame.
+ */
+const HOLD_SPEED = 1e-6;
+/** A frozen one-shot stays this many frames short of the group end, so a loop wrap back to frame 0 can't happen. */
+const END_MARGIN = 0.1;
 
 /** Airborne this long before the jump pose starts, so stepping off small ledges doesn't trigger it. */
 const AIR_DELAY = 0.1;
@@ -89,6 +96,10 @@ interface Channel {
   /** Frame a one-shot freezes on. */
   endFrame: number;
   frozen: boolean;
+  /** Animator frame of the last hold seek; the speed drops to 0 once Babylon has evaluated it. */
+  seekedAt: number;
+  /** Last observed frame of a playing one-shot, to catch a loop wrap after a long frame. */
+  lastFrame: number;
   /** Started but not yet weighted in; keeps a one-shot alive through its first frames. */
   pending: boolean;
   weighted: boolean;
@@ -122,6 +133,7 @@ export class SoldierAnimator {
   private readonly getUp: Channel;
 
   private action: ActionName | null = null;
+  private frameCount = 0;
   private down: DownState = "none";
   private downTime = 0;
   /** Seconds the crawl keeps playing after the soldier stops. */
@@ -173,6 +185,8 @@ export class SoldierAnimator {
         fullTarget: 0,
         endFrame: group.to,
         frozen: false,
+        seekedAt: -1,
+        lastFrame: 0,
         pending: false,
         weighted: true,
       };
@@ -270,8 +284,14 @@ export class SoldierAnimator {
     this.startAction("hit", ACTIONS.hit.speed);
   }
 
-  die(direction: DeathDirection): void {
+  /** @param settled Show the final lying pose at once (a body first seen already dead). */
+  die(direction: DeathDirection, settled = false): void {
     if (this.dead) return;
+    this.dieInto(direction);
+    if (settled) this.settleDeath();
+  }
+
+  private dieInto(direction: DeathDirection): void {
     this.action = null;
     this.air = "ground";
     const down = this.down;
@@ -285,6 +305,7 @@ export class SoldierAnimator {
       if (knock.group.isStarted && knock.group.getCurrentFrame() < prone) {
         knock.endFrame = prone;
         knock.frozen = false;
+        knock.lastFrame = knock.group.getCurrentFrame();
       } else {
         this.hold(knock);
       }
@@ -311,10 +332,28 @@ export class SoldierAnimator {
     this.deathPose = pose;
   }
 
+  /** Snaps every weight onto the death pose, already at its final frame. */
+  private settleDeath(): void {
+    const death = this.death!;
+    for (const c of this.channels) c.base = c.baseTarget = c.overlay = c.overlayTarget = c.full = c.fullTarget = 0;
+    death.full = death.fullTarget = 1;
+    if (death.oneShot && !death.frozen) this.seek(death, death.endFrame);
+    this.apply(0);
+  }
+
   /** Freezes a started clip on its current frame. */
   private hold(channel: Channel): void {
-    if (channel.group.isStarted) channel.group.speedRatio = 0;
+    if (channel.group.isStarted) this.seek(channel, channel.group.getCurrentFrame());
     channel.frozen = true;
+  }
+
+  /** Holds a started clip on `frame` (see HOLD_SPEED). */
+  private seek(channel: Channel, frame: number): void {
+    const group = channel.group;
+    group.speedRatio = HOLD_SPEED;
+    group.goToFrame(frame);
+    channel.frozen = true;
+    channel.seekedAt = this.frameCount;
   }
 
   /** Blends from wherever the body lies back into locomotion. */
@@ -336,6 +375,8 @@ export class SoldierAnimator {
     this.updateTargets();
     this.smooth(dt);
     this.apply(dt);
+    // Counts renders: a seek made now or before the next update is evaluated by the render after that update.
+    this.frameCount++;
   }
 
   private channel(name: CharacterClipName): Channel {
@@ -353,15 +394,21 @@ export class SoldierAnimator {
     this.play(channel, spec.start, speed, spec.end ?? channel.duration);
   }
 
-  /** Starts (or rewinds) a one-shot at clip time `from`, to freeze at clip time `to`. */
+  /** Starts (or rewinds) a one-shot at clip time `from`, to freeze at clip time `to`; speed 0 holds `from`. */
   private play(channel: Channel, from: number, speed: number, to: number): void {
     const group = channel.group;
-    if (!group.isStarted) group.start(true, speed, group.from, group.to);
-    group.speedRatio = speed;
-    group.goToFrame(group.from + from * channel.fps);
-    channel.endFrame = Math.min(group.from + to * channel.fps, group.to - 0.01);
-    channel.frozen = false;
+    const frame = group.from + from * channel.fps;
+    if (!group.isStarted) group.start(true, speed > 0 ? speed : HOLD_SPEED, group.from, group.to);
+    channel.endFrame = Math.min(group.from + to * channel.fps, group.to - END_MARGIN);
     channel.pending = true;
+    if (speed > 0) {
+      group.speedRatio = speed;
+      group.goToFrame(frame);
+      channel.frozen = false;
+      channel.lastFrame = frame;
+    } else {
+      this.seek(channel, Math.min(frame, channel.endFrame));
+    }
   }
 
   private updateDowned(dt: number): void {
@@ -413,8 +460,8 @@ export class SoldierAnimator {
       this.swayClock = 0;
     }
     this.swayClock += dt;
-    group.speedRatio = 0;
-    group.goToFrame(group.from + crawlSwayTime(this.crawlAnchor, this.swayClock, c.duration) * c.fps);
+    this.seek(c, group.from + crawlSwayTime(this.crawlAnchor, this.swayClock, c.duration) * c.fps);
+    c.frozen = false;
   }
 
   private setDown(state: DownState): void {
@@ -487,9 +534,14 @@ export class SoldierAnimator {
       c.fullTarget = 0;
     }
 
-    // Full body: death over the downed graph over jumps and activities.
-    if (this.death) this.death.fullTarget = 1;
-    else if (this.down === "knock") this.knockDown.fullTarget = 1;
+    // Dead: only the death pose, never locomotion, aim or activities, until `revive`.
+    if (this.death) {
+      this.death.fullTarget = 1;
+      return;
+    }
+
+    // Full body: the downed graph over jumps and activities.
+    if (this.down === "knock") this.knockDown.fullTarget = 1;
     else if (this.down === "down") (this.motion.beingRevived ? this.cprReceive : this.crawl).fullTarget = 1;
     else if (this.down === "getUp") this.getUp.fullTarget = 1;
     else if (this.air === "rising") this.jumpUp.fullTarget = 1;
@@ -606,14 +658,16 @@ export class SoldierAnimator {
         cycleRate += c.base / c.duration;
       }
     }
-    if (baseSum < EPSILON) {
+    // Faded out of every base clip: idle fills in while alive; a dead body is all death pose.
+    const deadOnly = baseSum < EPSILON && this.death !== null && fullSum > 0;
+    if (baseSum < EPSILON && !deadOnly) {
       this.idle.base = baseSum = 1;
     }
-    const baseScale = 1 / baseSum;
+    const baseScale = deadOnly ? 0 : 1 / baseSum;
     const overlayScale = overlaySum > 1 ? 1 / overlaySum : 1;
     const overlay = Math.min(overlaySum, 1);
-    const full = Math.min(fullSum, 1);
-    const fullScale = fullSum > 1 ? 1 / fullSum : 1;
+    const full = deadOnly ? 1 : Math.min(fullSum, 1);
+    const fullScale = fullSum > 1 || deadOnly ? 1 / fullSum : 1;
 
     // One shared cycle frequency, scaled so feet match the ground speed; each clip's rate follows from its length.
     let frequency = 1;
@@ -653,6 +707,10 @@ export class SoldierAnimator {
         this.startLoop(c, frequency, reference, dt);
       } else if (c.oneShot && !c.frozen) {
         this.freezeAtEnd(c, dt);
+      } else if (c.seekedAt >= 0 && c.seekedAt < this.frameCount && c.weighted && group.speedRatio === HOLD_SPEED) {
+        // Weighted through the render after the seek, so Babylon has evaluated the held frame: stop exactly there.
+        group.speedRatio = 0;
+        c.seekedAt = -1;
       }
       const animatables = group.animatables;
       const upper = c.upper;
@@ -677,14 +735,17 @@ export class SoldierAnimator {
     }
   }
 
-  /** Holds a one-shot on its end frame; weights may still be fading, so it must keep contributing. */
+  /**
+   * Holds a one-shot on its end frame; weights may still be fading, so it must keep contributing. Groups loop, so a frame
+   * longer than predicted (Babylon's clock, a hitch) can wrap it back to the start: that also snaps to the end.
+   */
   private freezeAtEnd(c: Channel, dt: number): void {
     const group = c.group;
-    const step = 2 * dt * c.fps * group.speedRatio;
-    if (group.getCurrentFrame() + step < c.endFrame) return;
-    group.goToFrame(c.endFrame);
-    group.speedRatio = 0;
-    c.frozen = true;
+    const frame = group.getCurrentFrame();
+    const wrapped = frame < c.lastFrame - EPSILON;
+    c.lastFrame = frame;
+    if (!wrapped && frame + 2 * dt * c.fps * group.speedRatio < c.endFrame) return;
+    this.seek(c, c.endFrame);
   }
 }
 

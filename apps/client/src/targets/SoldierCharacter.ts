@@ -141,15 +141,16 @@ export class SoldierCharacter implements BloodBody {
    * Plays a death clip chosen by where the shot came from (or, when knocked, collapses flat from the crawl) and disables
    * hitboxes. The body lies still in its final pose, darkening slightly after a moment, until `revive`.
    * @param shotDirection World-space bullet travel direction.
+   * @param settled Lie in the final pose at once, e.g. a body first seen after it died.
    */
-  die(shotDirection?: Vector3): void {
+  die(shotDirection?: Vector3, settled = false): void {
     if (this.dead) return;
     let fromBehind = false;
     if (shotDirection) {
       this.root.getDirectionToRef(FORWARD, direction);
       fromBehind = Vector3.Dot(direction, shotDirection) > 0;
     }
-    this.animator.die(fromBehind ? "back" : "front");
+    this.animator.die(fromBehind ? "back" : "front", settled);
     this.hitboxes?.setEnabled(false);
   }
 
