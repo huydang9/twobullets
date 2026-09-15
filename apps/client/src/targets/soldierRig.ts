@@ -121,7 +121,10 @@ export function activityForItem(item: ConsumableItemId): SoldierActivity {
   }
 }
 
-/** Full-body clips the downed/revive graph uses. Lying clips put the head toward −Z (docs/assets-pipeline.md). */
+/**
+ * Full-body clips the downed/revive graph uses. Lying clips put the head toward −Z (docs/assets-pipeline.md).
+ * `writhe` (flat on the back) is not used: at a distance it read as a dead body.
+ */
 export const DOWNED = {
   /** The crawl is authored In Place; its planted hands travel about this fast, m/s. */
   crawlClipSpeed: 0.5,
@@ -133,7 +136,55 @@ export const DOWNED = {
   /** Seconds before the end of knock_down / get_up where the next pose starts blending in. */
   knockBlend: 0.35,
   getUpBlend: 0.4,
+  /**
+   * Knocked and still: the crawl settles on a frame with both hands and knees planted (crawl clip seconds) and sways
+   * a little around it, so a knocked soldier stays up on all fours (~0.5 m) and visibly alive.
+   */
+  crawlRestTimes: [0.45, 1.35],
+  swayAmplitude: 0.06,
+  swayPeriod: 3.2,
 } as const;
+
+/** Dead-body presentation: flat and still, unlike the knocked crawl. */
+export const DEAD = {
+  /** knock_down clip second where the body lies flat face down (head 0.25 m, hips 0.15 m); later frames lift the head. */
+  proneTime: 1.85,
+  /** Weight rate of the collapse from the knocked crawl onto the prone frame, 1/s (slower than a death clip's fade). */
+  collapseRate: 4,
+  /** The body darkens slightly this long after death, in `tintSteps` shared material steps over `tintDuration`. */
+  tintDelay: 2,
+  tintDuration: 1.5,
+  tintSteps: 4,
+  /** Final albedo multiplier. */
+  tintFactor: 0.7,
+} as const;
+
+/** Clip seconds forward from `time` to the next planted crawl frame (wrapping at `duration`). */
+export function crawlRestAhead(time: number, duration: number): number {
+  let best = Infinity;
+  for (const rest of DOWNED.crawlRestTimes) {
+    const ahead = (((rest - time) % duration) + duration) % duration;
+    if (ahead < best) best = ahead;
+  }
+  return best;
+}
+
+/** Crawl clip second of the idle sway `clock` seconds after settling on `anchor`, wrapped into [0, duration). */
+export function crawlSwayTime(anchor: number, clock: number, duration: number): number {
+  const t = anchor + DOWNED.swayAmplitude * Math.sin((clock * Math.PI * 2) / DOWNED.swayPeriod);
+  return ((t % duration) + duration) % duration;
+}
+
+/** Tint step (0 = untouched … `DEAD.tintSteps`) for a body dead for `seconds`. */
+export function deadTintStep(seconds: number): number {
+  if (!(seconds > DEAD.tintDelay)) return 0;
+  return Math.min(DEAD.tintSteps, Math.ceil(((seconds - DEAD.tintDelay) / DEAD.tintDuration) * DEAD.tintSteps));
+}
+
+/** Albedo multiplier of a tint step. */
+export function deadTintFactor(step: number): number {
+  return 1 - ((1 - DEAD.tintFactor) * Math.min(step, DEAD.tintSteps)) / DEAD.tintSteps;
+}
 
 /** jump_up opens with a 0.27 s squat we skip, since the jump has already left the ground. */
 export const JUMP_UP_START = 0.27;

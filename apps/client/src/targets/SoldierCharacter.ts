@@ -1,13 +1,13 @@
-import { TransformNode, Vector3, type AbstractMesh, type Mesh, type Scene } from "@babylonjs/core";
+import { TransformNode, Vector3, type AbstractMesh, type Material, type Mesh, type Scene } from "@babylonjs/core";
 import type { HitZone } from "@twobullets/shared";
 import type { CharacterInstance } from "../assets";
 import type { Damageable, HitboxRegistry } from "../combat/hitboxes";
 import type { BloodBody } from "../fx/BloodEffects";
 import type { Environment } from "../world/environment";
-import { SoldierAnimator, createSoldierMotion, type AirState, type DownState, type SoldierMotion } from "./SoldierAnimator";
+import { SoldierAnimator, createSoldierMotion, type AirState, type DownState, type SoldierMotion, type SoldierPose } from "./SoldierAnimator";
 import { SoldierHitboxes } from "./SoldierHitboxes";
 import type { SoldierResources } from "./SoldierResources";
-import { soldierScale, type ActionName } from "./soldierRig";
+import { deadTintStep, soldierScale, type ActionName } from "./soldierRig";
 
 export interface SoldierCharacterOptions {
   /** Node names and collider ids are prefixed with it (`${name}/${part}`). */
@@ -39,6 +39,11 @@ export class SoldierCharacter implements BloodBody {
   private readonly rifle: Mesh | null = null;
   private rifleShown = true;
   private lives = 0;
+  private readonly resources: SoldierResources;
+  /** Body meshes and their own materials, restored when the dead tint clears. */
+  private readonly skin: { readonly mesh: AbstractMesh; readonly material: Material | null }[];
+  private deadTime = 0;
+  private tintStep = 0;
 
   constructor(scene: Scene, resources: SoldierResources, environment: Environment, options: SoldierCharacterOptions) {
     const { name, damage } = options;
@@ -50,6 +55,8 @@ export class SoldierCharacter implements BloodBody {
     this.model.root.scaling.scaleInPlace(scale);
 
     const meshes: AbstractMesh[] = this.model.meshes.filter((mesh) => mesh.getTotalVertices() > 0);
+    this.resources = resources;
+    this.skin = meshes.map((mesh) => ({ mesh, material: mesh.material }));
     if (resources.rifle && resources.grip) {
       const holder = new TransformNode(`${name}_rifleGrip`, scene);
       holder.parent = this.model.bones.rightHand;
@@ -101,6 +108,11 @@ export class SoldierCharacter implements BloodBody {
     return this.animator.handsBusy;
   }
 
+  /** Knocked (up on all fours, animated) vs dead (flat, still) presentation. */
+  get pose(): SoldierPose {
+    return this.animator.pose;
+  }
+
   /** Throw release: standing toss or crouched throw on the upper body. */
   throwGrenade(crouched: boolean): void {
     this.animator.throwGrenade(crouched);
@@ -126,8 +138,8 @@ export class SoldierCharacter implements BloodBody {
   }
 
   /**
-   * Plays a death clip chosen by where the shot came from and disables hitboxes. The body stays down, in its
-   * final pose, until `revive`.
+   * Plays a death clip chosen by where the shot came from (or, when knocked, collapses flat from the crawl) and disables
+   * hitboxes. The body lies still in its final pose, darkening slightly after a moment, until `revive`.
    * @param shotDirection World-space bullet travel direction.
    */
   die(shotDirection?: Vector3): void {
@@ -145,6 +157,8 @@ export class SoldierCharacter implements BloodBody {
   revive(): void {
     this.animator.revive();
     this.lives++;
+    this.deadTime = 0;
+    this.setTint(0);
   }
 
   setHitboxesEnabled(enabled: boolean): void {
@@ -168,10 +182,24 @@ export class SoldierCharacter implements BloodBody {
 
   update(dt: number): void {
     this.animator.update(dt);
+    if (this.animator.dead) {
+      this.deadTime += dt;
+      const step = deadTintStep(this.deadTime);
+      if (step !== this.tintStep) this.setTint(step);
+    }
     const show = this.rifleVisible && !this.animator.handsBusy;
     if (this.rifle && show !== this.rifleShown) {
       this.rifleShown = show;
       this.rifle.setEnabled(show);
+    }
+  }
+
+  /** Swaps the body onto the shared darkened material step (0 = own materials). */
+  private setTint(step: number): void {
+    if (step === this.tintStep) return;
+    this.tintStep = step;
+    for (const { mesh, material } of this.skin) {
+      mesh.material = step === 0 || !material ? material : this.resources.deadMaterial(material, step);
     }
   }
 

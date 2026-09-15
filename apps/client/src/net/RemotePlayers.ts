@@ -28,6 +28,8 @@ interface Avatar {
   /** Body yaw while lying (the head points along −Z of the model, so it is "head direction + π"). */
   lyingYaw: number;
   lying: boolean;
+  /** Body yaw held since death (a corpse doesn't turn with the replicated aim), or NaN while alive. */
+  deadYaw: number;
   readonly hitDirection: Vector3;
   readonly footstep: { id: string; position: Vector3; grounded: boolean; crouched: boolean; sprinting: boolean; alive: boolean };
 }
@@ -177,7 +179,7 @@ export class RemotePlayers implements FootstepEmitterSource {
       footstep.sprinting = (flags & RemoteFlags.sprint) !== 0;
       footstep.alive = life === LifeCode.alive;
 
-      Quaternion.RotationAxisToRef(Vector3.UpReadOnly, this.bodyYaw(avatar, pose.yaw, pose.vx, pose.vz, downed || (soldier !== null && soldier.downState !== "none" && !dead), dt), root.rotationQuaternion!);
+      Quaternion.RotationAxisToRef(Vector3.UpReadOnly, this.bodyYaw(avatar, pose.yaw, pose.vx, pose.vz, downed || (soldier !== null && soldier.downState !== "none" && !dead), dead, dt), root.rotationQuaternion!);
       if (soldier) {
         const motion = soldier.motion;
         if (dead) {
@@ -230,8 +232,14 @@ export class RemotePlayers implements FootstepEmitterSource {
     this.resources?.dispose();
   }
 
-  /** Aim yaw while up; while lying, the head follows the crawl direction (or stays put) and turns smoothly. */
-  private bodyYaw(avatar: Avatar, aimYaw: number, vx: number, vz: number, lying: boolean, dt: number): number {
+  /** Aim yaw while up; while lying, the head follows the crawl direction (or stays put) and turns smoothly; held once dead. */
+  private bodyYaw(avatar: Avatar, aimYaw: number, vx: number, vz: number, lying: boolean, dead: boolean, dt: number): number {
+    if (dead) {
+      // Killed while knocked keeps the crawl heading (the collapse lies along it); killed standing keeps the aim yaw.
+      if (Number.isNaN(avatar.deadYaw)) avatar.deadYaw = avatar.lying ? avatar.lyingYaw : aimYaw;
+      return avatar.deadYaw;
+    }
+    avatar.deadYaw = NaN;
     if (!lying) {
       avatar.lying = false;
       return aimYaw;
@@ -258,6 +266,7 @@ export class RemotePlayers implements FootstepEmitterSource {
       lastPhase: 0,
       lyingYaw: 0,
       lying: false,
+      deadYaw: NaN,
       hitDirection: new Vector3(0, 0, 1),
       footstep: { id: RemotePlayers.bodyId(slot), position: new Vector3(), grounded: true, crouched: false, sprinting: false, alive: true },
     });

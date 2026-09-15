@@ -111,8 +111,8 @@ Processing steps (`tools/assets/lib/character.ts`):
 
   | Clip | Source | Frames | Loop | Placement | Used for |
   |---|---|---|---|---|---|
-  | `knock_down` | Knocked Down | 0–66 | once | `lock` (the fall travels 1.6 m) | knocked: backward fall, rolls onto the stomach |
-  | `writhe` | Writhing In Pain | 0–170 | loop | `anchor` | knocked, not moving (on the back) |
+  | `knock_down` | Knocked Down | 0–66 | once | `lock` (the fall travels 1.6 m) | knocked: backward fall, rolls onto the stomach; held at 1.85 s (flat face down) for a death while knocked |
+  | `writhe` | Writhing In Pain | 0–170 | loop | `anchor` | unused: flat on the back read as a dead body; a still knocked soldier holds a planted `crawl` frame with a small sway |
   | `crawl` | Crawling (In Place) | 0–54 | loop | `yaw: 180` (authored head +Z) | knocked, moving (hands and knees, toward −Z) |
   | `get_up` | Getting Up | 0–62 | once | | revived: from the back to standing, facing +Z |
   | `cpr_give` | Administering Cpr | 0–259 | loop | `anchor` | reviver; the patient's chest is 0.45 m ahead of the hips |

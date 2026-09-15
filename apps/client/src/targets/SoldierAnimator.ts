@@ -1,6 +1,6 @@
 import { AnimationGroupMask, AnimationGroupMaskMode, type AnimationGroup } from "@babylonjs/core";
 import type { CharacterClipName, CharacterInstance } from "../assets";
-import { ACTIONS, ACTIVITIES, DOWNED, HANDS_BUSY_ACTIONS, JUMP_DOWN_START, JUMP_UP_START, type ActionName, type SoldierActivity } from "./soldierRig";
+import { ACTIONS, ACTIVITIES, DEAD, DOWNED, HANDS_BUSY_ACTIONS, JUMP_DOWN_START, JUMP_UP_START, crawlRestAhead, crawlSwayTime, type ActionName, type SoldierActivity } from "./soldierRig";
 
 /** Movement input for the animator, written by the owner every frame (local player sim or network snapshot). */
 export interface SoldierMotion {
@@ -12,7 +12,7 @@ export interface SoldierMotion {
   sprinting: boolean;
   /** Holds the shouldered-rifle stance on the upper body while moving. */
   aiming: boolean;
-  /** Knocked down: the fall, then crawl (moving) or writhe (still). Clearing it while alive plays the get-up. */
+  /** Knocked down: the fall, then crawl (moving) or a planted all-fours sway (still). Clearing it while alive plays the get-up. */
   downed: boolean;
   /** Downed and a teammate is giving CPR. */
   beingRevived: boolean;
@@ -26,8 +26,15 @@ export function createSoldierMotion(): SoldierMotion {
 
 export type DeathDirection = "front" | "back";
 export type AirState = "ground" | "rising" | "falling" | "landing";
-/** Knocked-down graph: none → knock (fall) → down (crawl / writhe / receive CPR) → getUp → none. */
+/** Knocked-down graph: none → knock (fall) → down (crawl / all-fours hold / receive CPR) → getUp → none. */
 export type DownState = "none" | "knock" | "down" | "getUp";
+
+/**
+ * What the body shows, for owners and tests. Knocked poses stay up on all fours and animate; dead ones lie flat and
+ * still: `deathClip` (shot while up: death_front/back), `deathCollapse` (killed while knocked: sinks from the crawl
+ * onto knock_down's prone frame), `deathHold` (killed while receiving CPR: already flat on the back, held).
+ */
+export type SoldierPose = "up" | "knock" | "crawl" | "crawlHold" | "cprReceive" | "getUp" | "deathClip" | "deathCollapse" | "deathHold";
 
 /** Weight smoothing rates, 1/s (exponential; ~3/rate seconds to settle). */
 const BASE_RATE = 9;
@@ -110,7 +117,6 @@ export class SoldierAnimator {
   private readonly jumpLoop: Channel;
   private readonly jumpDown: Channel;
   private readonly knockDown: Channel;
-  private readonly writhe: Channel;
   private readonly crawl: Channel;
   private readonly cprReceive: Channel;
   private readonly getUp: Channel;
@@ -125,6 +131,11 @@ export class SoldierAnimator {
   private air: AirState = "ground";
   private airTime = 0;
   private death: Channel | null = null;
+  private deathPose: SoldierPose = "deathClip";
+  /** Crawl hold: settled on a planted frame (clip seconds) and the sway clock. */
+  private crawlSettled = false;
+  private crawlAnchor = 0;
+  private swayClock = 0;
 
   /** Last significant movement direction, as normalized 4-way weights. */
   private dirFwd = 1;
@@ -180,7 +191,6 @@ export class SoldierAnimator {
     this.jumpLoop = this.channel("jump_loop");
     this.jumpDown = this.channel("jump_down");
     this.knockDown = this.channel("knock_down");
-    this.writhe = this.channel("writhe");
     this.crawl = this.channel("crawl");
     this.cprReceive = this.channel("cpr_receive");
     this.getUp = this.channel("get_up");
@@ -203,6 +213,20 @@ export class SoldierAnimator {
 
   get downState(): DownState {
     return this.down;
+  }
+
+  get pose(): SoldierPose {
+    if (this.death) return this.deathPose;
+    switch (this.down) {
+      case "knock":
+        return "knock";
+      case "getUp":
+        return "getUp";
+      case "down":
+        return this.motion.beingRevived ? "cprReceive" : this.crawlTimer > 0 ? "crawl" : "crawlHold";
+      default:
+        return "up";
+    }
   }
 
   /** On the ground, getting up, in a held activity or a throw/pickup: the rifle prop has no hands to sit in. */
@@ -250,28 +274,53 @@ export class SoldierAnimator {
     if (this.dead) return;
     this.action = null;
     this.air = "ground";
-    if (this.down === "knock" || this.down === "down") {
-      // Already on the ground (finished while downed): hold the lying pose the body is in.
-      let pose = this.knockDown;
-      for (const c of [this.writhe, this.crawl, this.cprReceive]) if (c.full > pose.full) pose = c;
-      this.down = "none";
-      this.death = pose;
-      // A loop is held where it is; the knock-down fall plays on to its lying end frame.
-      if (!pose.oneShot) {
-        if (pose.group.isStarted) pose.group.speedRatio = 0;
-        pose.frozen = true;
+    const down = this.down;
+    this.down = "none";
+    this.crawlSettled = false;
+    const knock = this.knockDown;
+    if (down === "knock") {
+      // Still falling: the knock-down plays on to its flat prone frame, or stays where it lies once past it.
+      this.setDeath(knock, "deathCollapse");
+      const prone = knock.group.from + DEAD.proneTime * knock.fps;
+      if (knock.group.isStarted && knock.group.getCurrentFrame() < prone) {
+        knock.endFrame = prone;
+        knock.frozen = false;
+      } else {
+        this.hold(knock);
       }
       return;
     }
-    this.down = "none";
-    this.death = this.channel(direction === "front" ? "death_front" : "death_back");
-    this.play(this.death, 0, 1, this.death.duration);
+    if (down === "down") {
+      if (this.cprReceive.full > this.crawl.full) {
+        // Already flat on the back: hold the CPR pose where it is.
+        this.setDeath(this.cprReceive, "deathHold");
+        this.hold(this.cprReceive);
+        return;
+      }
+      // Off all fours: the crawl hands over (at DEAD.collapseRate) to knock_down held on its prone frame.
+      this.setDeath(knock, "deathCollapse");
+      this.play(knock, DEAD.proneTime, 0, DEAD.proneTime);
+      return;
+    }
+    this.setDeath(this.channel(direction === "front" ? "death_front" : "death_back"), "deathClip");
+    this.play(this.death!, 0, 1, this.death!.duration);
+  }
+
+  private setDeath(channel: Channel, pose: SoldierPose): void {
+    this.death = channel;
+    this.deathPose = pose;
+  }
+
+  /** Freezes a started clip on its current frame. */
+  private hold(channel: Channel): void {
+    if (channel.group.isStarted) channel.group.speedRatio = 0;
+    channel.frozen = true;
   }
 
   /** Blends from wherever the body lies back into locomotion. */
   revive(): void {
     const death = this.death;
-    // A held lying loop (death while downed) runs again next time it is used.
+    // A held lying loop (death while receiving CPR) runs again next time it is used.
     if (death && !death.oneShot) {
       death.frozen = false;
       if (death.group.isStarted) death.group.speedRatio = 1;
@@ -337,10 +386,35 @@ export class SoldierAnimator {
         else if (this.downTime >= this.getUp.duration - DOWNED.getUpBlend) this.down = "none";
         break;
     }
-    if (this.down === "down" && this.crawl.group.isStarted) {
+    if (this.down !== "down" || !this.crawl.group.isStarted) {
+      this.crawlSettled = false;
+    } else if (this.crawlTimer > 0) {
+      this.crawlSettled = false;
       const playback = speed / DOWNED.crawlClipSpeed;
       this.crawl.group.speedRatio = Math.min(DOWNED.maxCrawlPlayback, Math.max(DOWNED.minCrawlPlayback, playback));
+    } else {
+      this.holdCrawl(dt);
     }
+  }
+
+  /** Knocked and still: finish the stride onto a planted frame, then sway gently around it. */
+  private holdCrawl(dt: number): void {
+    const c = this.crawl;
+    const group = c.group;
+    if (!this.crawlSettled) {
+      const time = (group.getCurrentFrame() - group.from) / c.fps;
+      // The group advances once more before the pose is evaluated.
+      if (crawlRestAhead(time, c.duration) > 2 * dt * DOWNED.minCrawlPlayback) {
+        group.speedRatio = DOWNED.minCrawlPlayback;
+        return;
+      }
+      this.crawlSettled = true;
+      this.crawlAnchor = (time + crawlRestAhead(time, c.duration)) % c.duration;
+      this.swayClock = 0;
+    }
+    this.swayClock += dt;
+    group.speedRatio = 0;
+    group.goToFrame(group.from + crawlSwayTime(this.crawlAnchor, this.swayClock, c.duration) * c.fps);
   }
 
   private setDown(state: DownState): void {
@@ -416,7 +490,7 @@ export class SoldierAnimator {
     // Full body: death over the downed graph over jumps and activities.
     if (this.death) this.death.fullTarget = 1;
     else if (this.down === "knock") this.knockDown.fullTarget = 1;
-    else if (this.down === "down") (this.motion.beingRevived ? this.cprReceive : this.crawlTimer > 0 ? this.crawl : this.writhe).fullTarget = 1;
+    else if (this.down === "down") (this.motion.beingRevived ? this.cprReceive : this.crawl).fullTarget = 1;
     else if (this.down === "getUp") this.getUp.fullTarget = 1;
     else if (this.air === "rising") this.jumpUp.fullTarget = 1;
     else if (this.air === "falling") this.jumpLoop.fullTarget = 1;
@@ -504,7 +578,8 @@ export class SoldierAnimator {
     const kBase = 1 - Math.exp(-BASE_RATE * dt);
     const kOverlay = 1 - Math.exp(-OVERLAY_RATE * dt);
     const kAir = 1 - Math.exp(-AIR_RATE * dt);
-    const kDeath = 1 - Math.exp(-(this.dead ? DEATH_RATE : REVIVE_RATE) * dt);
+    const deathRate = !this.dead ? REVIVE_RATE : this.deathPose === "deathCollapse" ? DEAD.collapseRate : DEATH_RATE;
+    const kDeath = 1 - Math.exp(-deathRate * dt);
     const kPosture = 1 - Math.exp(-POSTURE_RATE * dt);
     for (const c of this.channels) {
       c.base = approach(c.base, c.baseTarget, kBase);

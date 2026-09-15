@@ -1,7 +1,7 @@
-import { Matrix, Mesh, Quaternion, Vector3, type AnimationGroupMask, type Node, type TransformNode } from "@babylonjs/core";
+import { Color3, Matrix, Mesh, MultiMaterial, Quaternion, Vector3, type AnimationGroupMask, type Material, type Node, type TransformNode } from "@babylonjs/core";
 import type { AssetLibrary } from "../assets";
 import { createUpperBodyMask } from "./SoldierAnimator";
-import { soldierScale, upperBodyWeights } from "./soldierRig";
+import { deadTintFactor, soldierScale, upperBodyWeights } from "./soldierRig";
 
 /** Rifle pose relative to the right-hand bone (decomposed; the bone space is mirrored by the glTF root). */
 export interface GripTransform {
@@ -12,7 +12,8 @@ export interface GripTransform {
 
 /**
  * Data shared by every soldier of a scene: the third-person rifle mesh (merged once, cloned per soldier with
- * shared geometry and materials), where it sits in the right hand, and the upper-body layer weights.
+ * shared geometry and materials), where it sits in the right hand, the upper-body layer weights, and the darkened
+ * dead-body material steps.
  */
 export class SoldierResources {
   readonly upperWeights: ReadonlyMap<string, number>;
@@ -20,6 +21,8 @@ export class SoldierResources {
   /** Null when the weapon asset couldn't provide a separable gun. */
   readonly rifle: Mesh | null;
   readonly grip: GripTransform | null;
+  /** Dead-body tint steps per source material (index = step − 1), created on first use and shared by every soldier. */
+  private readonly tinted = new Map<Material, Material[]>();
 
   constructor(readonly assets: AssetLibrary) {
     // A throwaway instance, posed at the first rifle_idle frame, to calibrate against.
@@ -45,7 +48,34 @@ export class SoldierResources {
     }
   }
 
+  /** `source` darkened to tint `step` (≥ 1): a clone with its base color scaled, so shaders are shared. */
+  deadMaterial(source: Material, step: number): Material {
+    let steps = this.tinted.get(source);
+    if (!steps) this.tinted.set(source, (steps = []));
+    const cached = steps[step - 1];
+    if (cached) return cached;
+    const name = `${source.name}_dead${step}`;
+    let material: Material | null;
+    if (source instanceof MultiMaterial) {
+      const multi = new MultiMaterial(name, source.getScene());
+      multi.subMaterials = source.subMaterials.map((sub) => (sub ? this.deadMaterial(sub, step) : null));
+      material = multi;
+    } else {
+      material = source.clone(name);
+      const colors = (material ?? {}) as Partial<Record<"albedoColor" | "baseColor" | "diffuseColor", unknown>>;
+      const factor = deadTintFactor(step);
+      for (const key of ["albedoColor", "baseColor", "diffuseColor"] as const) {
+        const color = colors[key];
+        if (color instanceof Color3) color.scaleInPlace(factor);
+      }
+    }
+    steps[step - 1] = material ?? source;
+    return steps[step - 1]!;
+  }
+
   dispose(): void {
+    for (const steps of this.tinted.values()) for (const material of steps) if (!this.tinted.has(material)) material.dispose();
+    this.tinted.clear();
     const material = this.rifle?.material;
     this.rifle?.dispose();
     // The merged multi-material only references the template's materials.
