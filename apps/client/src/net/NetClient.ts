@@ -19,6 +19,7 @@ import {
   type Welcome,
 } from "@twobullets/protocol/messages/control";
 import { MsgId } from "@twobullets/protocol/messages/ids";
+import { decodeMatchEnd, decodePhaseChange, decodeZonePhase, type MatchEnd, type PhaseChange, type ZonePhaseMessage } from "@twobullets/protocol/messages/match";
 import { encodeInputPacket, MAX_INPUTS_PER_PACKET, type InputPacket } from "@twobullets/protocol/messages/input";
 import { decodePing, encodePing, pingRttMs } from "@twobullets/protocol/messages/ping";
 import type { ReliableEvent } from "@twobullets/protocol/messages/events";
@@ -122,6 +123,8 @@ export interface NetClientOptions {
   readonly events?: NetEventSink | null;
   /** Receives the owner's life before each reconcile, so replays step with that tick's life gates. */
   readonly movement?: { life: number } | null;
+  /** Battle royale lifecycle (protocol v4): PhaseChange, ZonePhase, MatchEnd, after the client state is updated. */
+  readonly onMatchMessage?: (client: NetClient) => void;
 }
 
 /**
@@ -140,6 +143,11 @@ export class NetClient {
   readonly store = new ClientSnapshotStore();
   /** Tier R events: exactly once, in order; `ackSeq` rides every input. */
   readonly receiver = new ReliableEventReceiver();
+  /** Newest PhaseChange (null until the first; Welcome also carries the phase). */
+  matchPhase: PhaseChange | null = null;
+  /** Announced zone phases by index order; run the shared `zoneAt(tick)` over them. */
+  readonly zonePhases: ZonePhaseMessage[] = [];
+  matchEnd: MatchEnd | null = null;
   private readonly session: Session;
   private readonly clock: Clock;
   private readonly netClock: NetClock;
@@ -150,6 +158,7 @@ export class NetClient {
   private readonly onStateChange: ((state: NetConnectionState, client: NetClient) => void) | null;
   private readonly events: NetEventSink | null;
   private readonly movement: { life: number } | null;
+  private readonly onMatchMessage: ((client: NetClient) => void) | null;
   private deliverTick = 0;
   private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
   private ownerLife: number = LifeCode.alive;
@@ -191,6 +200,7 @@ export class NetClient {
     this.onStateChange = options.onStateChange ?? null;
     this.events = options.events ?? null;
     this.movement = options.movement ?? null;
+    this.onMatchMessage = options.onMatchMessage ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
     this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
     this.stats = {
@@ -381,6 +391,31 @@ export class NetClient {
       case MsgId.KillFeed: {
         const feed = decodeKillFeed(reader);
         if (feed !== null) this.events?.onKillFeed(feed);
+        break;
+      }
+      case MsgId.PhaseChange: {
+        const phase = decodePhaseChange(reader);
+        if (phase === null) return;
+        this.matchPhase = phase;
+        this.onMatchMessage?.(this);
+        break;
+      }
+      case MsgId.ZonePhase: {
+        const zone = decodeZonePhase(reader);
+        if (zone === null) return;
+        // Sent again on reconnect: keep one entry per index.
+        const i = this.zonePhases.findIndex((z) => z.index >= zone.index);
+        if (i < 0) this.zonePhases.push(zone);
+        else if (this.zonePhases[i]!.index === zone.index) this.zonePhases[i] = zone;
+        else this.zonePhases.splice(i, 0, zone);
+        this.onMatchMessage?.(this);
+        break;
+      }
+      case MsgId.MatchEnd: {
+        const end = decodeMatchEnd(reader);
+        if (end === null) return;
+        this.matchEnd = end;
+        this.onMatchMessage?.(this);
         break;
       }
       default:

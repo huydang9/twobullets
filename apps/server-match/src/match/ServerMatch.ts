@@ -1,4 +1,4 @@
-import type { JoinClaims, MatchConfig, MatchPhase } from "@twobullets/contracts";
+import type { JoinClaims, MatchConfig, MatchPhase, MatchResult } from "@twobullets/contracts";
 import type { Clock, Session } from "@twobullets/netcode";
 import { writeOwnerMove } from "@twobullets/netcode/replication";
 import {
@@ -27,23 +27,27 @@ import { Btn, PlayerActionType, type MoveGates, type PlayerInput } from "@twobul
 import { createMoveState, fallDamage } from "@twobullets/shared/movement/movement";
 import type { Stance, Vec3 } from "@twobullets/shared/movement/types";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
-import { createSimWorld, stepPlayer, type HavokModule, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
+import { stepPlayer, type HavokModule, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
 import { createHmac } from "node:crypto";
 import type { AttachResult, Match } from "../host/MatchHost";
 import { disconnectSession } from "../session/control";
+import { arenaMatchLevel, type MatchLevel } from "../level/serverLevel";
 import { SnapshotBuilder } from "../snapshot/SnapshotBuilder";
+import { BrLifecycle, type BrLifecycleOptions, type LifecycleHost } from "./BrLifecycle";
 import { freshPlayerState, Player } from "./Player";
 import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
-import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize, SpawnPlanner } from "./slots";
+import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
 // registration and vitals (ServerCombat), and snapshots. Lifecycle (contracts MatchPhase): Booting (sim world loading) →
-// Allocated (ready, accepting joins) → Warmup (ticking; M5 continues to LandingSelect/Glide/Combat) → Ended.
+// Allocated (ready, accepting joins) → Warmup → Ended. With `lifecycle` (agent mode, `--flow=br`) the battle royale loop
+// runs (BrLifecycle): Warmup → LandingSelect → Glide → Combat → Ended/Cancelled, then the match closes itself.
 
 export interface ServerMatchOptions {
   readonly config: MatchConfig;
   readonly havok: HavokModule;
-  readonly level: ServerLevel;
+  /** A match level (`resolveServerLevel`), or a blockout `LevelData` (the arena). */
+  readonly level: MatchLevel | ServerLevel;
   readonly clock: Clock;
   /** Tick number the host will run next; inputs are unwrapped against it until the first tick. */
   readonly startTick: number;
@@ -60,6 +64,14 @@ export interface ServerMatchOptions {
   /** Combat overrides (tests): damage toggle, spawn armor. */
   readonly combat?: Partial<Pick<ServerCombatOptions, "damageEnabled" | "spawnArmor">>;
   readonly onPlayer?: (accountId: string, event: "joined" | "left") => void;
+  /** Battle royale loop; omitted = M4 sandbox (endless warmup with damage and respawns). */
+  readonly lifecycle?: BrLifecycleOptions | null;
+  /** Every lifecycle phase change after Booting. */
+  readonly onPhase?: (phase: MatchPhase) => void;
+  /** BR only: the final result, once (completed, cancelled or aborted). */
+  readonly onResult?: (result: MatchResult) => void;
+  /** The match closed (end linger over, cancelled or aborted); every session is gone. */
+  readonly onClosed?: () => void;
   /** Debug/test hook, runs at the end of every tick. */
   readonly onTickEnd?: (tick: number, match: ServerMatch) => void;
 }
@@ -82,6 +94,7 @@ const INTERP_FLOOR_WS_MS = 50;
 const INTERP_FLOOR_WT_MS = 25;
 const MAX_REWIND_MS = 200;
 const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
+const PHASE_CODES = { Warmup: PhaseCode.Warmup, LandingSelect: PhaseCode.LandingSelect, Glide: PhaseCode.Glide, Combat: PhaseCode.Combat, End: PhaseCode.End } as const;
 
 export class ServerMatch implements Match, CombatHost {
   readonly id: string;
@@ -91,7 +104,11 @@ export class ServerMatch implements Match, CombatHost {
   readonly snapshots: SnapshotBuilder;
   /** Null until the sim world is ready. */
   combat: ServerCombat | null = null;
+  /** Null in the sandbox and until the world is ready. */
+  lifecycle: BrLifecycle | null = null;
+  readonly level: MatchLevel;
   private phaseValue: MatchPhase = "Booting";
+  private closed = false;
   private world: SimWorld | null = null;
   private readonly options: ServerMatchOptions;
   private readonly clock: Clock;
@@ -100,7 +117,7 @@ export class ServerMatch implements Match, CombatHost {
   private active: Player[] = [];
   private readonly byAccount = new Map<string, Player>();
   private readonly bySession = new Map<Session, Player>();
-  private readonly spawns: SpawnPlanner;
+  private readonly spawnPlans: readonly { readonly feet: readonly Vec3[]; readonly yaw: number }[];
   private readonly reader = createBitReader(new Uint8Array(0));
   private readonly packet = createInputPacketBuffer();
   private readonly gatedInput = createMutablePlayerInput();
@@ -129,15 +146,23 @@ export class ServerMatch implements Match, CombatHost {
     this.tickMs = 1000 / (options.tickRate ?? 60);
     const maxSlots = matchSlotCount(options.config);
     const teamSize = matchTeamSize(options.config);
+    const teamCount = matchTeamCount(options.config);
+    this.level = "createWorld" in options.level ? options.level : arenaMatchLevel(options.level);
     this.slots = new Array<Player | null>(maxSlots).fill(null);
     this.snapshots = new SnapshotBuilder(maxSlots);
-    this.spawns = new SpawnPlanner(options.level.spawnPoints, options.config.matchSeed, teamSize);
-    this.ready = createSimWorld(options.havok, options.level).then((world) => {
+    this.spawnPlans = this.level.planTeamSpawns(options.config.matchSeed, teamCount, teamSize);
+    this.ready = this.level.createWorld(options.havok).then((world) => {
       this.world = world;
       const combat = new ServerCombat({ ...options.combat, rules: options.config.rules, maxSlots, raycastWorld: world.raycastWorld, tickRate: options.tickRate });
-      combat.attach(this, matchTeamCount(options.config), teamSize);
+      combat.attach(this, teamCount, teamSize);
       this.combat = combat;
-      if (this.phaseValue === "Booting") this.phaseValue = "Allocated";
+      if (this.phaseValue !== "Booting") return;
+      if (options.lifecycle) {
+        this.lifecycle = new BrLifecycle(this.lifecycleHost(combat, teamCount, teamSize), options.lifecycle, this.clock.now(), this.next);
+        this.setPhase("Warmup");
+      } else {
+        this.setPhase("Allocated");
+      }
     });
   }
 
@@ -174,7 +199,7 @@ export class ServerMatch implements Match, CombatHost {
   }
 
   attach(session: Session, claims: JoinClaims): AttachResult {
-    if (this.world === null || this.phaseValue === "Ended") return { ok: false, reason: DisconnectReason.internalError };
+    if (this.world === null || this.closed) return { ok: false, reason: this.closed ? DisconnectReason.matchEnded : DisconnectReason.internalError };
     const existing = this.byAccount.get(claims.sub);
     if (existing !== undefined) {
       if (existing.session !== null) {
@@ -187,9 +212,11 @@ export class ServerMatch implements Match, CombatHost {
       return { ok: true, slot: existing.slot, teamId: existing.teamId, resumed: true };
     }
 
+    // BR: the roster is fixed once warmup is over; only players already in the match reconnect.
+    if (this.lifecycle !== null && !this.lifecycle.acceptsNewPlayers) return { ok: false, reason: this.lifecycle.ended ? DisconnectReason.matchEnded : DisconnectReason.notAssigned };
     const choice = chooseSlot(this.config, claims, (slot) => this.slots[slot] !== null);
     if (!choice.ok) return { ok: false, reason: choice.reason === "matchFull" ? DisconnectReason.matchFull : DisconnectReason.notAssigned };
-    const spawn = this.spawns.spawnFor(choice.slot);
+    const spawn = this.spawnFor(choice.slot);
     const player = new Player(choice.slot, choice.teamId, claims.sub, this.world.createBody(spawn.feet), spawn);
     player.armor = this.combat!.armorForSpawn();
     this.slots[choice.slot] = player;
@@ -208,26 +235,32 @@ export class ServerMatch implements Match, CombatHost {
   tick(tick: number): void {
     const world = this.world;
     const combat = this.combat;
-    if (world === null || combat === null || this.phaseValue === "Ended") return;
-    if (this.phaseValue === "Allocated") this.phaseValue = "Warmup";
+    if (world === null || combat === null || this.closed) return;
+    if (this.phaseValue === "Allocated") this.setPhase("Warmup");
     this.lastTickStartMs = this.clock.now();
+    const lifecycle = this.lifecycle;
+    lifecycle?.beginTick(tick);
     const players = this.active;
+    const frozen = lifecycle !== null && lifecycle.frozen;
     combat.beginTick(tick);
     if (BODY_BLOCKING_SUPPORTED && this.config.rules.bodyBlocking) this.syncBodiesForBlocking();
-    const killY = this.options.level.killY;
+    const killY = this.level.killY;
     for (let i = 0; i < players.length; i++) {
       const p = players[i]!;
       const input = p.inputs.take(tick);
-      // The dead are frozen (spectating): inputs still drain the buffer and ack, but nothing moves or aims.
-      if (p.life === "dead") continue;
+      // The dead are frozen (spectating): inputs still drain the buffer and ack, but nothing moves or aims. After the
+      // match ends everyone is.
+      if (p.life === "dead" || frozen) continue;
       p.yawQ = input.yawQ;
       p.pitchQ = input.pitchQ;
       p.buttons = input.buttons;
       this.step(p, input, combat);
       if (p.body.feet.y < killY) combat.outOfBounds(p);
     }
-    combat.endTick(tick);
+    if (!frozen) combat.endTick(tick);
+    lifecycle?.endTick(tick);
     this.next = tick + 1;
+    if (this.closed) return;
     const now = this.clock.now();
     this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
@@ -254,10 +287,22 @@ export class ServerMatch implements Match, CombatHost {
     p.poseDiscontinuous = true;
   }
 
+  /**
+   * Ends a BR match now (drain, SIGTERM): MatchEnd + result with outcome `cancelled` (warmup) or `aborted`, then closes
+   * with `reason`. Sandbox matches just close.
+   */
+  abort(reason: DisconnectReason = DisconnectReason.serverShutdown): void {
+    if (this.closed) return;
+    this.closeReason = reason;
+    if (this.lifecycle !== null) this.lifecycle.abort();
+    else this.end(reason);
+  }
+
   /** Sends Disconnect{reason} to everyone, disposes the world. */
   end(reason: DisconnectReason = DisconnectReason.matchEnded): void {
-    if (this.phaseValue === "Ended") return;
-    this.phaseValue = "Ended";
+    if (this.closed) return;
+    this.closed = true;
+    if (this.phaseValue !== "Ended" && this.phaseValue !== "Cancelled") this.setPhase("Ended");
     for (const p of this.active) {
       const s = p.session;
       if (s !== null) {
@@ -272,6 +317,50 @@ export class ServerMatch implements Match, CombatHost {
     this.combat?.projectiles.clear();
     this.world?.dispose();
     this.world = null;
+    this.options.onClosed?.();
+  }
+
+  /** True once the match closed (sessions gone, world disposed). */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  private closeReason: DisconnectReason = DisconnectReason.matchEnded;
+
+  private setPhase(phase: MatchPhase): void {
+    if (this.phaseValue === phase) return;
+    this.phaseValue = phase;
+    this.options.onPhase?.(phase);
+  }
+
+  private spawnFor(slot: number): { feet: Vec3; yaw: number } {
+    const teamSize = matchTeamSize(this.config);
+    const plan = this.spawnPlans[Math.floor(slot / teamSize)];
+    const feet = plan?.feet[slot % teamSize] ?? plan?.feet[0];
+    if (plan === undefined || feet === undefined) throw new Error(`no spawn for slot ${slot}`);
+    return { feet: { x: feet.x, y: feet.y, z: feet.z }, yaw: plan.yaw };
+  }
+
+  private lifecycleHost(combat: ServerCombat, teamCount: number, teamSize: number): LifecycleHost {
+    const match = this;
+    return {
+      config: this.config,
+      get slots() {
+        return match.slots;
+      },
+      get players() {
+        return match.active;
+      },
+      combat,
+      teamCount,
+      teamSize,
+      zone: this.level.zone,
+      isValidZoneCenter: this.level.isValidZoneCenter,
+      placeAtStart: (p) => this.respawn(p),
+      lifecyclePhase: (phase) => this.setPhase(phase),
+      result: (result) => this.options.onResult?.(result),
+      close: () => this.end(this.closeReason),
+    };
   }
 
   /** Server spawn, fresh loadout and vitals (M4 warmup respawn; CombatHost). */
@@ -333,6 +422,7 @@ export class ServerMatch implements Match, CombatHost {
     session.onDatagram((bytes, recvMs) => this.onDatagram(player, session, bytes, recvMs));
     session.onStream((bytes) => this.onStream(player, session, bytes));
     this.sendWelcome(player, session);
+    this.lifecycle?.onBound(player, session);
     this.options.onPlayer?.(player.accountId, "joined");
   }
 
@@ -362,8 +452,8 @@ export class ServerMatch implements Match, CombatHost {
       tickRate: this.options.tickRate ?? 60,
       snapshotRate: this.options.tickRate ?? 60,
       matchSeed: this.config.matchSeed >>> 0,
-      phase: PhaseCode.Warmup,
-      phaseEndTick: 0,
+      phase: this.lifecycle ? PHASE_CODES[this.lifecycle.phase] : PhaseCode.Warmup,
+      phaseEndTick: this.lifecycle?.phaseEndTick ?? 0,
       maxRewindMs: MAX_REWIND_MS,
       interpFloorMs: session.kind === "websocket" ? INTERP_FLOOR_WS_MS : INTERP_FLOOR_WT_MS,
       resumeToken: mac,
@@ -456,9 +546,13 @@ export class ServerMatch implements Match, CombatHost {
 
   private sweep(now: number): void {
     let removed = false;
+    const keep = this.lifecycle !== null && this.lifecycle.keepsDisconnected;
     for (const p of this.active) {
       if (p.session !== null) {
         if (now - p.lastRecvMs > this.idleTimeoutMs) this.kick(p, DisconnectReason.timeout);
+      } else if (keep) {
+        // BR after warmup: the slot stays for results and team rules; past the grace the character is out.
+        if (p.disconnectedAtMs >= 0 && now - p.disconnectedAtMs > this.graceMs && p.life !== "dead") this.combat?.forfeit(p);
       } else if (p.disconnectedAtMs >= 0 && now - p.disconnectedAtMs > this.graceMs) {
         this.slots[p.slot] = null;
         this.byAccount.delete(p.accountId);
@@ -468,6 +562,7 @@ export class ServerMatch implements Match, CombatHost {
       }
     }
     if (removed) this.rebuildActive();
+    this.lifecycle?.sweep(now);
   }
 
   private rebuildActive(): void {

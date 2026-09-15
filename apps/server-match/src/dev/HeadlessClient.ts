@@ -6,6 +6,9 @@ import {
   createMutablePlayerInput,
   decodeDisconnect,
   decodeKillFeed,
+  decodeMatchEnd,
+  decodePhaseChange,
+  decodeZonePhase,
   LifeCode,
   decodeWelcome,
   encodeHello,
@@ -15,6 +18,9 @@ import {
   PROTOCOL_VERSION,
   type Disconnect,
   type KillFeed,
+  type MatchEnd,
+  type PhaseChange,
+  type ZonePhaseMessage,
   type ReliableEvent,
   type MutablePlayerInput,
   type Snapshot,
@@ -70,6 +76,11 @@ export class HeadlessClient {
   onReliable: ((event: ReliableEvent, client: HeadlessClient) => void) | null = null;
   onKillFeed: ((feed: KillFeed, client: HeadlessClient) => void) | null = null;
   script: InputScript | null = null;
+  /** Newest PhaseChange, every ZonePhase in arrival order, MatchEnd (BR lifecycle). */
+  phase: PhaseChange | null = null;
+  readonly phases: PhaseChange[] = [];
+  readonly zonePhases: ZonePhaseMessage[] = [];
+  matchEnd: MatchEnd | null = null;
   reliableDelivered = 0;
   killFeeds = 0;
   shotsSeen = 0;
@@ -266,6 +277,17 @@ export class HeadlessClient {
         this.killFeeds++;
         this.onKillFeed?.(feed, this);
       }
+    } else if (bytes[0] === MsgId.PhaseChange) {
+      const phase = decodePhaseChange(r);
+      if (phase !== null) {
+        this.phase = phase;
+        if (this.phases.length < 256) this.phases.push(phase);
+      }
+    } else if (bytes[0] === MsgId.ZonePhase) {
+      const zone = decodeZonePhase(r);
+      if (zone !== null && !this.zonePhases.some((z) => z.index === zone.index)) this.zonePhases.push(zone);
+    } else if (bytes[0] === MsgId.MatchEnd) {
+      this.matchEnd = decodeMatchEnd(r);
     } else if (bytes[0] === MsgId.Disconnect) {
       this.disconnect = decodeDisconnect(r);
       this.closedByServer = true;

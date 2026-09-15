@@ -1,6 +1,7 @@
 import { createBitReader } from "../bits";
 import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../messages/control";
 import { MsgId, peekMsgId } from "../messages/ids";
+import { decodeMatchEnd, decodePhaseChange, decodeZonePhase } from "../messages/match";
 import { decodeInputPacket } from "../messages/input";
 import { decodePing } from "../messages/ping";
 import { createSnapshotBuffer, decodeSnapshotHeader, decodeSnapshotInto, type Snapshot } from "../messages/snapshot";
@@ -74,6 +75,15 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
       break;
     case MsgId.KillFeed:
       message = decodeKillFeed(r);
+      break;
+    case MsgId.PhaseChange:
+      message = decodePhaseChange(r);
+      break;
+    case MsgId.ZonePhase:
+      message = decodeZonePhase(r);
+      break;
+    case MsgId.MatchEnd:
+      message = decodeMatchEnd(r);
       break;
     case MsgId.Resync:
       message = bytes.length === 2 ? decodeResyncRequest(r) : decodeResyncResponse(r);

@@ -1,4 +1,4 @@
-import { TEAM_MODE_SIZE, teamCount, type JoinClaims, type TeamMode } from "@twobullets/contracts";
+import { TEAM_MODE_SIZE, teamCount, type JoinClaims, type MatchConfig, type MatchPhase, type MatchResult, type TeamMode } from "@twobullets/contracts";
 import { createMemorySessionPair, LinkConditioner, ManualClock, NETWORK_PROFILES, type MemorySession, type NetworkProfile, type Session } from "@twobullets/netcode";
 import { CONTENT_HASH, PROTOCOL_VERSION, type Mutable, type OwnerMoveBlock } from "@twobullets/protocol";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
@@ -8,6 +8,8 @@ import { createDevClaims, devHmacKey, JoinTokenVerifier, signDevJoinToken } from
 import { HeadlessClient } from "../src/dev/HeadlessClient";
 import { LocalMatchHost } from "../src/host/LocalMatchHost";
 import type { ServerMatch, ServerMatchOptions } from "../src/match/ServerMatch";
+import type { BrLifecycleOptions } from "../src/match/BrLifecycle";
+import type { MatchLevel } from "../src/level/serverLevel";
 import { SessionManager } from "../src/session/SessionManager";
 import { createOwnerBlock } from "@twobullets/netcode/replication";
 
@@ -27,6 +29,10 @@ export interface Harness {
   readonly serverEnds: DeferredCloseSession[];
   /** Server owner blocks recorded at the end of every tick, keyed `tick * 32 + slot`. */
   readonly ownerHistory: Map<number, OwnerMoveBlock>;
+  /** Lifecycle phases reported by the match (onPhase), results (onResult) and whether it closed. */
+  readonly lifecyclePhases: MatchPhase[];
+  readonly results: MatchResult[];
+  readonly closed: { value: boolean };
   token(overrides?: Partial<JoinClaims> & { secret?: string }): string;
   connect(options?: { token?: string; profile?: NetworkProfile; seed?: number; protocolVersion?: number; leadTicks?: number; team?: number; interpDelayMs?: number }): HeadlessClient;
   run(ms: number, stepMs?: number): void;
@@ -85,6 +91,12 @@ export interface HarnessOptions {
   /** Match size and mode (default 10 duo). With a mode, default tokens fill teams in order (team = floor(i / size)). */
   readonly maxPlayers?: number;
   readonly teamMode?: TeamMode;
+  /** Battle royale loop (default: M4 sandbox). */
+  readonly lifecycle?: BrLifecycleOptions;
+  /** Default: the arena. */
+  readonly level?: MatchLevel;
+  /** Edits the local match config (roster, rules). */
+  readonly configure?: (config: MatchConfig) => MatchConfig;
 }
 
 export async function createHarness(havok: HavokModule, options: HarnessOptions = {}): Promise<Harness> {
@@ -113,7 +125,17 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
           : undefined,
     },
   });
-  const match = host.createMatch(localMatchConfig("local", 1234, options.maxPlayers, options.teamMode));
+  const lifecyclePhases: MatchPhase[] = [];
+  const results: MatchResult[] = [];
+  const closed = { value: false };
+  const baseConfig = localMatchConfig("local", 1234, options.maxPlayers, options.teamMode);
+  const match = host.createMatch(options.configure ? options.configure(baseConfig) : baseConfig, {
+    lifecycle: options.lifecycle ?? null,
+    ...(options.level ? { level: options.level } : {}),
+    onPhase: (phase) => lifecyclePhases.push(phase),
+    onResult: (result) => results.push(result),
+    onClosed: () => (closed.value = true),
+  });
   await match.ready;
   const verifier = new JoinTokenVerifier({ keys: [devHmacKey(SECRET)], nowSec: () => EPOCH_SEC + clock.now() / 1000 });
   const sessions = new SessionManager({ directory: host, verifier, clock });
@@ -133,6 +155,9 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
     links,
     serverEnds,
     ownerHistory,
+    lifecyclePhases,
+    results,
+    closed,
     token(overrides = {}) {
       const { secret, ...claimOverrides } = overrides;
       const base = createDevClaims({

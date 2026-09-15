@@ -20,8 +20,8 @@ import type { Player } from "./Player";
 // Server combat (T4.3/T4.6): shots → server projectiles with shooter-time rewind → damage pipeline (shared rules: zone
 // multipliers and falloff, armor, knock while a teammate stands, bleed-out, 5 s revive, team wipes) → events. Tier-U
 // Shot/PlayerHit go to the shared logs the snapshot builder reads; tier-R HitConfirm/DamageTaken/Kill go to each
-// recipient's reliable queue; KillFeed goes on every control stream. M4 has no BR loop: the dead respawn after
-// NET_RESPAWN_SECONDS at their server spawn with a fresh loadout.
+// recipient's reliable queue; KillFeed goes on every control stream. Without a BR lifecycle (M4 sandbox, BR warmup) the dead
+// respawn after NET_RESPAWN_SECONDS at their server spawn with a fresh loadout; BrLifecycle turns respawns off for combat.
 
 export interface ServerCombatOptions {
   readonly rules: MatchRules;
@@ -84,7 +84,10 @@ export class ServerCombat implements ProjectileHitSink {
   readonly hits = new HitLog();
   readonly stats: CombatStats = { shotsFired: 0, viewDelayClamps: 0, hits: 0, damageEvents: 0, knocks: 0, kills: 0, revives: 0, respawns: 0, friendlyFireHits: 0 };
   readonly rules: MatchRules;
+  /** Player and fall damage (off in BR warmup, glide and end). Zone damage is applied by the lifecycle. */
   damageEnabled: boolean;
+  /** The dead respawn after NET_RESPAWN_SECONDS (sandbox and BR warmup); off in BR combat. */
+  respawnEnabled = true;
   private readonly dt: number;
   private readonly respawnTicks: number;
   private readonly spawnArmor: (() => ArmorLoadout) | null;
@@ -148,7 +151,21 @@ export class ServerCombat implements ProjectileHitSink {
 
   /** Fall damage from a `landed` movement event. */
   landed(p: Player, damage: number): void {
-    if (damage > 0) this.damage(p, damage, "fall", null, -1, null, 0, 0, 0, true);
+    if (damage > 0 && this.damageEnabled) this.damage(p, damage, "fall", null, -1, null, 0, 0, 0, true);
+  }
+
+  /** Zone damage (BR combat); the owner sees it through vitals, no DamageTaken per zone tick. */
+  zoneDamage(p: Player, amount: number): void {
+    if (p.life !== "dead") this.damage(p, amount, "zone", null, -1, null, 0, 0, 0, false);
+  }
+
+  /** Out of the match without a killer (disconnected past the reconnect grace in BR combat). */
+  forfeit(p: Player): void {
+    if (p.life === "dead") return;
+    const knockedBy = p.life === "downed" ? p.vitals.knockedById : -1;
+    p.vitals = eliminate(p.vitals);
+    this.onDeath(p, knockedBy, "unknown", false, knockedBy, 0);
+    this.resolveWipes();
   }
 
   /** Below the level's kill plane. */
@@ -197,6 +214,7 @@ export class ServerCombat implements ProjectileHitSink {
       const p = players[i]!;
       if (p.life === "downed") this.stepBleed(p);
     }
+    if (!this.respawnEnabled) return;
     for (let i = 0; i < players.length; i++) {
       const p = players[i]!;
       if (p.life === "dead" && p.deathTick >= 0 && tick - p.deathTick >= this.respawnTicks) {
@@ -395,6 +413,7 @@ export class ServerCombat implements ProjectileHitSink {
         target.vitals = step.target;
         if (step.event?.type === "revived") {
           this.stats.revives++;
+          p.combat.revives++;
           p.reviveTarget = -1;
         } else if (step.target.reviverId !== p.slot) {
           p.reviveTarget = -1;
@@ -418,8 +437,10 @@ export class ServerCombat implements ProjectileHitSink {
     if (best === null) return;
     const step = stepRevive(best.vitals, p.slot, true, this.dt);
     best.vitals = step.target;
-    if (step.event?.type === "revived") this.stats.revives++;
-    else if (step.target.reviverId === p.slot) p.reviveTarget = best.slot;
+    if (step.event?.type === "revived") {
+      this.stats.revives++;
+      p.combat.revives++;
+    } else if (step.target.reviverId === p.slot) p.reviveTarget = best.slot;
   }
 
   private inReviveRange(p: Player, target: Player): boolean {

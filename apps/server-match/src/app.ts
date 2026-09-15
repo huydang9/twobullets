@@ -1,18 +1,24 @@
 import { clampMaxPlayers, DEFAULT_MATCH_PLAYERS, DEFAULT_TEAM_MODE, TEAM_MODE_SIZE, teamCount, type DevJoinTokenResponse, type MatchConfig, type MatchToAgent, type TeamMode } from "@twobullets/contracts";
 import { LinkConditioner, NETWORK_PROFILES, type Clock, type NetworkProfileName, type Session } from "@twobullets/netcode";
 import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol";
-import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { createHash } from "node:crypto";
 import { createDevClaims, DEV_JOIN_SECRET_DEFAULT, devHmacKey, JoinTokenVerifier, signDevJoinToken } from "./auth/joinToken";
 import { LocalMatchHost, type HostMetrics } from "./host/LocalMatchHost";
+import { arenaMatchLevel, resolveServerLevel } from "./level/serverLevel";
+import type { BrLifecycleOptions } from "./match/BrLifecycle";
 import type { ServerMatch } from "./match/ServerMatch";
 import { SessionManager } from "./session/SessionManager";
 import { startWsServer, type WsServerHandle } from "./transport/wsServer";
 
 // Process wiring shared by main.ts and the localhost smoke test: Havok → host + matches → sessions → WS listener.
+// `agent` mode (spawned by server-api, plan.md P3) starts with no match, no dev tokens and no HS256 key: the host agent
+// pushes the JWKS and one `allocate` (see agent/MatchAgent.ts).
 
-export type ServerMode = "local" | "single-match" | "packed";
+export type ServerMode = "local" | "single-match" | "packed" | "agent";
+
+/** `sandbox`: M4 endless warmup (damage, respawns). `br`: the battle royale loop (always on in agent mode). */
+export type MatchFlow = "sandbox" | "br";
 
 export interface ServerOptions {
   readonly mode: ServerMode;
@@ -28,6 +34,12 @@ export interface ServerOptions {
   readonly maxPlayers?: number;
   /** `--team-mode` (default duo). */
   readonly teamMode?: TeamMode;
+  /** Local modes: `--map` (default arena). */
+  readonly mapId?: string;
+  /** Local modes: `--flow` (default sandbox). */
+  readonly flow?: MatchFlow;
+  /** BR timings (`--warmup-seconds`, `--time-scale`, …); agent mode applies them to the allocated match. */
+  readonly lifecycle?: BrLifecycleOptions;
   readonly clock?: Clock;
   readonly log?: (line: string) => void;
 }
@@ -37,7 +49,10 @@ export interface RunningServer {
   readonly host: LocalMatchHost;
   readonly sessions: SessionManager;
   readonly ws: WsServerHandle;
+  readonly verifier: JoinTokenVerifier;
+  /** Local modes: the matches created at boot. Agent mode: empty until allocation (see `host.matches`). */
   readonly matches: readonly ServerMatch[];
+  readonly mode: ServerMode;
   /** Metrics for the last window; also sweeps Hello timeouts. Call once per second. */
   second(): HostMetrics;
   stop(): Promise<void>;
@@ -70,28 +85,36 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const devSecret = options.devJoinSecret ?? DEV_JOIN_SECRET_DEFAULT;
   const resumeSecret = createHash("sha256").update(options.resumeSecret ?? `resume:${devSecret}:${process.pid}:${Date.now()}`).digest();
   const havok = await loadHavok();
+  const agent = options.mode === "agent";
+  const mapId = options.mapId ?? "arena";
+  const level = agent || mapId === "arena" ? arenaMatchLevel() : await resolveServerLevel(mapId, { log });
 
   const host = new LocalMatchHost({
     mode: options.mode === "packed" ? "packed" : "single-match",
-    hostId: LOCAL_HOST_ID,
+    hostId: agent ? "unallocated" : LOCAL_HOST_ID,
     clock,
     havok,
-    level: ARENA_LEVEL,
+    level,
     resumeSecret,
+    onPlayer: agent ? (_matchId, accountId, event) => sendToAgent({ t: "player", accountId, event }) : undefined,
     onHitch: (behind, tick) => log(`[sched] hitch: ${behind.toFixed(0)} ms behind at tick ${tick}`),
   });
-  const count = options.mode === "packed" ? Math.max(1, options.matches ?? 2) : 1;
+  const count = agent ? 0 : options.mode === "packed" ? Math.max(1, options.matches ?? 2) : 1;
   const seed = options.matchSeed ?? 0x7b2b;
   const matches: ServerMatch[] = [];
-  for (let i = 0; i < count; i++) matches.push(host.createMatch(localMatchConfig(count === 1 ? "local" : `local-${i}`, seed + i, options.maxPlayers, options.teamMode)));
+  const lifecycle = options.flow === "br" ? (options.lifecycle ?? {}) : null;
+  for (let i = 0; i < count; i++) {
+    const config = { ...localMatchConfig(count === 1 ? "local" : `local-${i}`, seed + i, options.maxPlayers, options.teamMode), mapId };
+    matches.push(host.createMatch(config, { lifecycle }));
+  }
   await Promise.all(matches.map((m) => m.ready));
 
-  // M3: dev HS256 tokens through the production verifier. Production adds the agent's JWKS (EdDSA keys) via setKeys.
-  const verifier = new JoinTokenVerifier({ keys: [devHmacKey(devSecret)], nowSec: () => Date.now() / 1000 });
+  // M3: dev HS256 tokens through the production verifier. Agent mode has no dev key: the host agent's JWKS (EdDSA) only.
+  const verifier = new JoinTokenVerifier({ keys: agent ? [] : [devHmacKey(devSecret)], nowSec: () => Date.now() / 1000 });
   const sessions = new SessionManager({ directory: host, verifier, clock, log });
 
   const devTokens =
-    options.mode === "single-match"
+    options.mode === "single-match" || agent
       ? undefined
       : (sub: string, team: number, publicUrl: string): DevJoinTokenResponse => {
           const matchId = matches[0]!.id;
@@ -144,7 +167,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     host,
     sessions,
     ws,
+    verifier,
     matches,
+    mode: options.mode,
     second() {
       sessions.sweep(clock.now());
       return host.collectMetrics();
@@ -159,7 +184,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   };
 }
 
+let agentSendsPending = 0;
+
 /** Host agent IPC (platform.md A8) when spawned with an IPC channel; a no-op otherwise. */
 export function sendToAgent(message: MatchToAgent): void {
-  if (typeof process.send === "function") process.send(message);
+  if (typeof process.send !== "function" || !process.connected) return;
+  agentSendsPending++;
+  process.send(message, undefined, undefined, () => agentSendsPending--);
+}
+
+/** Waits until queued IPC messages are handed to the channel (call before `process.exit`). */
+export async function flushAgentMessages(timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (agentSendsPending > 0 && process.connected && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
 }

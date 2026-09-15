@@ -1,10 +1,11 @@
 // Local load driver: N headless WebSocket clients against a match server, random movement at 60 Hz.
 //   pnpm --filter @twobullets/server-match load -- [--url=http://localhost:7350] [--clients=10] [--seconds=20] [--lead=3]
-//     [--fire] [--inproc] [--max-players=20] [--team-mode=solo|duo|squad]
+//     [--fire] [--inproc] [--max-players=20] [--team-mode=solo|duo|squad] [--map=arena|v1] [--flow=sandbox|br]
 // --max-players/--team-mode: size of the in-process match (--inproc), and how clients spread over teams.
 // --fire: every client holds fire at the nearest remote player (rifle, then pistol taps when dry); kills and respawns run.
 // --inproc: starts the match server in this process on a random port and prints its per-second tick work and combat
-// counters (one heavy process instead of two).
+// counters (one heavy process instead of two). --map/--flow pick the in-process level and loop (plan.md B2 measurement:
+// `--inproc --map=v1 --clients=20 --max-players=20 --fire`); boot time and RSS are printed.
 // The driver has no clock sync: with --fake-net on the server, raise --lead above RTT/16.7 ms or inputs arrive late.
 // Exits on its own; prints per-client downstream bytes/s and snapshot counts.
 
@@ -38,8 +39,12 @@ const hardStop = setTimeout(() => {
 let server: RunningServer | null = null;
 let base = args.url ?? "http://localhost:7350";
 if (args.inproc === "true") {
-  server = await startServer({ mode: "local", host: "127.0.0.1", port: 0, maxPlayers, teamMode, log: () => {} });
+  const rssBefore = process.memoryUsage.rss();
+  const bootStart = performance.now();
+  const flow = args.flow === "br" ? "br" : "sandbox";
+  server = await startServer({ mode: "local", host: "127.0.0.1", port: 0, maxPlayers, teamMode, mapId: args.map ?? "arena", flow, lifecycle: { warmupSeconds: 5, allJoinedSeconds: 3 }, log: (l) => console.log(l) });
   base = `http://127.0.0.1:${server.port}`;
+  console.log(`[load] server (${args.map ?? "arena"}, ${flow}) booted in ${(performance.now() - bootStart).toFixed(0)} ms, rss ${(rssBefore / 1e6).toFixed(0)} → ${(process.memoryUsage.rss() / 1e6).toFixed(0)} MB`);
 }
 
 const clients: { client: HeadlessClient; ws: WebSocket; session: WsSession }[] = [];
@@ -76,7 +81,8 @@ const metrics = server
         workMax = Math.max(workMax, m.work.max);
       }
       console.log(
-        `[load] tick work p50=${m.work.p50.toFixed(3)} p99=${m.work.p99.toFixed(3)} max=${m.work.max.toFixed(2)} ms | players=${m.connected}` +
+        `[load] tick work p50=${m.work.p50.toFixed(3)} p99=${m.work.p99.toFixed(3)} max=${m.work.max.toFixed(2)} ms | players=${m.connected} rss=${(m.rssBytes / 1e6).toFixed(0)} MB` +
+          (match.lifecycle ? ` | ${match.lifecycle.phase}` : "") +
           (combat
             ? ` | in flight=${combat.projectiles.count} shots=${combat.stats.shotsFired} hits=${combat.stats.hits} knocks=${combat.stats.knocks} kills=${combat.stats.kills} respawns=${combat.stats.respawns} rays=${combat.projectiles.stats.worldRays} Dclamps=${combat.stats.viewDelayClamps}`
             : ""),

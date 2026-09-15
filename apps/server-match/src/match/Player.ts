@@ -19,6 +19,7 @@ export interface PlayerCombatStats {
   knocks: number;
   damageDealt: number;
   deaths: number;
+  revives: number;
 }
 
 /** 18-bit pitch of a level gaze (shared aim.ts: q = 2^17 − 1 is exactly 0). */
@@ -37,7 +38,7 @@ export class Player implements ReplicatedPlayer {
   readonly inputs = new ServerInputBuffer();
   readonly net = new ClientReplication();
   readonly viewDelay = new ViewDelayEstimator();
-  readonly combat: PlayerCombatStats = { kills: 0, knocks: 0, damageDealt: 0, deaths: 0 };
+  readonly combat: PlayerCombatStats = { kills: 0, knocks: 0, damageDealt: 0, deaths: 0, revives: 0 };
   state: PlayerState;
   vitals: Vitals = createVitals();
   armor: ArmorLoadout = NO_ARMOR;

@@ -2,6 +2,7 @@ import type { MatchConfig, MatchMetrics } from "@twobullets/contracts";
 import type { Clock } from "@twobullets/netcode";
 import { DisconnectReason } from "@twobullets/protocol";
 import type { HavokModule, ServerLevel } from "@twobullets/sim";
+import type { MatchLevel } from "../level/serverLevel";
 import { ServerMatch, type ServerMatchOptions } from "../match/ServerMatch";
 import { TickScheduler, type TimerApi } from "../sched/TickScheduler";
 import { createWindowSummary, WindowStats, type WindowSummary } from "../sched/WindowStats";
@@ -16,15 +17,17 @@ export type HostMode = "single-match" | "packed";
 
 export interface LocalMatchHostOptions {
   readonly mode: HostMode;
+  /** Checked against the join token's `hid`; agent mode sets it from `MatchConfig.hostId` on allocate. */
   readonly hostId: string;
   readonly clock: Clock;
   readonly timers?: TimerApi;
   readonly havok: HavokModule;
-  readonly level: ServerLevel;
+  /** Default level for `createMatch` (the arena `LevelData`, or a resolved `MatchLevel`). */
+  readonly level: MatchLevel | ServerLevel;
   readonly resumeSecret: Uint8Array;
   readonly tickRate?: number;
   readonly spinMs?: number;
-  readonly match?: Partial<Pick<ServerMatchOptions, "idleTimeoutMs" | "reconnectGraceMs" | "onTickEnd" | "datagramRateLimit" | "datagramKickRate" | "combat">>;
+  readonly match?: Partial<Pick<ServerMatchOptions, "idleTimeoutMs" | "reconnectGraceMs" | "onTickEnd" | "datagramRateLimit" | "datagramKickRate" | "combat" | "lifecycle">>;
   readonly onPlayer?: (matchId: string, accountId: string, event: "joined" | "left") => void;
   readonly onHitch?: (behindMs: number, tick: number) => void;
 }
@@ -55,9 +58,12 @@ interface MatchEntry {
   lastSkipped: number;
 }
 
+/** Per-match overrides of `createMatch`. */
+export type CreateMatchOverrides = Partial<Pick<ServerMatchOptions, "level" | "lifecycle" | "onPhase" | "onResult" | "onClosed">>;
+
 export class LocalMatchHost implements MatchHost, MatchDirectory {
   readonly mode: HostMode;
-  readonly hostId: string;
+  hostId: string;
   readonly scheduler: TickScheduler;
   private readonly options: LocalMatchHostOptions;
   private readonly clock: Clock;
@@ -95,7 +101,7 @@ export class LocalMatchHost implements MatchHost, MatchDirectory {
     return this.list.map((e) => e.match);
   }
 
-  createMatch(config: MatchConfig): ServerMatch {
+  createMatch(config: MatchConfig, overrides: CreateMatchOverrides = {}): ServerMatch {
     if (this.draining) throw new Error("host is draining");
     if (this.mode === "single-match" && this.entries.size > 0) throw new Error("single-match mode runs one match per process");
     if (this.entries.has(config.matchId)) throw new Error(`match ${config.matchId} exists`);
@@ -105,6 +111,7 @@ export class LocalMatchHost implements MatchHost, MatchDirectory {
       config,
       havok: o.havok,
       level: o.level,
+      ...overrides,
       clock: o.clock,
       startTick: this.scheduler.nextTick,
       resumeSecret: o.resumeSecret,
@@ -136,10 +143,11 @@ export class LocalMatchHost implements MatchHost, MatchDirectory {
     };
   }
 
+  /** Stops ticking and closes every match (BR matches report a cancelled/aborted result first). */
   drain(): Promise<void> {
     this.draining = true;
     this.scheduler.stop();
-    for (const e of this.list) e.match.end(DisconnectReason.serverShutdown);
+    for (const e of this.list) e.match.abort(DisconnectReason.serverShutdown);
     return Promise.resolve();
   }
 
