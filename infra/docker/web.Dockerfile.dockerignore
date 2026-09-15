@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/.vite
+**/.data
+**/*.log
+.git
+.github
+.claude
+assets-src
+docs
+tools
+apps/server-api/src
+apps/server-match/src
+apps/bot/src
+**/test
+**/.env
+infra/.env

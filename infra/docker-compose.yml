@@ -1,0 +1,60 @@
+# Production: one VPS, two containers. Lives at /opt/twobullets/docker-compose.yml on the host next to `.env`
+# (copied from infra/.env.example). See docs/release/runbook.md.
+#   docker compose pull && docker compose up -d
+name: twobullets
+
+services:
+  web:
+    image: ${TB_REGISTRY:?set TB_REGISTRY in .env}/twobullets-web:${TB_TAG:?set TB_TAG in .env}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      TB_SITE_ADDRESS: ${TB_DOMAIN:?set TB_DOMAIN in .env}
+      TB_ACME_EMAIL: ${TB_ACME_EMAIL:?set TB_ACME_EMAIL in .env}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  server:
+    image: ${TB_REGISTRY}/twobullets-server-api:${TB_TAG}
+    restart: unless-stopped
+    # tini as PID 1: forwards SIGTERM/SIGHUP to server-api and reaps anything a match process leaves behind.
+    init: true
+    env_file: .env
+    environment:
+      TB_ENV: production
+      TB_PUBLIC_URL: https://${TB_DOMAIN}
+      TB_MATCH_URL_TEMPLATE: wss://${TB_DOMAIN}/gs/{port}/m/{matchId}
+      TB_API_HOST: 0.0.0.0
+      TB_MATCH_BIND_HOST: 0.0.0.0
+      TB_TRUST_PROXY: "1"
+      TB_DATA_DIR: /data
+    # Not published: only Caddy (same Docker network) reaches 8080 and the match ports.
+    expose:
+      - "8080"
+      - "7400-7419"
+    volumes:
+      - tb_data:/data
+    # Running matches get SIGTERM → drain; give them time to report results.
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${TB_SERVER_MEMORY_LIMIT:-6g}
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
+  tb_data:

@@ -1,0 +1,20 @@
+{
+  "name": "@twobullets/server-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import ./src/node/resolveHooks.ts src/main.ts",
+    "keys": "node --import ./src/node/resolveHooks.ts src/cli/keys.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@twobullets/contracts": "workspace:*",
+    "@twobullets/protocol": "workspace:*",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "vitest": "^5.0.0"
+  }
+}

@@ -1,0 +1,64 @@
+# Front door on the single host: automatic HTTPS (Let's Encrypt), the client files, the API, and match WebSockets.
+#   https://{$TB_SITE_ADDRESS}/                    client (apps/client/dist)
+#   https://{$TB_SITE_ADDRESS}/v1/*                server-api (REST + /v1/ws push)
+#   https://{$TB_SITE_ADDRESS}/.well-known/jwks.json
+#   wss://{$TB_SITE_ADDRESS}/gs/<port>/m/<matchId> a match process on <port> (7400–7499) inside the `server` container
+# TB_SITE_ADDRESS is a bare domain in production (play.example.com → HTTPS) or http://localhost:8080 for the local smoke.
+# Game traffic is WSS on TCP 443 from day one (ADR 0002 §1), with Caddy doing TLS instead of HAProxy on this MVP.
+
+{
+	email {$TB_ACME_EMAIL:admin@localhost}
+	admin off
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+{$TB_SITE_ADDRESS} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Match WebSockets. The join token travels inside the first message (Hello), never in this URL.
+	@game path_regexp game ^/gs/(74[0-9]{2})(/m/[A-Za-z0-9_.:-]{1,64})$
+	handle @game {
+		rewrite * {re.game.2}
+		reverse_proxy server:{re.game.1} {
+			flush_interval -1
+		}
+	}
+
+	# Metrics and anything internal stay off the public internet.
+	@private path /metrics /internal/*
+	handle @private {
+		respond 404
+	}
+
+	@api path /v1/* /.well-known/jwks.json /healthz /readyz
+	handle @api {
+		reverse_proxy server:8080
+	}
+
+	handle {
+		root * /srv/client
+		encode zstd gzip
+		@html path / *.html
+		header @html Cache-Control "no-cache"
+		# Vite's hashed bundles are immutable; public/assets (GLB, textures, audio) keep their names, so cache for an hour.
+		@hashed path_regexp hashed ^/assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|wasm)$
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		header /assets/* ?Cache-Control "public, max-age=3600"
+		file_server
+	}
+}

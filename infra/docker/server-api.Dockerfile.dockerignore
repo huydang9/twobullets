@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/.vite
+**/.data
+**/*.log
+.git
+.github
+.claude
+assets-src
+docs
+tools
+apps/client/public
+apps/client/src
+apps/bot/src
+**/test
+**/.env
+infra/.env
