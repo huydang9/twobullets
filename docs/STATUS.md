@@ -46,7 +46,7 @@ Last updated: 2026-09-15 13:45. Check `git log` and `git status` before acting o
 - Spacing rule: minor POIs use 150 m spacing (the big ones 250 m) — keep or revert.
 
 ## Workflow notes
-- Usage guard: stop all agents and rewrite this file if weekly Claude usage > 60% (hourly check from `~/.claude/usage-last.json`).
+- Usage guard: stop all agents and rewrite this file if weekly Claude usage > 65% (hourly check from `~/.claude/usage-last.json`).
 - Downloads of researched, license-checked assets don't need approval; never send personal info in API requests.
 - Browser checks while agents edit client code: use the no-HMR verify server on :5174 or the stable worktree on :5175.
 
