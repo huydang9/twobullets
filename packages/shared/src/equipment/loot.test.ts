@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBuildingPrefab, isBuildingPrefabId, worldToLocal } from "../map/buildings/index";
+import { getBuildingPrefab, getPrefabLootSpots, isBuildingPrefabId, worldToLocal } from "../map/buildings/index";
 import { MAP_V1 } from "../map/mapV1";
 import { ITEMS } from "./items";
 import {
@@ -71,12 +71,23 @@ describe("loot generation", () => {
       expect(pile.items.length).toBeLessThanOrEqual(4);
     }
     const counts = categoryCounts(layout);
-    expect(counts.weapon).toBeGreaterThanOrEqual(30);
+    expect(counts.weapon).toBeGreaterThanOrEqual(100);
     expect(counts.ammo).toBeGreaterThanOrEqual(counts.weapon!);
     expect(counts.heal).toBeGreaterThanOrEqual(30);
     expect(counts.throwable).toBeGreaterThanOrEqual(15);
     expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(20);
     expect(counts.backpack).toBeGreaterThanOrEqual(10);
+  });
+
+  it("puts a primary weapon with its ammo in most buildings with 3+ loot spots", () => {
+    const big = buildings.filter((b) => isBuildingPrefabId(b.prefab) && getPrefabLootSpots(b.prefab).length >= 3);
+    const armed = big.filter((b) =>
+      layout.piles.some((p) => p.buildingId === b.id && p.items.some((i) => {
+        const def = ITEMS[i.itemId];
+        return def.category === "weapon" && def.weaponClass === "primary" && p.items.some((o) => o.itemId === def.ammo && o.quantity >= ITEMS[def.ammo].lootQuantity * 2);
+      })),
+    );
+    expect(armed.length / big.length).toBeGreaterThan(0.85);
   });
 
   it("makes hot drops denser and better than outskirts", () => {

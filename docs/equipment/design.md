@@ -346,27 +346,29 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
 
 ## 6. Loot spawning
 
-`generateLoot(seed, pois, buildings)` takes MapLayout `ResolvedBuilding`s (Y resolved) plus `MapData.pois`, and returns `{ piles, items }`. Items get sequential `lootId`s. It is pure and reproducible in Node; `LOOT_TABLE_VERSION = 1` goes into the content hash.
+`generateLoot(seed, pois, buildings)` takes MapLayout `ResolvedBuilding`s (Y resolved) plus `MapData.pois`, and returns `{ piles, items }`. Items get sequential `lootId`s. It is pure and reproducible in Node; `LOOT_TABLE_VERSION = 2` goes into the content hash. The client (`EquipmentSystem` map mode, which `OfflineMatch` uses) and the headless harnesses call it at match start for Map v1 and the real maps alike; nothing is baked into map data. Online has no ground loot yet (B5).
 
 - **Spots:** `getPrefabLootSpots` (1.5 m grid, on floors, clear of geometry), transformed to world space.
 - **Pile chance per spot, by POI tier:**
 
   | Tier | Chance |
   |---|---|
-  | 0 | 13 % |
-  | 1 | 18 % |
-  | 2 | 24 % |
+  | 0 | 12 % |
+  | 1 | 16.5 % |
+  | 2 | 22 % |
 
   - Open-air rooms (balconies, towers) ×0.6.
   - Buildings outside any POI: tier 0 ×0.8.
   - A building that rolls nothing gets one pile on a seeded spot.
-- **Pile contents:** 1 roll, plus a chance of a 2nd and then a 3rd roll (35 / 45 / 55 % by tier). A weapon roll adds 1–2 stacks of its ammo, so a pile holds 1–4 items. Items sit on a 0.3 m ring around the spot.
+- **Pile contents:** 1 roll, plus a chance of a 2nd and then a 3rd roll (35 / 45 / 55 % by tier). A weapon roll adds 2–3 stacks of its ammo, so a pile holds 1–4 items. Items sit on a 0.3 m ring around the spot.
+- **Primary top-up:** a building with 3+ loot spots whose piles hold no primary (rifle, shotgun, sniper) gets one with 80 / 85 / 90 % chance by tier, drawn from the tier's weapon table without pistols, with 2–3 stacks of its ammo. It joins a seeded pile of that building with at most 2 items, else a new pile on a free spot.
+- **Matching ammo:** a loose ammo roll takes the ammo of a gun already rolled in the same building 60 % of the time.
 - **Category weights** (tier 0 / 1 / 2):
 
   | Category | Tier 0 | Tier 1 | Tier 2 |
   |---|---|---|---|
-  | weapon | 14 | 17 | 20 |
-  | ammo | 17 | 16 | 15 |
+  | weapon | 19 | 22 | 25 |
+  | ammo | 14 | 14 | 13 |
   | heal | 20 | 18 | 16 |
   | boost | 8 | 9 | 10 |
   | throwable | 10 | 12 | 13 |
@@ -375,14 +377,21 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
   | attachment | 0 | 0 | 0 (placeholder) |
 
 - **Within categories:**
-  - Weapons: pistol 40→15, shotgun 30→20, rifle 25→45, sniper 5→20. Military POIs scale sniper weight ×1.5.
+  - Weapons: pistol 30→12, shotgun 34→20, rifle 31→48, sniper 5→20. Military POIs scale sniper weight ×1.5.
   - Heals: bandage (×5) 60→50, first aid 32→36, medkit 8→14.
   - Throwables: frag 35–38, smoke 24–25, flash 20–22, molotov 18.
   - Armor/backpack levels: L1 70→50, L2 26→38, L3 4→12.
-- **Density on Map v1**, seed `0xc0ffee` (43 buildings, 1,024 spots):
-  - 220 piles, 438 items (~44 per player for 10 players)
-  - 72 weapons, 144 ammo, 72 heals, 29 boosts, 38 throwables, 49 armor, 34 backpacks
-  - by POI: town 99 piles, military 41, farm 31, quarry 29, forest 13, radar 7
+- **Density** (averages over 8 seeds, from `lootStats.test.ts`; `LOOT_STATS=1` prints them):
+
+  | | Map v1 (74 buildings) | vn-hangxanh (190 buildings) |
+  |---|---|---|
+  | Piles / items | 300 / 660 | 263 / 692 |
+  | Weapons (rifle, shotgun, sniper, pistol) | 142 (60, 41, 21, 20) | 193 (91, 56, 31, 16) |
+  | Ammo / heal / boost / throwable / armor / backpack | 213 / 89 / 46 / 65 / 65 / 40 | 245 / 73 / 39 / 47 / 58 / 37 |
+  | Buildings with 3+ spots holding a primary | 91 % | 91 % |
+  | 3 random buildings hold a primary | 99.9 % | 99.7 % |
+
+  Table version 1 had 99 / 81 weapons, 47 % / 29 % of 3+ spot buildings with a primary, and 84 % / 63 % for three buildings.
 - **Stability:** each spot's RNG comes from `(seed, hash(buildingId), spotIndex)`, so editing one building never reshuffles another building's loot (tested).
 - **Runtime ground loot:** a `GroundLoot` store with an 8 m spatial hash and `version` (netcode `lootVersion`).
   - Store operations: `takeGroundItem`, `setGroundQuantity`, `dropGroundItem`, `queryGroundLoot`.

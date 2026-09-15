@@ -7,7 +7,7 @@ import { ITEMS, type ItemCategory, type ItemId } from "./items";
 import { createRng, hash32, hashString, len2, len3, pickWeighted } from "./math";
 
 /** Bump when tables or generation change; part of the match content hash (netcode §8.3). */
-export const LOOT_TABLE_VERSION = 1;
+export const LOOT_TABLE_VERSION = 2;
 
 type Tier = 0 | 1 | 2;
 type TierTable<K extends string> = readonly [Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>];
@@ -15,7 +15,7 @@ type LootCategory = Exclude<ItemCategory, "helmet" | "vest"> | "armor";
 
 export const LOOT = {
   /** Chance that a building loot spot (1.5 m grid) holds a pile, by POI tier. Outdoor rooms (balconies, roofs) get less. */
-  spotChance: [0.13, 0.18, 0.24],
+  spotChance: [0.12, 0.165, 0.22],
   outdoorChanceScale: 0.6,
   /** Buildings outside any POI use tier 0 at this scale. */
   outskirtsChanceScale: 0.8,
@@ -26,17 +26,24 @@ export const LOOT = {
   pileRadius: 0.3,
 
   category: [
-    { weapon: 14, ammo: 17, heal: 20, boost: 8, throwable: 10, armor: 14, backpack: 8, attachment: 0 },
-    { weapon: 17, ammo: 16, heal: 18, boost: 9, throwable: 12, armor: 14, backpack: 8, attachment: 0 },
-    { weapon: 20, ammo: 15, heal: 16, boost: 10, throwable: 13, armor: 15, backpack: 8, attachment: 0 },
+    { weapon: 19, ammo: 14, heal: 20, boost: 8, throwable: 10, armor: 14, backpack: 8, attachment: 0 },
+    { weapon: 22, ammo: 14, heal: 18, boost: 9, throwable: 12, armor: 14, backpack: 8, attachment: 0 },
+    { weapon: 25, ammo: 13, heal: 16, boost: 10, throwable: 13, armor: 15, backpack: 8, attachment: 0 },
   ] satisfies TierTable<LootCategory>,
   weapon: [
-    { weapon_pistol: 40, weapon_shotgun: 30, weapon_rifle: 25, weapon_sniper: 5 },
-    { weapon_pistol: 25, weapon_shotgun: 25, weapon_rifle: 38, weapon_sniper: 12 },
-    { weapon_pistol: 15, weapon_shotgun: 20, weapon_rifle: 45, weapon_sniper: 20 },
+    { weapon_pistol: 30, weapon_shotgun: 34, weapon_rifle: 31, weapon_sniper: 5 },
+    { weapon_pistol: 20, weapon_shotgun: 26, weapon_rifle: 42, weapon_sniper: 12 },
+    { weapon_pistol: 12, weapon_shotgun: 20, weapon_rifle: 48, weapon_sniper: 20 },
   ] satisfies TierTable<ItemId>,
   /** Military POIs multiply sniper weight. */
   militarySniperScale: 1.5,
+  /**
+   * A building with at least `minSpots` loot spots that rolled no primary weapon gets one (from the tier's weapon
+   * table without pistols) with this chance by tier. It joins one of the building's piles with room, else a new pile.
+   */
+  guaranteedPrimary: { minSpots: 3, chance: [0.8, 0.85, 0.9] },
+  /** A loose ammo roll picks the ammo of a gun already found in the same building with this chance. */
+  matchingAmmoChance: 0.6,
   ammo: [
     { ammo_9mm: 35, ammo_12g: 25, ammo_556: 30, ammo_762: 10 },
     { ammo_9mm: 25, ammo_12g: 22, ammo_556: 38, ammo_762: 15 },
@@ -62,7 +69,7 @@ export const LOOT = {
   /** Units per ground item for stackables other than ammo (ammo uses AmmoItemDef.lootQuantity). */
   quantity: { bandage: 5 } as Readonly<Partial<Record<ItemId, number>>>,
   /** A weapon comes with this many stacks of its ammo. */
-  weaponAmmoStacks: [1, 2],
+  weaponAmmoStacks: [2, 3],
 } as const;
 
 /** A building as the generator needs it: MapLayout's ResolvedBuilding fits (Y must be resolved). */
@@ -100,9 +107,10 @@ export interface LootLayout {
 
 /**
  * Deterministic ground loot for a match: every building loot spot rolls for a pile with a chance by its POI tier;
- * each pile holds 1–3 items drawn from tier tables (weapons bring their ammo). Every spot is seeded from
+ * each pile holds 1–3 rolls drawn from tier tables (weapons bring their ammo). Every spot is seeded from
  * (seed, building id, spot index), so adding or moving one building never reshuffles the others. Buildings that
- * roll nothing get one pile on a seeded spot. Pure data; the same result in the browser, the server and tests.
+ * roll nothing get one pile on a seeded spot; most buildings with 3+ spots are topped up with a primary weapon.
+ * Pure data; the same result in the browser, the server and tests.
  */
 export function generateLoot(seed: number, pois: readonly PointOfInterest[], buildings: readonly LootBuilding[]): LootLayout {
   const piles: LootPile[] = [];
@@ -114,64 +122,98 @@ export function generateLoot(seed: number, pois: readonly PointOfInterest[], bui
     if (spots.length === 0) continue;
     const poi = poiFor(building, pois);
     const tier: Tier = poi?.lootTier ?? 0;
+    const military = poi?.kind === "military";
     const chanceScale = poi ? 1 : LOOT.outskirtsChanceScale;
     const buildingSeed = hash32(seed, hashString(building.id), LOOT_TABLE_VERSION);
     const outdoorRooms = new Set(getBuildingPrefab(building.prefab).rooms.filter((room) => !room.indoor).map((room) => room.id));
+    const context: RollContext = { tier, military, gunAmmo: [], hasPrimary: false };
 
-    let placed = 0;
-    const place = (spotIndex: number, random: () => number): void => {
-      const spot = spots[spotIndex]!;
+    // Piles are drafted per building first so the primary top-up can join one before item ids are assigned.
+    const drafts: { spotIndex: number; items: ItemInstance[] }[] = [];
+    spots.forEach((spot, index) => {
+      const random = createRng(hash32(buildingSeed, index));
+      const chance = LOOT.spotChance[tier] * chanceScale * (outdoorRooms.has(spot.roomId) ? LOOT.outdoorChanceScale : 1);
+      if (random() < chance) drafts.push({ spotIndex: index, items: rollPile(random, context) });
+    });
+    if (drafts.length === 0) {
+      const random = createRng(hash32(buildingSeed, 0xffff));
+      drafts.push({ spotIndex: Math.floor(random() * spots.length), items: rollPile(random, context) });
+    }
+
+    const guarantee = LOOT.guaranteedPrimary;
+    const topUp = createRng(hash32(buildingSeed, 0xfffe));
+    if (!context.hasPrimary && spots.length >= guarantee.minSpots && topUp() < guarantee.chance[tier]) {
+      const weapon = rollWeapon(topUp, context, true);
+      const roomy = drafts.filter((d) => d.items.length + weapon.length <= LOOT.maxItemsPerPile + 1);
+      if (roomy.length > 0) {
+        roomy[Math.floor(topUp() * roomy.length)]!.items.push(...weapon);
+      } else {
+        const used = new Set(drafts.map((d) => d.spotIndex));
+        const free = spots.map((_, i) => i).filter((i) => !used.has(i));
+        if (free.length > 0) drafts.push({ spotIndex: free[Math.floor(topUp() * free.length)]!, items: weapon });
+      }
+    }
+
+    for (const draft of drafts) {
+      const spot = spots[draft.spotIndex]!;
       const pileId = piles.length;
       const position = roundTuple(localToWorld(building, spot.position));
-      const pileItems = rollPile(random, tier, poi?.kind === "military").map((instance, k, all): LootItem => {
-        const angle = (k / all.length) * Math.PI * 2 + random() * 0.6;
+      const jitter = createRng(hash32(buildingSeed, draft.spotIndex, 0x6a17));
+      const pileItems = draft.items.map((instance, k, all): LootItem => {
+        const angle = (k / all.length) * Math.PI * 2 + jitter() * 0.6;
         const r = all.length > 1 ? LOOT.pileRadius : 0;
         const itemPosition = roundTuple([position[0] + Math.sin(angle) * r, position[1], position[2] + Math.cos(angle) * r]);
         return { ...instance, lootId: items.length + k, pileId, position: itemPosition };
       });
       items.push(...pileItems);
       piles.push({ id: pileId, position, buildingId: building.id, roomId: spot.roomId, poi: poi?.id ?? null, items: pileItems });
-      placed++;
-    };
-
-    spots.forEach((spot, index) => {
-      const random = createRng(hash32(buildingSeed, index));
-      const chance = LOOT.spotChance[tier] * chanceScale * (outdoorRooms.has(spot.roomId) ? LOOT.outdoorChanceScale : 1);
-      if (random() < chance) place(index, random);
-    });
-    if (placed === 0) {
-      const random = createRng(hash32(buildingSeed, 0xffff));
-      place(Math.floor(random() * spots.length), random);
     }
   }
   return { seed, version: LOOT_TABLE_VERSION, piles, items };
 }
 
-function rollPile(random: () => number, tier: Tier, military: boolean): ItemInstance[] {
+interface RollContext {
+  readonly tier: Tier;
+  readonly military: boolean;
+  /** Ammo of the guns rolled so far in this building. */
+  readonly gunAmmo: ItemId[];
+  hasPrimary: boolean;
+}
+
+function rollPile(random: () => number, context: RollContext): ItemInstance[] {
+  const { tier } = context;
   const out: ItemInstance[] = [];
   let rolls = 1;
   while (rolls < LOOT.maxItemsPerPile && random() < LOOT.extraItemChance[tier]) rolls++;
   for (let r = 0; r < rolls && out.length < LOOT.maxItemsPerPile; r++) {
     const category = pickWeighted<LootCategory>(LOOT.category[tier], random());
-    out.push(...rollCategory(category, random, tier, military));
+    out.push(...rollCategory(category, random, context));
   }
   return out;
 }
 
-function rollCategory(category: LootCategory, random: () => number, tier: Tier, military: boolean): ItemInstance[] {
+function rollWeapon(random: () => number, context: RollContext, primaryOnly: boolean): ItemInstance[] {
+  const weights: Partial<Record<ItemId, number>> = { ...LOOT.weapon[context.tier] };
+  if (context.military) weights.weapon_sniper = (weights.weapon_sniper ?? 0) * LOOT.militarySniperScale;
+  if (primaryOnly) weights.weapon_pistol = 0;
+  const id = pickWeighted(weights, random());
+  const def = ITEMS[id];
+  if (def.category !== "weapon") return [];
+  if (def.weaponClass === "primary") context.hasPrimary = true;
+  if (!context.gunAmmo.includes(def.ammo)) context.gunAmmo.push(def.ammo);
+  const [minStacks, maxStacks] = LOOT.weaponAmmoStacks;
+  const stacks = minStacks + Math.floor(random() * (maxStacks - minStacks + 1));
+  return [{ itemId: id, quantity: 1, magazine: 0 }, { itemId: def.ammo, quantity: ITEMS[def.ammo].lootQuantity * stacks }];
+}
+
+function rollCategory(category: LootCategory, random: () => number, context: RollContext): ItemInstance[] {
+  const { tier } = context;
   switch (category) {
-    case "weapon": {
-      const weights: Partial<Record<ItemId, number>> = { ...LOOT.weapon[tier] };
-      if (military) weights.weapon_sniper = (weights.weapon_sniper ?? 0) * LOOT.militarySniperScale;
-      const id = pickWeighted(weights, random());
-      const def = ITEMS[id];
-      if (def.category !== "weapon") return [];
-      const [minStacks, maxStacks] = LOOT.weaponAmmoStacks;
-      const stacks = minStacks + Math.floor(random() * (maxStacks - minStacks + 1));
-      return [{ itemId: id, quantity: 1, magazine: 0 }, { itemId: def.ammo, quantity: ITEMS[def.ammo].lootQuantity * stacks }];
-    }
+    case "weapon":
+      return rollWeapon(random, context, false);
     case "ammo": {
-      const id = pickWeighted(LOOT.ammo[tier], random());
+      const matching = context.gunAmmo.length > 0 && random() < LOOT.matchingAmmoChance;
+      const id = matching ? context.gunAmmo[Math.floor(random() * context.gunAmmo.length)]! : pickWeighted(LOOT.ammo[tier], random());
       const def = ITEMS[id];
       return def.category === "ammo" ? [{ itemId: id, quantity: def.lootQuantity }] : [];
     }
