@@ -4,6 +4,7 @@ import type { RoadSpec } from "../../layout/roads";
 import type { ScatterRule } from "../../layout/scatter";
 import type { PointOfInterest, PropScatter, Vec2Tuple } from "../../types";
 import type { FenceLine } from "../fences";
+import { REAL_TERRAIN } from "./elevation";
 import { clipPolylineToSquare, clipRingToSquare, simplifyPolyline, simplifyRing } from "./geometry";
 import type { AreaFeature, LineFeature, PlaceConfig, Polygon } from "./types";
 import type { Wilderness } from "./wilderness";
@@ -67,7 +68,7 @@ const WILD_UNDERGROWTH: Palette = [
 ];
 
 /** Scatter areas stay this far inside the playable edge, m. */
-const SCATTER_CLIP = 492;
+const SCATTER_CLIP = 244;
 /** Forest, wood and scrub outlines smaller than this become loose trees instead of their own rule, m². */
 const MIN_WOOD_AREA = 1500;
 const MAX_WOOD_RULES = 28;
@@ -80,7 +81,7 @@ export function isWater(tags: AreaFeature["tags"]): boolean {
 export function waterPolygons(areas: readonly AreaFeature[]): Polygon[] {
   return areas
     .filter((a) => isWater(a.tags) && a.area >= 120)
-    .map((a) => clipRingToSquare(simplifyRing(a.outer, 1), 500))
+    .map((a) => clipRingToSquare(simplifyRing(a.outer, 1), REAL_TERRAIN.playableHalfExtent))
     .filter((ring) => ring.length >= 3)
     .map((ring) => ring.map((p): Vec2Tuple => [round3(p[0]), round3(p[1])]));
 }

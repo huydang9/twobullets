@@ -11,9 +11,9 @@ export const catalog: CatalogResponse = {
   defaultPlayers: 10,
   defaultMode: "duo",
   maps: [
-    { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 1000, available: true, kind: "handmade" },
+    { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 500, available: true, kind: "handmade" },
     { id: "arena", name: { vi: "Sân tập", en: "Arena" }, sizeM: 120, available: true, kind: "dev" },
-    { id: "cz-holasovice", name: { vi: "Holašovice (Séc)", en: "Holašovice (Czechia)" }, sizeM: 1000, available: false, kind: "realWorld" },
+    { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 500, available: false, kind: "realWorld" },
   ],
   defaultMapId: "v1",
   languages: ["vi", "en"],

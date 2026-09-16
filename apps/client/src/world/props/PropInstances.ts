@@ -50,9 +50,9 @@ const SMALL_PROP_SHADOW_DISTANCE = 30;
 const TELEPORT_DISTANCE = 30;
 /**
  * Props that block movement and bullets and are taller than SMALL_PROP_HEIGHT (walls, fences, rocks, wrecks, trunks)
- * never cull inside the map (its diagonal is ~1.41 km): nobody may see through cover. They go to their cheapest level.
+ * never cull inside the map (a 500 m square, diagonal ~707 m): nobody may see through cover. They go to their cheapest level.
  */
-export const COVER_CULL_DISTANCE = 1500;
+export const COVER_CULL_DISTANCE = 720;
 /** Unzoomed vertical field of view (CAMERA.fovDegrees is horizontal at 16:9), radians. */
 const REFERENCE_FOV = 2 * Math.atan(Math.tan((CAMERA.fovDegrees * Math.PI) / 360) / (16 / 9));
 
@@ -102,7 +102,7 @@ export class PropInstances {
     sets: readonly PropInstanceSet[],
     options: PropInstancesOptions = {},
   ) {
-    const cellSize = options.cellSize ?? 250;
+    const cellSize = options.cellSize ?? 125;
     this.selectDistance = options.selectDistance ?? 0.5;
     this.fadeSeconds = options.fadeSeconds ?? 0.4;
     const hysteresis = options.hysteresis ?? 0.1;

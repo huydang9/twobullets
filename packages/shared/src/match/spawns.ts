@@ -39,8 +39,9 @@ export function spawnsByPoi(pois: readonly PointOfInterest[], spawns: readonly M
 export const TEAM_SPAWN_SPACING = 2;
 /** Members per row at a spawn; larger teams stand in rows behind the first (away from the POI). */
 export const TEAM_SPAWN_ROW = 2;
-/** When a POI hosts more teams than it has spawns, later teams shift this far back from the reused spawn, m. */
-export const TEAM_SPAWN_STACK = 12;
+/** When a POI hosts more teams than it has spawns, later teams shift this far back from the reused spawn, m (25 keeps
+ * two teams on one spawn more than 20 m apart on the 500 m maps). */
+export const TEAM_SPAWN_STACK = 25;
 
 /**
  * Teams spread over the POIs that hold validated spawns, in a seeded shuffle: team t gets POI `order[t % POIs]`, so POIs

@@ -20,7 +20,7 @@ The check runs in about a minute and exits with code 1 on the first failure.
 
 ## Diagnosis
 
-A headless walk replays four camera paths at 60 Hz on the Map v1 layout (5,960 prop instances in 247 prop cells), with the manifest's LOD distances. It compares the previous scheme with the new one.
+A headless walk replays four camera paths at 60 Hz on the Map v1 layout, with the manifest's LOD distances. It compares the previous scheme with the new one. The paths were re-routed onto the 500 × 500 m map on 2026-09-16 (town → west road → Forest Cabins, a sprint loop of r 45 m around (−190, 105), the strafe at (−218, 152)); the table below was measured on the 1 km layout (5,960 prop instances in 247 prop cells), and the harness still passes, with the strafe's switches dropping 396 → 8.
 
 **Previous scheme:**
 - Each instance was re-bucketed every 4 m of camera movement.
@@ -71,7 +71,7 @@ All flags are in `perf/flags.ts`, on by default, and accept `?opt=name:0`. Every
 - **Zoom-aware LOD.** Distances are divided by `lodZoom(activeCamera.fov)`: the magnification against the unzoomed FOV, rounded down to 1/2/4/8.
   - Sprint FOV and iron sights (62–75°) stay at 1.
   - The K-98 scope (27°) uses 4×, so a fir 300 m away draws at LOD1 instead of as an impostor.
-- **Cover never culls in the map.** Props that block movement and bullets and are taller than 0.5 m keep a cull distance of at least 1,500 m (the map diagonal is 1.41 km) and fall back to their cheapest level instead: walls, fences, rocks, cars, logs, hay bales, sandbags and tree trunks. `rock_small`, stumps, small crates and bushes still cull (bushes by their zoomed distance).
+- **Cover never culls in the map.** Props that block movement and bullets and are taller than 0.5 m keep a cull distance of at least 720 m (`COVER_CULL_DISTANCE`; the 500 m square's diagonal is ~707 m) and fall back to their cheapest level instead: walls, fences, rocks, cars, logs, hay bales, sandbags and tree trunks. `rock_small`, stumps, small crates and bushes still cull (bushes by their zoomed distance).
 
 **Shadows.** The shadow band has hysteresis. During a cross-fade, only the incoming level casts. Shadows themselves still switch without dithering, because Babylon's shadow depth shader doesn't run material plugins. A dithered shadow fade would need `ShadowDepthWrapper` (the full PBR shader in the depth pass), which isn't worth its cost yet.
 
@@ -90,7 +90,7 @@ Headless, with 5,000 instances within 150 m of a moving camera (8 cells, 3 level
 
 ## What to look at in the browser
 
-Walk and sprint through the western forest on `?map=v1`: west road → Forest Cabins → loop. Then strafe (A/D) near trees 30–45 m away, and scope with the K-98.
+Walk and sprint through the western forest on `?map=v1`: west road → Forest Cabins (−190, 105) → loop. Then strafe (A/D) near trees 30–45 m away, and scope with the K-98.
 
 **What good looks like:**
 - Trees 30–45 m (LOD0 ↔ LOD1) and 90–140 m (LOD1 ↔ impostor) away never swap in one frame. For about 0.4 s a tree shows a fine noise pattern where both levels mix, then it settles. Nothing blinks back and forth while strafing.
@@ -119,6 +119,6 @@ Nothing in the new code is specific to the current assets:
 - **Dither pattern.** During the 0.4 s fades, the pattern is visible at 80% render scale and MSAA doesn't smooth it (there is no TAA). Many trees fade at once when a scope zooms in.
 - **Opaque discard.** Opaque bark and rock materials now contain a `discard`, which disables early-depth for those draws.
 - **Zoom cost.** A scoped view selects nearer levels for everything in range, capped at 8×. With the K-98 (4×) over the forest, expect more triangles while scoped.
-- **Cover draw distance.** Cover now draws map-wide. The worst case, if every cover instance were in view at its far level, is about 290k triangles (rocks are most of it).
+- **Cover draw distance.** Cover now draws map-wide. The worst case, if every cover instance were in view at its far level, was about 290k triangles on the 1 km layout (rocks are most of it); the 500 m map carries about a sixth of the instances.
 - **Memory.** Batches grow to their high-water mark. The worst case is one copy per instance per level, and it usually stays far below that.
 - **Grass vertex work.** Grass draws about 1.6× as many (partly zero-size) clumps within the extended gather radius. They cost vertex work only.

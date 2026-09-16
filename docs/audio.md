@@ -365,7 +365,7 @@ The cut points were chosen by transient analysis and spectrograms, **not by ear*
 - Occlusion is binary (one ray, no transmission through thin materials) and uses the listener's current position for the whole delayed sound.
 - Enclosure is a heuristic. Near tall walls it reads partly indoor.
 - Surface resolution on building floors falls back to the terrain provider unless building meshes set `metadata.surface`.
-- The ambience height factor uses absolute Y. On the 1×1 km terrain it should use height above ground.
+- The ambience height factor uses absolute Y. On the map terrain it should use height above ground.
 - Near-miss cracks are synthesized. The explosion close layer is a firework/cannon recording, not a real grenade.
 - Smoke and fire loops sit on the ambience bus (volume slider "ambience"), which is otherwise idle while ambience is switched off.
 - Grenade bounces on players aren't simulated (grenades collide with the static world only), so there is no body-hit bounce sound.

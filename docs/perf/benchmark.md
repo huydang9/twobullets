@@ -164,6 +164,17 @@ With `shadowStaticCache:1,dynamicShadowsNearOnly:1` Hàng Xanh drops further to 
 while the view stays inside the cached cascades (the bench has no soldiers). Merged buildings on Hàng Xanh hold ~60 MB of
 GPU buffers and no CPU copy (thin-instance batches held ~27 MB on each side).
 
+**500 × 500 m maps (2026-09-16)**, same command and 500 frames, before = the right-hand column above (the 1 km maps at
+their current flags), after = the same flags on the shrunk maps:
+
+| Map            | Meshes    | Active     | Draws/frame (shadow) | Triangles/frame (shadow)      | scene.render   |
+| -------------- | --------- | ---------- | -------------------- | ----------------------------- | -------------- |
+| Hàng Xanh      | 357 → 293 | 106 → 71.4 | 294 (45) → 168 (29)  | 1.90M (1.22M) → 1.25M (0.78M) | 0.94 → 0.61 ms |
+| Phú Nhuận      | 341 → 330 | 99 → 89.3  | 272 (45) → 174 (35)  | 1.93M (1.35M) → 1.19M (0.79M) | 0.89 → 0.56 ms |
+| Map v1         | 702 → 488 | 175 → 97.0 | 274 (55) → 174 (47)  | 0.64M (0.19M) → 0.53M (0.19M) | 1.05 → 0.61 ms |
+
+Main-camera triangles (total minus the shadow passes) are now 471k / 397k / 343k, all under the 600k target.
+
 ### Terrain texture fetches
 
 Layer fetches per pixel besides the mask and two macro samples (3, always):

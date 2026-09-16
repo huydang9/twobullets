@@ -2,7 +2,7 @@ import type { RoadLabel } from "@twobullets/shared";
 import { describe, expect, it } from "vitest";
 import { boxesOverlap, placeRoadLabels, uprightAngle, type LabelBox, type RoadLabelView } from "../../../src/ui/map/roadLabels";
 
-/** Whole 1000 m map in 800 px, north up. */
+/** Whole 500 m map in 800 px, north up. */
 const VIEW: RoadLabelView = { size: 800, pixelsPerMeter: 0.8, sx: (x) => (x + 500) * 0.8, sy: (z) => (500 - z) * 0.8 };
 const OPTIONS = { fontPx: 12, measure: (text: string) => text.length * 6, obstacles: [] as LabelBox[], maxRank: 3 };
 

@@ -163,13 +163,16 @@ function report(name: string, s: Stats): Report {
  * fails here.
  */
 const FLOORS = {
+  // Map v1 halved to a 500 m square on 2026-09-16: 53 buildings with loot spots instead of 85, so the totals fall with
+  // the building count while the per-building density is unchanged.
   "Map v1": {
-    categories: { weapon: 500, ammo: 600, heal: 375, throwable: 425, armor: 385, boost: 62, backpack: 180 },
-    items: { medkit: 78, first_aid: 125, bandage: 165, frag: 190, smoke: 172, "helmet_1+vest_1": 210, "helmet_2+vest_2": 120, "helmet_3+vest_3": 40, backpack_2: 55, backpack_3: 20 },
+    categories: { weapon: 385, ammo: 465, heal: 285, throwable: 320, armor: 290, boost: 53, backpack: 139 },
+    items: { medkit: 59, first_aid: 102, bandage: 123, frag: 144, smoke: 132, "helmet_1+vest_1": 158, "helmet_2+vest_2": 98, "helmet_3+vest_3": 34, backpack_2: 46, backpack_3: 18 },
   },
+  // Regenerated as a 500 m square on 2026-09-16: 110 buildings instead of 190.
   "vn-hangxanh": {
-    categories: { weapon: 595, ammo: 710, heal: 375, throwable: 345, armor: 395, boost: 82, backpack: 195 },
-    items: { medkit: 78, first_aid: 130, bandage: 160, frag: 155, smoke: 132, "helmet_1+vest_1": 205, "helmet_2+vest_2": 130, "helmet_3+vest_3": 50, backpack_2: 65, backpack_3: 24 },
+    categories: { weapon: 353, ammo: 424, heal: 219, throwable: 210, armor: 250, boost: 49, backpack: 118 },
+    items: { medkit: 50, first_aid: 79, bandage: 89, frag: 87, smoke: 84, "helmet_1+vest_1": 126, "helmet_2+vest_2": 87, "helmet_3+vest_3": 37, backpack_2: 40, backpack_3: 17 },
   },
 } as const;
 
@@ -224,15 +227,15 @@ function outdoorWorld(map: MapData): OutdoorLootWorld {
 describe("loot weapon availability", () => {
   it("Map v1", () => {
     const r = report("Map v1", measure(MAP_V1.pois, MAP_V1.buildings));
-    expectPlenty("Map v1", r, 500);
-    expect(r.items).toBeLessThan(2900);
+    expectPlenty("Map v1", r, 385);
+    expect(r.items).toBeLessThan(2300);
   });
 
   it("vn-hangxanh", async () => {
     const { map } = await loadRealMap("vn-hangxanh");
     const r = report("vn-hangxanh", measure(map.pois, map.buildings));
-    expectPlenty("vn-hangxanh", r, 595);
-    expect(r.items).toBeLessThan(3000);
+    expectPlenty("vn-hangxanh", r, 353);
+    expect(r.items).toBeLessThan(1900);
   }, 60_000);
 
   it("Map v1 with outdoor piles", () => {
@@ -240,7 +243,7 @@ describe("loot weapon availability", () => {
     const r = report("Map v1 + outdoor", measure(MAP_V1.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
     // What the client spawns: LootRenderer draws about 3,200 items at ~30 draw calls (docs/equipment/design.md §6).
-    expect(r.items).toBeLessThan(3400);
+    expect(r.items).toBeLessThan(2700);
     expectOutdoorPlacement(MAP_V1.pois, world.layout.buildings, world);
   }, 120_000);
 
@@ -249,7 +252,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-hangxanh + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    expect(r.items).toBeLessThan(3950);
+    expect(r.items).toBeLessThan(2350);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
   it("vn-phandangluu with outdoor piles", async () => {
@@ -257,7 +260,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-phandangluu + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    expect(r.items).toBeLessThan(4200);
+    expect(r.items).toBeLessThan(2200);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
 });

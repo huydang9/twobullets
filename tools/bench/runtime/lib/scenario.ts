@@ -1,6 +1,6 @@
 /**
  * Engine-free description of the benchmark match, shared by every mode so they simulate the same world:
- * 1×1 km rolling heightfield, ~300 building boxes (+ a few ramps) clustered in towns, 10 players with scripted
+ * 500 × 500 m rolling heightfield, ~300 building boxes (+ a few ramps) clustered in towns, 10 players with scripted
  * random inputs, 20 bone hitboxes per player on a synthetic animation, and a steady population of projectiles.
  */
 import type { LevelBlock, MoveInput, CombatInput, WeaponId } from "../../../../packages/shared/src/index.ts";
@@ -12,7 +12,7 @@ export interface ScenarioOptions {
   hitboxesPerPlayer: number;
   projectiles: number;
   buildings: number;
-  /** Heightfield samples per side (513 → ~1.95 m spacing over 1 km). */
+  /** Heightfield samples per side (513 → ~0.98 m spacing over 500 m). */
   heightfieldSamples: number;
   mapSize: number;
   /** Seed for the building layout; matches on the same map share it (defaults to `seed`). */
@@ -28,7 +28,7 @@ export const DEFAULT_SCENARIO: ScenarioOptions = {
   projectiles: 50,
   buildings: 300,
   heightfieldSamples: 513,
-  mapSize: 1000,
+  mapSize: 500,
 };
 
 /** Collision filter bits (identical in every mode). World: default membership. */

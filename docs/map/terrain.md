@@ -1,6 +1,6 @@
 # Map v1 terrain
 
-Map v1 terrain covers 1280 × 1280 m: a 1 km playable square plus a 140 m out-of-bounds mountain border. The same data builds the ground everywhere:
+Map v1 terrain covers 640 × 640 m: a 500 × 500 m playable square plus a 70 m out-of-bounds mountain border (halved on 2026-09-16; the browser build was too heavy at 1 km). The same data builds the ground everywhere:
 
 - **Client:** renders it and runs player physics on it.
 - **Server:** builds it headless (Node, Havok, no rendering) from the same `MapData`.
@@ -17,11 +17,11 @@ Map v1 terrain covers 1280 × 1280 m: a 1 km playable square plus a 140 m out-of
 
 Open `http://localhost:5173/?map=v1` (DEV builds only; without the query you get the arena as before).
 
-- You spawn just south-west of the future town, facing the **Training Yard**: the arena on a dirt pad about 120 m away (south-west), with a gate cut into its north wall. An asphalt road leads to the gate, and the soldier range works inside.
+- You spawn on the outskirts of one of the seven POIs. The **Training Yard** is at (20, −185): the arena on a dirt pad, with a gate cut into its north wall. A dirt road leads to the gate, and the soldier range works inside.
 - **Landmarks:**
-  - radar ridge: north-west;
-  - quarry pit with a dirt ramp down: south (-60, -330);
-  - shallow valley: north-south, east of the center;
+  - radar ridge: north, (−60, 185);
+  - quarry pit with two dirt ramps down: west-south-west, (−130, −110);
+  - a low hill east of the center, (60, −60);
   - mountains: all around the edge, fading into haze.
 - **What to check:**
   - distant hills pop when LOD switches (threshold 3 px);
@@ -38,7 +38,7 @@ Open `http://localhost:5173/?map=v1` (DEV builds only; without the query you get
 
 | Field | Meaning |
 |---|---|
-| `terrain: TerrainSpec` | `seed`, `size`, `resolution`, `playableHalfExtent`, `relief` (noise layers), `border` (mountain ring), `features` (hill / ridge / valley / basin) |
+| `terrain: TerrainSpec` | `seed`, `size`, `resolution`, `playableHalfExtent`, `relief` (noise layers), `border` (mountain ring), `features` (hill / ridge / valley / basin; v1 uses a ridge, a hill and the quarry basin) |
 | `flatten: FlattenRegion[]` | POI pads and roads, applied in order after generation |
 | `bounds: MapBounds` | out-of-bounds grace time, `killY`, `landingAltitude`. The playable square is `terrain.playableHalfExtent` (single source) |
 | `pois: PointOfInterest[]` | `id`, `name`, `kind`, `center`, `radius`, `lootTier` |
@@ -53,25 +53,26 @@ Placing a building: flatten its footprint with a `rect` region (a few meters of 
 
 | Parameter | Value | Why |
 |---|---|---|
-| Size | 1280 m, centered | 1000 m playable + 140 m border each side |
-| Resolution | 1025 × 1025 samples (2^10 + 1) | chunks and a 2× physics downsample line up exactly |
+| Size | 640 m, centered | 500 m playable + 70 m border each side |
+| Resolution | 513 × 513 samples (2^9 + 1) | chunks and a 2× physics downsample line up exactly |
 | Spacing | 1.25 m | see below |
-| Heights | `Float32Array`, 4.2 MB | row-major `heights[iz * 1025 + ix]`; can view a `SharedArrayBuffer` (`Heightfield.fromBuffer`) |
-| Surface mask | `Uint8Array` RGBA = grass, dirt, rock, road, 4.2 MB | each sample sums to 255 |
-| Height range | playable ≈ 0.5–67 m (quarry floor to radar ridge), border up to ≈ 150 m | |
-| Slopes (playable) | 96.3% of cells < 25°, 99.4% < 50° | steeper cells are quarry walls and foothills at the edge |
-| Slopes (border) | 17% of cells > 50° | |
+| Heights | `Float32Array`, 1.05 MB | row-major `heights[iz * 513 + ix]`; can view a `SharedArrayBuffer` (`Heightfield.fromBuffer`) |
+| Surface mask | `Uint8Array` RGBA = grass, dirt, rock, road, 1.05 MB | each sample sums to 255 |
+| Border | `{ foothillInset: 20, rampDistance: 55, height: 110, ridgeWavelength: 200 }` | the ring rises inside 70 m instead of 140 |
+| Height range | playable 4.4–48.8 m (quarry floor to radar ridge), border up to 134 m | |
+| Slopes (playable) | 95.9% of cells < 25°, 98.3% < 50° | steeper cells are quarry walls and foothills at the edge |
+| Slopes (border) | 40% of cells > 50° | the same 110 m of rise over half the ramp distance |
 
 **Why 1.25 m spacing.**
 
 - **Texture detail:** the splat textures carry the sub-meter detail (forest ground is 1024 px/m, asphalt 340 px/m). Mesh vertices only need to resolve landforms. At 1.25 m, features down to about 2.5 m survive: ditches, road shoulders, flatten falloffs of 4 m or more, 3 m terrace walls.
 - **Surface mask:** one mask texel per sample gives 1.25 m layer edges. The shader breaks them up with height-based blending.
-- **Physics:** Havok ray cost barely depends on resolution (measured 1.5–3 µs). Creating the 1025² shape took 12 ms, versus 10 ms at 513².
-- **Memory:** the JS copy is 4.2 MB. The server can pass `{ stride: 2 }` to `createTerrainBody` for a 513² collision surface (a quarter of the Havok memory), at the cost of up to a few cm of mismatch with the rendered surface on curved ground.
+- **Physics:** Havok ray cost barely depends on resolution (measured 1.5–3 µs). Creating the 513² shape takes about 10 ms (12 ms at the old 1025²).
+- **Memory:** the JS copy is 1.05 MB. The server can pass `{ stride: 2 }` to `createTerrainBody` for a 257² collision surface (a quarter of the Havok memory), at the cost of up to a few cm of mismatch with the rendered surface on curved ground.
 
 Generation is deterministic: integer-hash gradient noise, polynomial `sinCos`, and no `Math.random`, `sin`, `exp`, `pow`, `hypot` or `**`. `determinism.test.ts` enforces this over the folder's source. A golden checksum test catches accidental changes; bump `TerrainSpec.version` when generation changes on purpose. `terrain.checksum()` hashes heights and mask, so client and server can compare.
 
-Build time on an M-series Mac in Node: heights ≈ 0.69 s, flatten 0.02 s, mask 0.27 s (≈ 1 s total). In the browser it's similar on the main thread at load; see Risks.
+Build time on an M-series Mac in Node: ≈ 0.27 s in total for heights, flatten and mask (≈ 1 s at the old 1025²). In the browser it's similar on the main thread at load; see Risks.
 
 ## API (pure, `@twobullets/shared`)
 
@@ -131,7 +132,7 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
 
 ## Rendering
 
-**Chunks.** 8 × 8 chunks of 128 cells (160 m). Each chunk is one mesh and one draw call, with a shared vertex buffer (position + normal, 17 157 vertices) and one index range per LOD. LOD n steps 2^n samples, so the levels are 1.25 / 2.5 / 5 / 10 / 20 m.
+**Chunks.** 4 × 4 chunks of 128 cells (160 m). Each chunk is one mesh and one draw call, with a shared vertex buffer (position + normal, 17 157 vertices) and one index range per LOD. LOD n steps 2^n samples, so the levels are 1.25 / 2.5 / 5 / 10 / 20 m.
 
 | LOD | Triangles per chunk (incl. skirts) |
 |---|---|
@@ -147,7 +148,7 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
 - **Shadows.** Terrain receives shadows but doesn't cast them. The sun is 48° up, so hills rarely shadow anything, and casting would put 64 large meshes into every cascade.
 - **Horizon.** One mesh of 6 144 vertices and 11 264 triangles: square rings out to 2.8 km whose heights continue the border ridges and sink toward the far edge, where fog takes over. Its inner ring reuses the heightfield edge samples.
 
-**Budget.** Measured headless (NullEngine, `TerrainRenderer.getStats()`, horizontal FOV 90°, 8 headings per spot):
+**Budget.** Measured headless (NullEngine, `TerrainRenderer.getStats()`, horizontal FOV 90°, 8 headings per spot) on the 1 km terrain, not re-measured after the 2026-09-16 shrink. There are now 16 chunks instead of 64, so the counts below are an upper bound:
 
 | Viewpoint | 2560×1440: chunks / triangles (max) | 1920×1080: max triangles |
 |---|---|---|
@@ -158,10 +159,10 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
 | East playable edge | 52 / 442k | 306k |
 | Gliding 300 m above center | 27 / 278k | 178k |
 
-- **Draw calls.** Terrain costs at most 52 chunks + 1 horizon draws, plus 0 in shadow passes.
-- **GPU memory.** Buffers take 44.6 MB (26 MB vertices, 18 MB indices). The mask texture takes 5.6 MB with mips.
-- **Pixel-error tradeoff.** At 1.5 px, triangles rise to 540–760k; at 6 px they fall to 165–260k.
-- **CPU per frame.** The LOD pass is 64 box-distance checks (well under 0.1 ms).
+- **Draw calls.** Terrain costs at most 16 chunks + 1 horizon draws, plus 0 in shadow passes.
+- **GPU memory.** Buffers take 11.2 MB (6.5 MB vertices, 4.5 MB indices) over the 16 chunks. The mask texture takes 1.4 MB with mips.
+- **Pixel-error tradeoff.** At 1.5 px, triangles rise to 540–760k; at 6 px they fall to 165–260k (measured at 64 chunks).
+- **CPU per frame.** The LOD pass is 16 box-distance checks (well under 0.1 ms).
 - **GPU cost.** Without a GPU, frame time can't be measured here. The fragment shader dominates: about 11 texture fetches per pixel on grass, and up to 20 where rock (triplanar) and road overlap. 144 Hz (6.9 ms) needs a real profile at 1440p; see Risks.
 
 **Material** (`TerrainMaterial.ts`). The base is a `PBRMaterial`, with a `MaterialPluginBase` injecting GLSL at `CUSTOM_FRAGMENT_DEFINITIONS`, `CUSTOM_FRAGMENT_BEFORE_LIGHTS` (albedo, normal, AO) and `CUSTOM_FRAGMENT_UPDATE_METALLICROUGHNESS` (roughness). Lighting is the scene's sun, cascaded shadows, IBL and fog, unchanged.
@@ -184,7 +185,7 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
 ## Dev map mode wiring
 
 - `Game.ts`: `?map=v1` (DEV only) does the following:
-  1. `createEnvironment(scene, { largeWorld: true })`: EXP2 fog 0.0011 (about 26% at 500 m, 70% at 1 km) and a 160 m shadow distance.
+  1. `createEnvironment(scene, { largeWorld: true })`: EXP2 fog 0.0011 (about 26% at 500 m, the square's full width) and a 110 m shadow distance.
   2. `createDevMapV1` builds the terrain, physics body, chunks, horizon and Training Yard level.
   3. The player camera's `maxZ` is set to 4000 m.
 - The arena default path is unchanged: same environment values, level, spawns and combat.
@@ -197,9 +198,9 @@ On slopes the capsule's rounded bottom rests r·(1/cos θ − 1) above the groun
   - move to texture arrays (needs same-size textures from the asset pipeline);
   - let the performance engineer add a depth pre-pass decision.
 - **Texture sets are stand-ins.** There's no real dirt, gravel or rock scan: dirt is re-tinted forest ground and rock is worn concrete. Suggested Poly Haven CC0 additions through the world asset pipeline: `brown_mud_leaves_01` or `forest_leaves_02` for dirt, `rocky_terrain_02` or `aerial_rocks_02` for rock, `gravel_road` for dirt roads, and a proper grass or meadow set.
-- **Main-thread build of about 1 s at load** (generation + mask), plus 0.2 s for chunk meshes. Move it to a worker, which can hand over the `SharedArrayBuffer` heights, or ship a baked heights+mask binary verified by `terrain.checksum()`.
+- **Main-thread build of about 0.27 s at load** (generation + mask), plus chunk meshes. Move it to a worker, which can hand over the `SharedArrayBuffer` heights, or ship a baked heights+mask binary verified by `terrain.checksum()`.
 - **Depth precision.** The near plane stays 0.05 m for the viewmodel, and the far plane is 4 km. Precision is about 1.2 m at 1 km, which is fine for terrain and could cause z-fighting between building bases and terrain at long range. Options: reverse-Z, or a larger near plane in map mode (the viewmodel has its own rendering group).
 - **LOD pops without geomorphing.** A 128-cell chunk near the camera is always LOD 0 (35k triangles). A quadtree with 64-cell leaves near the camera would cut about 40% of triangles.
 - **Resolved: the shared barrel is pure.** The heightfield body (`terrainBody.ts`) and `buildLevel` moved to `packages/sim` (M3 T3.1), so `@twobullets/shared` no longer pulls Babylon; import `createTerrainBody` from `@twobullets/sim`.
-- **Border.** Outside the playable square the mountains are walkable in places (83% of border cells are under 50°). The out-of-bounds timer or kill volume must do the enforcement.
-- **Terrain edge.** Havok rays exactly on the +X/+Z edge (640 m) miss. That's far outside the playable area.
+- **Border.** Outside the playable square the mountains are walkable in places (60% of border cells are under 50°). The out-of-bounds timer or kill volume must do the enforcement.
+- **Terrain edge.** Havok rays exactly on the +X/+Z edge (320 m) miss. That's far outside the playable area.

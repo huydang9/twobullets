@@ -36,7 +36,7 @@ export const MAP_CREDITS: MapPickerStrings["credits"] = {
   "eu-dem": "Copernicus EU-DEM (European Union)",
 };
 
-const COUNTRY_CODES = ["cz", "vn", "jp"] as const;
+const COUNTRY_CODES = ["vn"] as const;
 
 /** Strings in the current language. */
 export function mapPickerStrings(): MapPickerStrings {

@@ -4,11 +4,12 @@ import { clusterPoints, type PlacedBuilding } from "./buildings";
 import { centroid } from "./geometry";
 import { isPoliticalName } from "./names";
 import type { AreaFeature, PlaceConfig, PointFeature, Polygon } from "./types";
+import { REAL_TERRAIN } from "./elevation";
 
 /** POI spacing rules for real maps (passed to `validateMapLayout`): villages sit closer than Map v1's authored POIs. */
-export const REAL_POI_SPACING = { poiSpacing: 200, minorPoiSpacing: 130, minorPoiRadius: 40 } as const;
+export const REAL_POI_SPACING = { poiSpacing: 120, minorPoiSpacing: 85, minorPoiRadius: 40 } as const;
 /** Spawn groups (POIs) wanted per map, so 10+ teams can start apart. */
-export const TARGET_POIS = 10;
+export const TARGET_POIS = 7;
 
 const DEFAULT_DIRECTIONS = ["North", "South", "East", "West"] as const;
 const DEFAULT_GENERIC = ["Hamlet", "Farm", "Woods"] as const;
@@ -172,7 +173,7 @@ export function convertPois(
   const accepted: Draft[] = [];
   for (const g of candidates) {
     const center: Vec2Tuple = [round3(g.center[0]), round3(g.center[1])];
-    const radius = Math.round(Math.min(100, Math.max(25, g.radius + 6)));
+    const radius = Math.round(Math.min(85, Math.max(25, g.radius + 6)));
     if (spacingOk(center, radius, accepted)) accepted.push({ center, radius, members: g.members, landmark: null });
     else if (radius > REAL_POI_SPACING.minorPoiRadius && spacingOk(center, REAL_POI_SPACING.minorPoiRadius, accepted)) accepted.push({ center, radius: REAL_POI_SPACING.minorPoiRadius, members: g.members, landmark: null });
   }
@@ -182,7 +183,8 @@ export function convertPois(
   const forests = areas.filter((a) => a.tags.landuse === "forest" || a.tags.natural === "wood");
   const inWater = (x: number, z: number) => water.some((w) => pointInPolygon(w, x, z));
   const landmarkRadius = 30;
-  const usable = (p: Vec2Tuple) => Math.abs(p[0]) <= 380 && Math.abs(p[1]) <= 380 && !inWater(p[0], p[1]) && !isolated(p[0], p[1]) && !buildings.some((b) => distance(p[0], p[1], b.bounds.center[0], b.bounds.center[1]) < 25);
+  const landmarkEdge = REAL_TERRAIN.playableHalfExtent - 45;
+  const usable = (p: Vec2Tuple) => Math.abs(p[0]) <= landmarkEdge && Math.abs(p[1]) <= landmarkEdge && !inWater(p[0], p[1]) && !isolated(p[0], p[1]) && !buildings.some((b) => distance(p[0], p[1], b.bounds.center[0], b.bounds.center[1]) < 25);
   const landmarkKind = (p: Vec2Tuple): "forest" | "farm" => (forests.some((f) => pointInPolygon(f.outer, p[0], p[1])) ? "forest" : "farm");
   const localities = points.filter((p) => p.tags.name && (p.tags.place === "locality" || p.tags.place === "isolated_dwelling" || p.tags.place === "hamlet")).sort((a, b) => a.id - b.id);
   for (const p of localities) {
@@ -193,8 +195,9 @@ export function convertPois(
   while (accepted.length < TARGET_POIS) {
     let best: Vec2Tuple | null = null;
     let bestScore = -1;
-    for (let z = -360; z <= 360; z += 30) {
-      for (let x = -360; x <= 360; x += 30) {
+    const scan = Math.floor(landmarkEdge / 20) * 20;
+    for (let z = -scan; z <= scan; z += 20) {
+      for (let x = -scan; x <= scan; x += 20) {
         const p: Vec2Tuple = [x, z];
         if (!usable(p) || !spacingOk(p, landmarkRadius, accepted)) continue;
         const score = accepted.reduce((m, a) => Math.min(m, distance(x, z, a.center[0], a.center[1])), Infinity);

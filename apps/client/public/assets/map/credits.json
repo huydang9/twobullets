@@ -39,9 +39,6 @@
     }
   ],
   "maps": [
-    { "id": "cz-holasovice", "name": "Holašovice", "credits": ["openstreetmap", "terrain-tiles (SRTM/GMTED courtesy of the U.S. Geological Survey; EU-DEM, Copernicus)"], "osmSnapshot": "2026-09-15T03:54:20Z" },
-    { "id": "vn-camthanh", "name": "Hội An – Cẩm Thanh", "credits": ["openstreetmap"], "osmSnapshot": "2026-09-15T03:54:20Z", "note": "Flat relief: elevation data fetched but not used." },
-    { "id": "jp-shirakawago", "name": "Shirakawa-gō", "credits": ["openstreetmap", "terrain-tiles (SRTM/GMTED courtesy of the U.S. Geological Survey)"], "osmSnapshot": "2026-09-15T03:54:20Z" },
     { "id": "vn-hangxanh", "name": "Ngã Tư Hàng Xanh", "credits": ["openstreetmap"], "osmSnapshot": "2026-09-15T05:23:48Z", "note": "Flat relief: elevation data fetched but not used." },
     { "id": "vn-phandangluu", "name": "Phú Nhuận", "credits": ["openstreetmap"], "osmSnapshot": "2026-09-15T05:34:53Z", "note": "Flat relief: elevation data fetched but not used." }
   ]

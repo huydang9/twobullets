@@ -252,9 +252,9 @@ export function loadRealMap(id: string): Promise<RealMapModule> {
   if (!existsSync(path) || readFileSync(path, "utf8") !== source) writeFileSync(path, source);
 }
 
-/** Presets keep their order in places.ts (Holašovice first); custom places follow alphabetically. */
+/** Presets keep their order in places.ts (Hàng Xanh first); custom places follow alphabetically. */
 function registryOrder(a: string, b: string): number {
-  const preset = ["cz-holasovice", "vn-camthanh", "jp-shirakawago"];
+  const preset = ["vn-hangxanh", "vn-phandangluu"];
   const ia = preset.indexOf(a);
   const ib = preset.indexOf(b);
   if (ia >= 0 || ib >= 0) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);

@@ -109,7 +109,7 @@ const elapsed = () => `${((performance.now() - started) / 1000).toFixed(1)} s`;
 const fetched = await fetchPlace(place);
 if (!positional) rememberPlace(place);
 const projection = createProjection(place.lat, place.lon);
-const elevation = place.elevation.mode === "real" ? await sampleElevation(fetched.tiles, projection, 640, 10) : null;
+const elevation = place.elevation.mode === "real" ? await sampleElevation(fetched.tiles, projection, 320, 10) : null;
 const result = convertRealMap({ osm: fetched.osm, elevation, config: place }, { navCheck: !flag("no-nav"), log: (message) => console.info(`[osm] ${elapsed()} ${message}`) });
 writeRealMapModule(result, place);
 

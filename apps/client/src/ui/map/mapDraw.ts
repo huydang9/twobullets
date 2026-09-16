@@ -16,7 +16,7 @@ export class MapProjection {
   cx = 0;
   cz = 0;
   /** Visible world side, m. */
-  span = 1000;
+  span = 500;
   /** Viewport side, CSS px. */
   size = 1;
 

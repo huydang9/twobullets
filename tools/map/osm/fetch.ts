@@ -21,8 +21,9 @@ const { bboxAround } = await import("../../../packages/shared/src/map/real/conve
 export const USER_AGENT = "twobullets-dev/0.1";
 export const OVERPASS_ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"] as const;
 const TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
-/** Half side of the fetched square, m: the 1280 m terrain plus a margin, so edge roads and woods keep their shape. */
-export const FETCH_HALF = 660;
+/** Half side of the fetched square, m: the 640 m terrain plus a margin, so edge roads and woods keep their shape.
+ * The caches in assets-src/ were fetched at 660 m (the 1 km maps) and are a superset, so they stay valid. */
+export const FETCH_HALF = 340;
 export const DEM_ZOOM = 14;
 
 export function cacheDir(id: string): string {

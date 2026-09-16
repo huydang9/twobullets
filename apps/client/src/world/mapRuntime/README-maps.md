@@ -5,7 +5,7 @@
 | Id | Map | Training Yard |
 |---|---|---|
 | `v1` | Map v1 (`MAP_V1`) | yes |
-| `cz-holasovice`, `vn-camthanh`, `jp-shirakawago` (and any generated place) | `packages/shared/src/map/real/<id>.ts`, loaded on demand as its own chunk | no (`null`) |
+| `vn-hangxanh`, `vn-phandangluu` (and any generated place) | `packages/shared/src/map/real/<id>.ts`, loaded on demand as its own chunk | no (`null`) |
 | missing, `arena`, unknown (warned) | `null`: the blockout arena | – |
 
 `MapRuntime.load` takes the definition spread into its options. `trainingYard: null` skips the arena, its soldier range and its audio ray zone.
@@ -19,8 +19,8 @@
 Everything below keeps using `world` (`world.map`, `world.layout`, `world.level`), so equipment loot, the map screen, the minimap and `OfflineMatch` pick the chosen map up unchanged.
 
 Notes:
-- `?bots=1&map=cz-holasovice` needs no change in `apps/client/src/match/options.ts`: `OfflineMatch` reads `world.map` (POIs, spawns, nav grid) and `Game.ts` picks the map. If the play overlay should show the map name, `mapDefinition.name` is available at that point.
-- A match needs at least as many POIs with spawns as teams (`planTeamSpawns`). The real maps have 10–11 spawn groups with 2 spawns each; a 20-team solo match needs the match-size agent's spawn planner to share POIs.
+- `?bots=1&map=vn-hangxanh` needs no change in `apps/client/src/match/options.ts`: `OfflineMatch` reads `world.map` (POIs, spawns, nav grid) and `Game.ts` picks the map. If the play overlay should show the map name, `mapDefinition.name` is available at that point.
+- A match needs at least as many POIs with spawns as teams (`planTeamSpawns`). The real maps have 7 spawn groups with 2 spawns each; a 20-team solo match shares POIs through the spawn planner (`TEAM_SPAWN_STACK` 25 m).
 - The benchmark (`?bench=v1`) stays Map v1 only.
 
 ## Map picker

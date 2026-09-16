@@ -8,8 +8,8 @@ import type { Vec2Tuple } from "../../types";
 import { centroid, minAreaRect, type MinRect } from "./geometry";
 import type { AreaFeature, OsmTags, PointFeature, Polygon } from "./types";
 
-/** Buildings stay this far inside the playable edge (the border foothills start 40 m in), m. */
-export const BUILDING_EDGE = 445;
+/** Buildings stay this far inside the playable edge (the border foothills start 20 m in), m. */
+export const BUILDING_EDGE = 225;
 /** Gap between a building's outline and a road or creek edge, m (validation needs 1). */
 export const ROAD_GAP = 1.6;
 /** Gap between building outlines, m (validation needs 1; pads need a little more). */

@@ -45,5 +45,5 @@
 ## Alternatives considered
 
 - **Send everyone always.** Simplest; full ESP exposure. Rejected for competitive play after M4.
-- **Distance-only culling.** Weak on a 1 km map with long sightlines and buildings. Rejected.
+- **Distance-only culling.** Weak on a 1 km map with long sightlines and buildings. Rejected. *Superseded on 2026-09-16: the maps are now 500 × 500 m; the sightlines and the decision are unchanged.*
 - **Client-side audibility decisions.** Trusting the client with data it shouldn't have. Rejected.

@@ -20,7 +20,7 @@
 | Engineering | Allocation-free hot loops, no `Math.hypot`, stable hidden classes, fewer embind crossings, CI performance gates. [ADR 0305](adr/0305-performance-budgets-and-ci-gates.md) | `Math.hypot`: **15 ns + ~10 B per call vs 1.1 ns** for `sqrt`. The immutable `stepProjectiles` costs **12× the SoA version**. An embind crossing costs at least **123 ns** per call. |
 | Plan B | (1) Shared minimal capsule controller in `packages/sim` for client and server, (2) packed matches, (3) a Rust/Jolt **WASM** physics core used by client *and* server. Never a native addon. [ADR 0306](adr/0306-performance-migration-path.md) | Minimal controller: move phase **0.14 ms vs 0.27 ms** for 10 players |
 
-**Bottom line.** On Node, the simulation isn't the bottleneck at 10 players. A full authoritative tick with 1 km terrain, 300 buildings, 10 character controllers, 200 bone hitboxes and 50 projectiles costs under 0.6 ms. What decides cost is **process memory** (Babylon barrel imports), **real-time scheduling on shared cores**, **transport I/O** (not measured here) and **egress bandwidth**.
+**Bottom line.** On Node, the simulation isn't the bottleneck at 10 players. A full authoritative tick with the map terrain, 300 buildings, 10 character controllers, 200 bone hitboxes and 50 projectiles costs under 0.6 ms. What decides cost is **process memory** (Babylon barrel imports), **real-time scheduling on shared cores**, **transport I/O** (not measured here) and **egress bandwidth**.
 
 ---
 
@@ -83,7 +83,7 @@ Machine: **Apple M2 Pro** (`machdep.cpu.brand_string`), `hw.ncpu` = 10 (6 perfor
 
 Scenario (`lib/scenario.ts`), identical in every mode:
 
-- **Terrain:** 1×1 km rolling terrain, `PhysicsShapeHeightField` with 513×513 samples (1.95 m spacing, ±20 m relief).
+- **Terrain:** 500 × 500 m rolling terrain (`mapSize` 500 since 2026-09-16; the numbers below were measured at 1000), `PhysicsShapeHeightField` with 513×513 samples (0.98 m spacing, ±20 m relief).
 - **Buildings:** 300 static blocks placed through `LevelBlock` in 4 towns plus scattered ones: houses, walls, 0.15–0.30 m steps, and 10% wedge ramps as convex hulls.
 - **Players:** 10 players with scripted random inputs: walk/sprint/strafe/crouch, jumps, 30% firing.
 - **Hitboxes:** 10 × **20 bone hitboxes** (spheres, boxes, capsules) as ANIMATED/kinematic trigger bodies, teleported every tick along a synthetic gait.

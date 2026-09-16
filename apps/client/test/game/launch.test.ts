@@ -8,12 +8,12 @@ const DEV: GameLaunch = { kind: "dev" };
 describe("game launch", () => {
   it("net launch: the match's endpoint, account, team and map, in DEV and production alike, whatever the URL says", () => {
     const exits: unknown[] = [];
-    const launch: GameLaunch = { kind: "net", wsUrl: "wss://play.example.com/gs/7400/m/m_1", accountId: "acc_1", teamId: 2, mapId: "vn-camthanh", matchId: "m_1", tokens, onExit: (e) => exits.push(e) };
+    const launch: GameLaunch = { kind: "net", wsUrl: "wss://play.example.com/gs/7400/m/m_1", accountId: "acc_1", teamId: 2, mapId: "vn-hangxanh", matchId: "m_1", tokens, onExit: (e) => exits.push(e) };
     for (const dev of [true, false]) {
       const resolved = resolveLaunch(launch, "?bots=1&map=v1&bench=v1&net=ws://other", dev, readOfflineMatchOptions);
       expect(resolved.practice).toBeNull();
       expect(resolved.benchmark).toBeNull();
-      expect(resolved.mapId).toBe("vn-camthanh");
+      expect(resolved.mapId).toBe("vn-hangxanh");
       expect(resolved.net).toMatchObject({ sub: "acc_1", team: 2, matchId: "m_1", avatar: "soldier", debugHitboxes: false, zoneTimeScale: 1 });
       expect(resolved.net!.endpoint.wsUrl).toBe("wss://play.example.com/gs/7400/m/m_1");
       expect(resolved.net!.tokens).toBe(tokens);
@@ -23,9 +23,9 @@ describe("game launch", () => {
   });
 
   it("practice launch: bots on its map (Map v1 by default) in production", () => {
-    const options = readOfflineMatchOptions("?bots=1&players=16&mode=squad&difficulty=hard&map=cz-holasovice", false);
-    const resolved = resolveLaunch({ kind: "practice", options, mapId: "cz-holasovice" }, "", false, readOfflineMatchOptions);
-    expect(resolved).toMatchObject({ net: null, mapId: "cz-holasovice", benchmark: null });
+    const options = readOfflineMatchOptions("?bots=1&players=16&mode=squad&difficulty=hard&map=vn-hangxanh", false);
+    const resolved = resolveLaunch({ kind: "practice", options, mapId: "vn-hangxanh" }, "", false, readOfflineMatchOptions);
+    expect(resolved).toMatchObject({ net: null, mapId: "vn-hangxanh", benchmark: null });
     expect(resolved.practice).toMatchObject({ enabled: true, maxPlayers: 16, teamMode: "squad", difficulty: "hard" });
     expect(resolveLaunch({ kind: "practice", options, mapId: "" }, "", false, readOfflineMatchOptions).mapId).toBe("v1");
   });
@@ -36,12 +36,12 @@ describe("game launch", () => {
 
   it("DEV flags: bench implies v1, bots implies v1 unless map is set, net runs its map (arena by default)", () => {
     expect(resolveLaunch(DEV, "", true, readOfflineMatchOptions)).toEqual({ net: null, practice: null, mapId: null, benchmark: null });
-    expect(resolveLaunch(DEV, "?map=jp-shirakawago", true, readOfflineMatchOptions)).toMatchObject({ net: null, practice: null, mapId: "jp-shirakawago" });
+    expect(resolveLaunch(DEV, "?map=vn-phandangluu", true, readOfflineMatchOptions)).toMatchObject({ net: null, practice: null, mapId: "vn-phandangluu" });
     expect(resolveLaunch(DEV, "?bench=v1&bots=1&net=ws://x", true, readOfflineMatchOptions)).toMatchObject({ net: null, practice: null, mapId: "v1", benchmark: "v1" });
     const bots = resolveLaunch(DEV, "?bots=1&difficulty=easy", true, readOfflineMatchOptions);
     expect(bots.mapId).toBe("v1");
     expect(bots.practice).toMatchObject({ enabled: true, difficulty: "easy" });
-    expect(resolveLaunch(DEV, "?bots=1&map=vn-camthanh", true, readOfflineMatchOptions).mapId).toBe("vn-camthanh");
+    expect(resolveLaunch(DEV, "?bots=1&map=vn-hangxanh", true, readOfflineMatchOptions).mapId).toBe("vn-hangxanh");
     const net = resolveLaunch(DEV, "?net=ws://localhost:7350&team=1&netId=alice&bots=1", true, readOfflineMatchOptions);
     expect(net).toMatchObject({ practice: null, mapId: null, benchmark: null });
     expect(net.net).toMatchObject({ sub: "alice", team: 1, tokens: null });

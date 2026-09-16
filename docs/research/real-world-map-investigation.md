@@ -4,6 +4,8 @@ Investigation only (2026-09-15). Nothing is implemented; waiting on the user's d
 
 Repo untouched by this investigation; probe scripts and cached OSM/DEM data stayed in a temporary scratchpad.
 
+> **Outcome (2026-09-16).** Only the two Saigon city maps shipped: Ngã Tư Hàng Xanh (`vn-hangxanh`) and Phú Nhuận (`vn-phandangluu`). Holašovice, Shirakawa-gō and Hội An – Cẩm Thanh were generated and then removed when the playable square shrank from 1×1 km to 500 × 500 m. The survey below is kept as it was: the squares it measures are 1 km, and the candidate list is still the place to start from when adding a map. See [`docs/map/real-world.md`](../map/real-world.md) for what the pipeline does today.
+
 **1. Data sources and licenses**
 - **Google Maps: not usable.** Its Platform Terms forbid scraping, caching, making new content from Google Maps data, and using it with non-Google maps. A map built from it breaks all of these.
 - **OpenStreetMap via Overpass (ODbL 1.0):** use this.

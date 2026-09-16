@@ -42,7 +42,7 @@ Start with [`STATUS.md`](STATUS.md) for the roadmap and what's in progress, then
 pnpm install
 pnpm dev                      # http://localhost:5173
 ```
-- `/` is the arena with the soldier target range; `?map=v1` is the full 1×1 km map.
+- `/` is the arena with the soldier target range; `?map=v1` is the full 500 × 500 m map.
 - `/buildings.html` previews building prefabs; `/props.html` previews the cover props and big trees (DEV only, see below).
 - Controls: WASD, mouse, Space jump, Shift sprint, C crouch, LMB fire, RMB aim, R reload (cook while a pin is pulled), 1–3 or wheel weapons, 5 throwable, G cycle throwable, F pick up (hold: revive), Tab inventory, X holster, 7/8/9/0 bandage/first aid/medkit/boost, Esc release mouse.
 - Debug keys: F3 stats, F4 perf, F6 net panel (with `?net`), F7 bot debug overlay (with `&botDebug=1`), F8 physics shapes, F9 inspector. While spectating in a bot match: `[` / `]` cycle players, Enter reopens the death or result screen.

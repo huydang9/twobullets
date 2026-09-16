@@ -8,7 +8,7 @@ import type { LineFeature } from "./types";
 /** Label rank by OSM highway class; other named road classes rank 3. */
 const RANKS: Readonly<Record<string, 0 | 1 | 2>> = { trunk: 0, primary: 0, secondary: 1, tertiary: 2 };
 /** Shortest merged length inside the map that earns a label, by rank, m: big roads always, others when long. */
-export const ROAD_LABEL_MIN_LENGTH = [100, 100, 200, 300] as const;
+export const ROAD_LABEL_MIN_LENGTH = [60, 60, 120, 180] as const;
 /** Label lines are simplified to this, m (they only place text). */
 const SIMPLIFY = 2;
 /** Alleys ("Hẻm 181/7 …", "Ngõ 12") and anything carrying a house number never label the map. */

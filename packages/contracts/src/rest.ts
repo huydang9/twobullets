@@ -79,7 +79,7 @@ export interface LocalizedText {
 }
 
 export interface MapInfo {
-  /** `v1` (Map v1), `arena`, or `<countryCode>-<place>` for real-world maps (e.g. `cz-holasovice`). */
+  /** `v1` (Map v1), `arena`, or `<countryCode>-<place>` for real-world maps (e.g. `vn-hangxanh`). */
   readonly id: string;
   readonly name: LocalizedText;
   /** Side length in metres. */

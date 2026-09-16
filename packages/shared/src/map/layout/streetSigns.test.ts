@@ -8,7 +8,7 @@ type SignMap = Pick<MapData, "flatten" | "roadLabels" | "landmarks" | "terrain">
 
 function testMap(roads: { name: string; width: number; points: Vec2Tuple[]; rank?: RoadLabel["rank"] }[], landmarks: MapData["landmarks"] = undefined): SignMap {
   return {
-    terrain: { playableHalfExtent: 500 } as TerrainSpec,
+    terrain: { playableHalfExtent: 250 } as TerrainSpec,
     flatten: roads.map((r, i) => roadFlatten({ id: `road_${i}`, kind: "asphalt", straight: true, width: r.width, points: r.points })),
     roadLabels: roads.map((r) => ({ name: r.name, rank: r.rank ?? 0, length: Math.round(distance(r.points[0]![0], r.points[0]![1], r.points[1]![0], r.points[1]![1])), lines: [r.points] })),
     ...(landmarks ? { landmarks } : {}),
@@ -61,10 +61,10 @@ describe("street signs", () => {
   });
 
   it("spaces street signs along long roads and keeps one road's signs apart", () => {
-    const map = testMap([{ name: "Nguyễn Kiệm", width: 7.5, points: [[-450, 30], [450, 30]] }]);
+    const map = testMap([{ name: "Nguyễn Kiệm", width: 7.5, points: [[-240, 30], [240, 30]] }]);
     const signs = planStreetSigns(map, []);
     expect(signs.every((s) => s.kind === "street")).toBe(true);
-    expect(signs.length).toBe(Math.floor(900 / STREET_SIGN.spacing));
+    expect(signs.length).toBe(Math.floor(480 / STREET_SIGN.spacing));
     const xs = signs.map((s) => s.position[0]).sort((a, b) => a - b);
     for (let i = 1; i < xs.length; i++) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(STREET_SIGN.sameNameGap);
     // Alternating sides of the street.

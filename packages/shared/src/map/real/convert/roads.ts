@@ -4,8 +4,8 @@ import type { FlattenRegion, Vec2Tuple } from "../../types";
 import { clipPolylineToSquare, simplifyPolyline } from "./geometry";
 import type { LineFeature, OsmTags } from "./types";
 
-/** Roads stop this far inside the playable edge, m (the border foothills start 40 m in). */
-export const ROAD_CLIP = 492;
+/** Roads stop this far inside the playable edge, m (the border foothills start 20 m in). */
+export const ROAD_CLIP = 244;
 
 interface RoadClass {
   readonly kind: RoadKind;

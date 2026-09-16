@@ -66,13 +66,13 @@ describe("loot generation", () => {
     expect(new Set(layout.items.map((i) => i.lootId)).size).toBe(layout.items.length);
   });
 
-  it("gives every building loot, nearly every pile a gun, and plenty for 20 players on a 1 km map", () => {
+  it("gives every building loot, nearly every pile a gun, and plenty for 20 players on the 500 m map", () => {
     const withLoot = new Set(layout.piles.map((p) => p.buildingId));
     expect(withLoot.size).toBe(buildings.filter((b) => isBuildingPrefabId(b.prefab) && b.prefab !== "container_closed").length);
-    expect(layout.piles.length).toBeGreaterThan(1000);
-    expect(layout.piles.length).toBeLessThan(1400);
-    expect(layout.items.length).toBeGreaterThan(2300);
-    expect(layout.items.length).toBeLessThan(2900);
+    expect(layout.piles.length).toBeGreaterThan(820);
+    expect(layout.piles.length).toBeLessThan(1000);
+    expect(layout.items.length).toBeGreaterThan(1900);
+    expect(layout.items.length).toBeLessThan(2300);
     for (const pile of layout.piles) {
       expect(pile.items.length).toBeGreaterThanOrEqual(1);
       expect(pile.items.length).toBeLessThanOrEqual(LOOT.maxItemsPerPile + 1);
@@ -83,27 +83,27 @@ describe("loot generation", () => {
     const armed = rolled.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "weapon"));
     expect(armed.length / rolled.length).toBeGreaterThan(0.85);
     const counts = categoryCounts(layout);
-    expect(counts.weapon).toBeGreaterThanOrEqual(450);
+    expect(counts.weapon).toBeGreaterThanOrEqual(380);
     expect(counts.ammo).toBeGreaterThanOrEqual(counts.weapon!);
-    expect(counts.heal).toBeGreaterThanOrEqual(330);
-    expect(counts.throwable).toBeGreaterThanOrEqual(400);
-    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(340);
-    expect(counts.backpack).toBeGreaterThanOrEqual(150);
+    expect(counts.heal).toBeGreaterThanOrEqual(280);
+    expect(counts.throwable).toBeGreaterThanOrEqual(320);
+    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(280);
+    expect(counts.backpack).toBeGreaterThanOrEqual(130);
     // Heals and gear are findable: a medkit in every few buildings, armor of every level (table v4).
     const ids = itemCounts(layout);
-    expect(ids.medkit).toBeGreaterThanOrEqual(65);
-    expect(ids.first_aid).toBeGreaterThanOrEqual(110);
-    expect(ids.bandage).toBeGreaterThanOrEqual(140);
+    expect(ids.medkit).toBeGreaterThanOrEqual(50);
+    expect(ids.first_aid).toBeGreaterThanOrEqual(90);
+    expect(ids.bandage).toBeGreaterThanOrEqual(115);
     // Throwables are findable too (table v5): frag and smoke carry the category, molotov stays the rarest.
     expect(ids.frag).toBeGreaterThan(ids.smoke!);
     expect(ids.smoke).toBeGreaterThan(ids.flash!);
     expect(ids.flash).toBeGreaterThan(ids.molotov!);
-    expect(ids.frag).toBeGreaterThanOrEqual(170);
-    expect(ids.smoke).toBeGreaterThanOrEqual(150);
+    expect(ids.frag).toBeGreaterThanOrEqual(135);
+    expect(ids.smoke).toBeGreaterThanOrEqual(120);
     for (const slot of ["helmet", "vest", "backpack"] as const) {
-      expect(ids[`${slot}_1`], `${slot}_1`).toBeGreaterThanOrEqual(80);
-      expect(ids[`${slot}_2`], `${slot}_2`).toBeGreaterThanOrEqual(40);
-      expect(ids[`${slot}_3`], `${slot}_3`).toBeGreaterThanOrEqual(12);
+      expect(ids[`${slot}_1`], `${slot}_1`).toBeGreaterThanOrEqual(60);
+      expect(ids[`${slot}_2`], `${slot}_2`).toBeGreaterThanOrEqual(32);
+      expect(ids[`${slot}_3`], `${slot}_3`).toBeGreaterThanOrEqual(10);
     }
     // Every building with loot spots holds at least one heal, and nearly every one a throwable (table v5).
     const holders = (match: (id: ItemId) => boolean) =>

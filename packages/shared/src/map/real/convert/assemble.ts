@@ -13,7 +13,7 @@ import type { FlattenRegion, MapData, MapLandmark, MapSpawn, PointOfInterest, Pr
 import { findBridges, type BridgeSite } from "./bridges";
 import { buildingCandidates, buildingId, DEFAULT_BUILDING_CAP, PlacementSpace, placeBuildings, placeLandmark, type PlacedBuilding, type PlacementReport } from "./buildings";
 import { isBuildingPrefabId } from "../../buildings/prefabs";
-import { realTerrainSpec, type ElevationReport } from "./elevation";
+import { REAL_TERRAIN, realTerrainSpec, type ElevationReport } from "./elevation";
 import { convertLanduse, insideAny, trimRoadsAtWater, waterEdges, waterPolygons, type LanduseReport } from "./landuse";
 import { buildWilderness, withWilderness, type Wilderness, type WildernessReport } from "./wilderness";
 import { buildingPads } from "./pads";
@@ -129,7 +129,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     if (name && isPoliticalName(name)) throw new Error(`${config.id}: "${name}" is a political name; pick a neutral map name (see convert/names.ts)`);
   }
   const projection = createProjection(config.lat, config.lon);
-  const parsed = parseOsm(input.osm, projection, 640);
+  const parsed = parseOsm(input.osm, projection, REAL_TERRAIN.size / 2);
   const { spec: baseSpec, report: elevation } = realTerrainSpec(config.seed ?? seedFromId(config.id), input.elevation, config.elevation);
 
   const urban = config.urban;

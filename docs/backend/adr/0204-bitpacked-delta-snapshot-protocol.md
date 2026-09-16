@@ -7,7 +7,7 @@
 
 ## Context
 
-- Per-tick state is small (10 players), mostly unchanged between snapshots, and made of bounded ranges (1 km map, angles, speeds ≤ 64 m/s).
+- Per-tick state is small (10 players), mostly unchanged between snapshots, and made of bounded ranges (1 km map, angles, speeds ≤ 64 m/s). *Superseded on 2026-09-16: the maps are now 500 × 500 m. The position ranges below keep their headroom and their bit widths are unchanged.*
 - Measured encodings of one full 10-player snapshot:
 
 | Encoding | Size | Encode time |

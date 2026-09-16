@@ -1,5 +1,5 @@
 /**
- * Full authoritative-tick benchmark for one match: 1×1 km heightfield, ~300 buildings, 10 players with character
+ * Full authoritative-tick benchmark for one match: 500 × 500 m heightfield, ~300 buildings, 10 players with character
  * controllers + step-up/ground-snap casts, 10×20 kinematic bone hitboxes, ~50 projectiles with segment raycasts,
  * weapons, and a world step, measured tick by tick (back-to-back, not wall-clock paced).
  *

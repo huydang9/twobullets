@@ -5,24 +5,29 @@ import type { ZoneCircle, ZonePhase, ZoneSpec, ZoneStage, ZoneState } from "./ty
 // Shrinking zone (docs/bots/design.md §8.2): a pure schedule of phases and `zoneAt(tick)`. The rules, HUD, bots and the
 // future networked client compute the same circle from the announced phases. No engine imports, no Math.random.
 
-/** Playable half extent the zone centers are clamped to, m (Map v1: 1 km square). */
-export const ZONE_PLAYABLE_HALF_EXTENT = 500;
+/** Playable half extent the zone centers are clamped to, m (the maps are a 500 m square). */
+export const ZONE_PLAYABLE_HALF_EXTENT = 250;
 
-/** Map v1 zone tuning (design.md §8.2 table, sped up 2026-09-15). The circle closes at 6:55 of combat. */
+/**
+ * Zone tuning (design.md §8.2 table, sped up 2026-09-15). The circle closes at 6:55 of combat.
+ *
+ * Every radius halved with the map on 2026-09-16: the initial circle still covers the playable square
+ * (250·√2 ≈ 354) and the pacing in time is unchanged.
+ */
 export const DEFAULT_ZONE_SPEC: ZoneSpec = {
-  initial: { cx: 0, cz: 0, r: 710 },
+  initial: { cx: 0, cz: 0, r: 355 },
   phases: [
-    { waitSeconds: 70, shrinkSeconds: 40, radius: 400, dps: 1 },
-    { waitSeconds: 35, shrinkSeconds: 30, radius: 250, dps: 2 },
-    { waitSeconds: 30, shrinkSeconds: 25, radius: 150, dps: 3 },
-    { waitSeconds: 25, shrinkSeconds: 20, radius: 90, dps: 5 },
-    { waitSeconds: 20, shrinkSeconds: 20, radius: 45, dps: 8 },
-    { waitSeconds: 20, shrinkSeconds: 15, radius: 20, dps: 12 },
+    { waitSeconds: 70, shrinkSeconds: 40, radius: 200, dps: 1 },
+    { waitSeconds: 35, shrinkSeconds: 30, radius: 125, dps: 2 },
+    { waitSeconds: 30, shrinkSeconds: 25, radius: 75, dps: 3 },
+    { waitSeconds: 25, shrinkSeconds: 20, radius: 45, dps: 5 },
+    { waitSeconds: 20, shrinkSeconds: 20, radius: 25, dps: 8 },
+    { waitSeconds: 20, shrinkSeconds: 15, radius: 12, dps: 12 },
     { waitSeconds: 20, shrinkSeconds: 15, radius: 0, dps: 20 },
   ],
   firstAnnounceSeconds: 30,
   damageIntervalTicks: 6,
-  edgeMargin: 40,
+  edgeMargin: 20,
 };
 
 /** Seconds before a shrink at which `zoneWarning` events fire. */

@@ -76,14 +76,14 @@ export const LOOK = {
 } as const;
 
 /**
- * View-distance tuning for the 1 km map (`?map=v1`), replacing the arena values in LOOK. Everything else in LOOK
- * applies unchanged.
+ * View-distance tuning for the outdoor maps (`?map=v1` and the real-world maps), replacing the arena values in LOOK.
+ * Everything else in LOOK applies unchanged.
  */
 export const LARGE_WORLD_LOOK = {
   /** EXP2 haze: ~4% at 200 m, ~26% at 500 m, ~70% at 1 km; the horizon mountains at 2–3 km fade out. */
   fogDensity: 0.0011,
-  /** Cascades cover 160 m; terrain doesn't cast (the sun is 48° up, so hills barely shadow anything). */
-  shadowDistance: 160,
+  /** Cascades cover 110 m; terrain doesn't cast (the sun is 48° up, so hills barely shadow anything). */
+  shadowDistance: 110,
   shadowLambda: 0.9,
 } as const;
 

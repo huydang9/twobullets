@@ -146,16 +146,16 @@ console.table(upperResults);
 log("\n== Random queries ==");
 function randomWalkable(k: number): { x: number; y: number; z: number } | null {
   for (let attempt = 0; attempt < 50; attempt++) {
-    const x = -480 + (hash32(Number(args.seed), k, attempt) / 4294967296) * 960;
-    const z = -480 + (hash32(Number(args.seed), k, attempt + 1000) / 4294967296) * 960;
+    const x = -240 + (hash32(Number(args.seed), k, attempt) / 4294967296) * 480;
+    const z = -240 + (hash32(Number(args.seed), k, attempt + 1000) / 4294967296) * 480;
     const ref = query.nearest({ x, y: terrain.sampleHeight(x, z), z }, 3, scratch);
     if (ref >= 0 && data.componentOf(ref) === data.layout.mainComponent) return { ...scratch };
   }
   return null;
 }
 const bands = [
-  { name: "short 20-150 m", min: 20, max: 150 },
-  { name: "long 150-800 m", min: 150, max: 800 },
+  { name: "short 20-100 m", min: 20, max: 100 },
+  { name: "long 100-450 m", min: 100, max: 450 },
 ];
 const report: Record<string, unknown> = {};
 for (const band of bands) {

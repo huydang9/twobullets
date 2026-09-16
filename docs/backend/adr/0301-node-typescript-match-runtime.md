@@ -13,7 +13,7 @@
 - The product owner wants many cheap concurrent matches with a stable tick.
 - Candidates: Node + TS, Bun, a Rust or Go port, or a hybrid with a native core.
 - Measured on an M2 Pro with Node 24.19:
-  - **Full 10-player tick:** 0.38 ms p50 with direct Havok, 0.57 ms p50 on the Babylon `CharacterBody` path (the scenario includes 1 km terrain, 300 buildings, 200 hitbox bodies and 50 projectiles). That is 2–4% of a 16.67 ms tick.
+  - **Full 10-player tick:** 0.38 ms p50 with direct Havok, 0.57 ms p50 on the Babylon `CharacterBody` path (the scenario includes 1 km terrain, 300 buildings, 200 hitbox bodies and 50 projectiles; superseded on 2026-09-16: the maps are now 500 × 500 m and the bench scenario's `mapSize` with them, which only lowers the cost). That is 2–4% of a 16.67 ms tick.
   - **Pure shared code:** < 2 µs per tick for 10 players.
   - **Bun:** runs the same code about 13% faster.
   - **Determinism:** simulation results are identical across processes on the same engine but diverge between V8 and JavaScriptCore.

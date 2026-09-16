@@ -17,8 +17,8 @@ describe("menu entry and launch URLs", () => {
   });
 
   it("offline practice reloads with the flags the offline match reads", () => {
-    const search = practiceSearch("?lang=en&foo=1", { difficulty: "hard", mode: "squad", players: 16, mapId: "cz-holasovice" });
-    expect(search).toBe("?bots=1&players=16&mode=squad&difficulty=hard&map=cz-holasovice&lang=en");
+    const search = practiceSearch("?lang=en&foo=1", { difficulty: "hard", mode: "squad", players: 16, mapId: "vn-hangxanh" });
+    expect(search).toBe("?bots=1&players=16&mode=squad&difficulty=hard&map=vn-hangxanh&lang=en");
     const options = readOfflineMatchOptions(search, true);
     expect(options).toMatchObject({ enabled: true, difficulty: "hard", teamMode: "squad", maxPlayers: 16, teams: 4 });
   });
@@ -61,9 +61,9 @@ describe("menu validation", () => {
 
 describe("menu data", () => {
   it("marks maps the server can't run as unavailable", () => {
-    const all = [{ id: "v1" }, { id: "cz-holasovice" }, { id: "vn-camthanh" }];
-    expect([...unavailableNetworkMaps(catalog, all)].sort()).toEqual(["cz-holasovice", "vn-camthanh"]);
-    expect([...unavailableNetworkMaps(null, all)].sort()).toEqual(["cz-holasovice", "vn-camthanh"]);
+    const all = [{ id: "v1" }, { id: "vn-hangxanh" }, { id: "vn-phandangluu" }];
+    expect([...unavailableNetworkMaps(catalog, all)].sort()).toEqual(["vn-hangxanh", "vn-phandangluu"]);
+    expect([...unavailableNetworkMaps(null, all)].sort()).toEqual(["vn-hangxanh", "vn-phandangluu"]);
   });
 
   it("parses stored preferences defensively", () => {

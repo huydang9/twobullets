@@ -1,6 +1,7 @@
 import { clampMaxPlayers, DEFAULT_MATCH_PLAYERS, DEFAULT_TEAM_MODE, TEAM_MODES, type TeamMode } from "@twobullets/contracts/match";
 import type { BotDifficulty } from "@twobullets/shared";
 import { browserStorage, type KeyValueStorage } from "../platform/SessionStore";
+import { isMapId } from "../world/mapRuntime/maps";
 
 // Last choices on the menu (quick play, new lobbies, offline practice), so the next visit starts from them.
 
@@ -41,7 +42,10 @@ export function parsePreferences(raw: string | null): MenuPreferences {
   }
   const mode = (value: unknown, fallback: TeamMode): TeamMode => (TEAM_MODES.includes(value as TeamMode) ? (value as TeamMode) : fallback);
   const players = (value: unknown, fallback: number): number => (typeof value === "number" ? clampMaxPlayers(value) : fallback);
-  const id = (value: unknown, fallback: string): string => (typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value) ? value : fallback);
+  // A saved id of a map that no longer exists (a removed real-world map) falls back to Map v1 rather than dropping the
+  // player into the blockout arena.
+  const id = (value: unknown, fallback: string): string =>
+    typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value) && (value === "arena" || isMapId(value)) ? value : fallback;
   const d = DEFAULT_PREFERENCES;
   return {
     mode: mode(saved.mode, d.mode),

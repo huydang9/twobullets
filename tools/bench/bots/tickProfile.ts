@@ -353,10 +353,10 @@ async function benchWorldStep(): Promise<Record<string, number>> {
     await import("@babylonjs/core/Meshes/thinInstanceMesh.js");
     const matrices = new Float32Array(extraStatics * 16);
     const bounds = loaded.map.bounds as unknown as { minX?: number; maxX?: number; minZ?: number; maxZ?: number };
-    const size = (bounds.maxX ?? 500) - (bounds.minX ?? -500);
+    const size = (bounds.maxX ?? 250) - (bounds.minX ?? -250);
     for (let i = 0; i < extraStatics; i++) {
-      const x = (bounds.minX ?? -500) + ((i * 7919) % 1000) / 1000 * size;
-      const z = (bounds.minZ ?? -500) + ((i * 104729) % 997) / 997 * size;
+      const x = (bounds.minX ?? -250) + ((i * 7919) % 1000) / 1000 * size;
+      const z = (bounds.minZ ?? -250) + ((i * 104729) % 997) / 997 * size;
       const o = i * 16;
       matrices[o] = matrices[o + 5] = matrices[o + 10] = matrices[o + 15] = 1;
       matrices[o + 12] = x;

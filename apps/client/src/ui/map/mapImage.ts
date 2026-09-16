@@ -1,10 +1,10 @@
 import { INSTANCE_STRIDE, getMapProp, mapPaths, rectCorners } from "@twobullets/shared";
 import type { MapWorldData } from "./types";
 
-/** Side of the cached map image, px. It covers exactly the playable square, north up. */
-export const MAP_IMAGE_SIZE = 2048;
+/** Side of the cached map image, px. It covers exactly the playable square (500 m), north up: ~2 px per meter. */
+export const MAP_IMAGE_SIZE = 1024;
 /** Terrain colour is computed at this resolution (≈1 m per pixel, the heightfield is 1.25 m) and upscaled. */
-const TERRAIN_RESOLUTION = 1024;
+const TERRAIN_RESOLUTION = 512;
 /** Longest the generator runs before yielding to the frame loop, ms. */
 const SLICE_MS = 8;
 

@@ -135,21 +135,21 @@ describe("server bots", () => {
     await h.dispose();
   }, 300_000);
 
-  it("vn-camthanh (real map): allocate from its bake with a nav grid, then a short duo bot match with fillWithBots", async () => {
-    const level = await resolveServerLevel("vn-camthanh");
-    expect(level).toMatchObject({ mapId: "vn-camthanh", source: "bake" });
+  it("vn-hangxanh (real map): allocate from its bake with a nav grid, then a short duo bot match with fillWithBots", async () => {
+    const level = await resolveServerLevel("vn-hangxanh");
+    expect(level).toMatchObject({ mapId: "vn-hangxanh", source: "bake" });
     const h = await createHarness(havok, {
       level,
       maxPlayers: 6,
       teamMode: "duo",
       // One rostered bot; the two empty slots of team 2 are filled when warmup ends.
-      configure: (c) => ({ ...c, mapId: "vn-camthanh", teams: [{ teamId: 0, accountIds: ["human", "bot:0"] }, { teamId: 1, accountIds: ["bot:1", "bot:2"] }], botDifficulty: "easy" }),
+      configure: (c) => ({ ...c, mapId: "vn-hangxanh", teams: [{ teamId: 0, accountIds: ["human", "bot:0"] }, { teamId: 1, accountIds: ["bot:1", "bot:2"] }], botDifficulty: "easy" }),
       lifecycle: { warmupSeconds: 30, allJoinedSeconds: 0.3, timeScale: 0.05, endLingerSeconds: 0.3 },
     });
     const match = h.match;
     expect(match.navInfo?.kind).toBe("grid");
     expect(match.bots!.count).toBe(3);
-    console.log(`[bots] vn-camthanh: map load ${level.loadMs.toFixed(0)} ms, nav ${match.navInfo!.buildMs.toFixed(0)} ms`);
+    console.log(`[bots] vn-hangxanh: map load ${level.loadMs.toFixed(0)} ms, nav ${match.navInfo!.buildMs.toFixed(0)} ms`);
     const human = h.connect({ token: h.token({ sub: "human", team: 0 }) });
     stand(human);
     expect(runUntil(h, () => match.lifecycle!.phase === "Combat", 5000)).toBe(true);

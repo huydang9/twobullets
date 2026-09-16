@@ -33,14 +33,14 @@ export function pickSpawns(
   pois.forEach((poi, index) => {
     const mine: Vec2Tuple[] = [];
     const start = (index * 47) % 360;
-    for (const extra of [14, 24, 36, 50, 66]) {
+    for (const extra of [12, 20, 30, 42, 56]) {
       for (let step = 0; step < 16 && mine.length < SPAWNS_PER_POI; step++) {
         const degrees = start + step * 22.5;
         const a = (degrees * Math.PI) / 180;
         const r = poi.radius + extra;
         const x = round3(poi.center[0] + Math.cos(a) * r);
         const z = round3(poi.center[1] + Math.sin(a) * r);
-        if (Math.abs(x) > half - 30 || Math.abs(z) > half - 30) continue;
+        if (Math.abs(x) > half - 24 || Math.abs(z) > half - 24) continue;
         if (blocked.has(spawnKey(x, z)) || isolated(x, z)) continue;
         if (nearestPoi(pois, x, z) !== poi) continue;
         if (terrain.slopeTanAt(x, z) > MAX_SLOPE_TAN) continue;
@@ -48,8 +48,8 @@ export function pickSpawns(
         if (space.nearestPath(x, z, 4) !== null) continue;
         if (space.insideWater(x, z) || !space.clearOfWater({ center: [x, z], halfExtents: [0.5, 0.5], yaw: 0 }, 6)) continue;
         if (collidable.some((p) => distance(x, z, p.position[0], p.position[2]) < 4)) continue;
-        if (mine.some(([sx, sz]) => distance(x, z, sx, sz) < 30)) continue;
-        if (spawns.some((s) => distance(x, z, s.position[0], s.position[1]) < 20)) continue;
+        if (mine.some(([sx, sz]) => distance(x, z, sx, sz) < 24)) continue;
+        if (spawns.some((s) => distance(x, z, s.position[0], s.position[1]) < 16)) continue;
         mine.push([x, z]);
       }
       if (mine.length >= SPAWNS_PER_POI) break;

@@ -40,11 +40,11 @@ const grid: NavGrid = {
     cellSize: 0.5,
     buildingCellSize: 0.25,
     coarseCellSize: 4,
-    originX: -500,
-    originZ: -500,
+    originX: -250,
+    originZ: -250,
     width: 2000,
     depth: 2000,
-    terrainNodes: 4_000_000,
+    terrainNodes: 1_000_000,
     buildingNodes: 0,
     components: 1,
     byteLength: 0,
@@ -112,7 +112,7 @@ const createStubBrain: BotBrainFactory = (options) => {
   return brain;
 };
 
-const zone: ZoneState = { phaseIndex: 0, stage: "idle", current: { cx: 0, cz: 0, r: 710 }, next: null, dps: 0, ticksToChange: 0, phase: null };
+const zone: ZoneState = { phaseIndex: 0, stage: "idle", current: { cx: 0, cz: 0, r: 355 }, next: null, dps: 0, ticksToChange: 0, phase: null };
 
 const actors: ActorConfig[] = Array.from({ length: 10 }, (_, slot) => ({
   slot,

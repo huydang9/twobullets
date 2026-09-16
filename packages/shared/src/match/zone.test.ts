@@ -26,7 +26,7 @@ describe("zone schedule", () => {
     // Table: phase 1 announced 0:30, shrink 1:40–2:20; phase 3 shrink 3:55–4:20.
     expect([phases[0]!.waitStartTick, phases[0]!.shrinkStartTick, phases[0]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([30, 100, 140]);
     expect([phases[2]!.shrinkStartTick, phases[2]!.shrinkEndTick].map((t) => (t - START) / 60)).toEqual([235, 260]);
-    expect(phases.map((p) => p.to.r)).toEqual([400, 250, 150, 90, 45, 20, 0]);
+    expect(phases.map((p) => p.to.r)).toEqual([200, 125, 75, 45, 25, 12, 0]);
     expect(phases.map((p) => p.dps)).toEqual([1, 2, 3, 5, 8, 12, 20]);
   });
 

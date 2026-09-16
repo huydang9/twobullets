@@ -77,7 +77,7 @@ export interface TestWorldOptions {
   readonly zone?: ZoneState;
 }
 
-export const OPEN_ZONE: ZoneState = { phaseIndex: 0, stage: "idle", current: { cx: 0, cz: 0, r: 710 }, next: null, dps: 0, ticksToChange: 0, phase: null };
+export const OPEN_ZONE: ZoneState = { phaseIndex: 0, stage: "idle", current: { cx: 0, cz: 0, r: 355 }, next: null, dps: 0, ticksToChange: 0, phase: null };
 
 export function eyeHeightFor(stance: Stance): number {
   return stance === "prone" ? MOVEMENT.proneEyeHeight : stance === "crouch" ? MOVEMENT.crouchEyeHeight : MOVEMENT.standEyeHeight;

@@ -10,7 +10,7 @@ import { mapPaths } from "./roads";
 
 /**
  * A coverage/density field on a regular grid, row-major from `origin` (the south-west sample). `values` holds one
- * digit "0".."9" per cell, so a 10 m grid over a 1 km map is a readable ~17 KB string in a generated module instead of
+ * digit "0".."9" per cell, so a 10 m grid over a 500 m map is a readable ~4 KB string in a generated module instead of
  * 17 000 numbers. Sampled bilinearly; outside the grid the edge samples extend.
  */
 export interface WeightGrid {

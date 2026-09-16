@@ -29,7 +29,7 @@ import { MapSpawns, type Respawnable } from "./MapSpawns";
 import { OutOfBounds } from "./OutOfBounds";
 import { createTrainingYard, type TrainingYardPlacement } from "./trainingYard";
 
-/** Camera far plane for 1 km views plus the horizon mountains, m. */
+/** Camera far plane for the outdoor maps plus the horizon mountains, m. */
 export const MAP_FAR_PLANE = 4000;
 
 /** Load options; spread a `MapDefinition` (maps.ts) into them: `{ ...definition, overlay }`. */

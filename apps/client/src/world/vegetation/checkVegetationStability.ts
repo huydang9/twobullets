@@ -79,10 +79,10 @@ function at(x: number, z: number): Frame {
 const PATHS: readonly { readonly name: string; readonly frames: Frame[] }[] = [
   {
     name: "forest walk (town → west road → cabins → loop)",
-    frames: polyline([[-80, 20], [-130, 12], [-175, 2], [-235, -45], [-300, -68], [-324, -98], [-334, -112], [-380, -140], [-420, -110], [-380, -80], [-334, -112]], WALK),
+    frames: polyline([[-80, 20], [-100, 50], [-108, 84], [-124, 118], [-150, 157], [-174, 127], [-184, 113], [-215, 96], [-228, 130], [-200, 152], [-184, 113]], WALK),
   },
-  { name: "forest sprint loop (r 45 m around the cabins)", frames: polyline(Array.from({ length: 33 }, (_, k) => [-340 + 45 * Math.cos(k / 5), -120 + 45 * Math.sin(k / 5)] as const), SPRINT) },
-  { name: "forest strafe (A/D ±2 m, 20 s)", frames: strafe(-385, -150, 2, 1.2, 20) },
+  { name: "forest sprint loop (r 45 m around the cabins)", frames: polyline(Array.from({ length: 33 }, (_, k) => [-190 + 45 * Math.cos(k / 5), 105 + 45 * Math.sin(k / 5)] as const), SPRINT) },
+  { name: "forest strafe (A/D ±2 m, 20 s)", frames: strafe(-218, 152, 2, 1.2, 20) },
   { name: "town walk (main street, cross street)", frames: polyline([[-90, 20], [60, 20], [0, 20], [0, -50], [0, 90]], WALK) },
 ];
 
@@ -466,10 +466,10 @@ function runShipped(frames: readonly Frame[], flags: { hysteresis: boolean; cros
   // Cover never culls inside the map, from any corner or edge, unzoomed.
   const covers = new Set(probe.lodCellProps.filter((prop) => isCover(getMapProp(prop))));
   check(["wall_concrete", "fence_chainlink", "rock_boulder_b", "car_covered", "tree_fir_a"].every((prop) => covers.has(prop)) && !covers.has("bush_a") && !covers.has("rock_small"), `cover set: ${[...covers].join(", ")}`);
-  const { minX, minZ, maxX, maxZ } = { minX: -500, minZ: -500, maxX: 500, maxZ: 500 };
+  const { minX, minZ, maxX, maxZ } = { minX: -250, minZ: -250, maxX: 250, maxZ: 250 };
   let checked = 0;
   for (const [x, z] of [[minX, minZ], [maxX, maxZ], [minX, maxZ], [maxX, minZ], [0, minZ], [0, 0]] as const) {
-    position.set(x, terrain.sampleHeight(Math.max(-499, Math.min(499, x)), Math.max(-499, Math.min(499, z))) + EYE, z);
+    position.set(x, terrain.sampleHeight(Math.max(-249, Math.min(249, x)), Math.max(-249, Math.min(249, z))) + EYE, z);
     probe.update(position, true, 1000 + checked);
     probe.lodCells.forEach((lod, c) => {
       if (!covers.has(probe.lodCellProps[c]!)) return;

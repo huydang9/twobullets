@@ -3,8 +3,8 @@ import { MapProjection, drawMapImage, drawRunLine, drawTeammates, drawViewer, dr
 import type { MapImage } from "./mapImage";
 import type { MapFrameData } from "./MapScreen";
 
-/** Visible world side of the minimap, m. */
-const MINIMAP_SPAN = 260;
+/** Visible world side of the minimap, m (a bit over a third of the 500 m square). */
+const MINIMAP_SPAN = 180;
 
 /** Small north-up minimap, bottom right, centred on the viewer: same image, zone and markers as the big map. */
 export class Minimap {

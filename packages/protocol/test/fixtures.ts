@@ -46,7 +46,7 @@ interface SimPlayer {
   flags: number;
 }
 
-/** Ten players strafing, sprinting and jumping on a 1 km map; quantized per recipient 0 like the snapshot builder. */
+/** Ten players strafing, sprinting and jumping on a 500 m map; quantized per recipient 0 like the snapshot builder. */
 export class SnapshotWorld {
   readonly players: SimPlayer[] = [];
   tick = 1000;

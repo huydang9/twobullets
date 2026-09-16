@@ -86,9 +86,9 @@ export interface TerrainSpec {
   readonly seed: number;
   /** Side of the square heightfield (playable area + border), m. */
   readonly size: number;
-  /** Samples per side. Use 2^k + 1 so chunks and physics downsampling line up (1025 → 1.25 m spacing at 1280 m). */
+  /** Samples per side. Use 2^k + 1 so chunks and physics downsampling line up (513 → 1.25 m spacing at 640 m). */
   readonly resolution: number;
-  /** Half size of the square players may land in and move around, m (1 km map → 500). The border lies outside it. */
+  /** Half size of the square players may land in and move around, m (the 500 m maps → 250). The border lies outside it. */
   readonly playableHalfExtent: number;
   readonly relief: TerrainRelief;
   readonly border: TerrainBorder;

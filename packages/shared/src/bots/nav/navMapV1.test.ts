@@ -15,7 +15,7 @@ import { emptyPath } from "./testWorld";
  * Recorded Map v1 nav checksum (like MAP_V1_BAKE): a layout, prefab or nav build change fails here. Rerun
  * `node tools/bench/bots/nav.ts` and update after intentional changes.
  */
-const MAP_V1_NAV_CHECKSUM = "7061c979";
+const MAP_V1_NAV_CHECKSUM = "bbc28b01";
 
 /** Known unreachable areas, by probe name prefix (none since the radar station's stair got its bottom step). */
 const KNOWN_GAPS: readonly string[] = [];
@@ -46,7 +46,7 @@ describe("Map v1 navigation", () => {
   it("builds within budget", () => {
     expect(grid.stats!.buildMs).toBeLessThan(2000);
     expect(grid.info.byteLength).toBeLessThan(24 * 1024 * 1024);
-    expect(grid.info.terrainNodes).toBe(4_000_000);
+    expect(grid.info.terrainNodes).toBe(1_000_000);
     expect(grid.stats!.overflowColumns).toBe(0);
     expect(grid.info.components).toBeLessThan(200);
     expect(town).toBeGreaterThanOrEqual(0);

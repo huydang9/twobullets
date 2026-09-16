@@ -1,40 +1,41 @@
 import type { TerrainSpec } from "../types";
 
 /**
- * Map v1 terrain: 1280 m square (1 km playable + 140 m mountain border), 1025² samples at 1.25 m spacing.
+ * Map v1 terrain: 640 m square (500 m playable + 70 m mountain border), 513² samples at 1.25 m spacing.
+ *
+ * The playable square halved from 1 km to 500 m on 2026-09-16 (the browser build was too heavy). POI content is still
+ * authored at 1:1, so the landforms moved and shrank rather than scaling with the square.
  *
  * Landforms (playable area, +X east, +Z north):
- * - radar ridge in the north-west, crest ~40 m above the surrounding hills;
- * - a shallow river valley running north-south east of the center;
- * - a lookout hill between the ridge and the center;
- * - a terraced quarry pit in the south.
+ * - radar ridge north of town, crest ~20 m above the surrounding hills;
+ * - a lookout hill west of town;
+ * - a terraced quarry pit in the south-west.
  */
 export const TERRAIN_V1: TerrainSpec = {
   version: 1,
   seed: 0x7b0b_0001,
-  size: 1280,
-  resolution: 1025,
-  playableHalfExtent: 500,
+  size: 640,
+  resolution: 513,
+  playableHalfExtent: 250,
   relief: {
     baseHeight: 30,
-    macroAmplitude: 14,
-    macroWavelength: 700,
-    hillAmplitude: 7,
-    hillWavelength: 180,
+    macroAmplitude: 8,
+    macroWavelength: 420,
+    hillAmplitude: 5,
+    hillWavelength: 130,
     detailAmplitude: 0.6,
     detailWavelength: 24,
-    warp: 50,
+    warp: 40,
   },
   border: {
-    foothillInset: 40,
-    rampDistance: 110,
-    height: 120,
-    ridgeWavelength: 320,
+    foothillInset: 20,
+    rampDistance: 55,
+    height: 110,
+    ridgeWavelength: 200,
   },
   features: [
-    { kind: "ridge", path: [[-370, 170], [-300, 255], [-215, 300]], width: 170, height: 40 },
-    { kind: "valley", path: [[90, 560], [150, 320], [120, 140], [200, -60], [160, -220], [240, -560]], width: 130, depth: 9 },
-    { kind: "hill", center: [-190, 110], radius: 95, height: 13 },
-    { kind: "basin", center: [-60, -330], radius: 95, floorRadius: 45, depth: 24, terraces: 3 },
+    { kind: "ridge", path: [[-118, 138], [-60, 185], [-2, 232]], width: 130, height: 20 },
+    { kind: "hill", center: [60, -60], radius: 55, height: 9 },
+    { kind: "basin", center: [-130, -110], radius: 85, floorRadius: 40, depth: 22, terraces: 3 },
   ],
 };

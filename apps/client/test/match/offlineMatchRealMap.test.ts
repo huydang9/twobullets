@@ -15,11 +15,11 @@ import { describe, expect, it } from "vitest";
 import { createOfflineMatchConfig, createOfflineMatchSim } from "../../src/match/createOfflineMatchSim";
 import { readOfflineMatchOptions } from "../../src/match/options";
 
-// Practice with bots on a real-world map (`?bots=1&map=vn-camthanh`), headless: the same start path as the Map v1 test
+// Practice with bots on a real-world map (`?bots=1&map=vn-hangxanh`), headless: the same start path as the Map v1 test
 // (offlineMatchStart.test.ts) on the generated map data and its terrain bake. TB_REAL_MAP=<id> picks another map,
 // TB_MATCH_PROGRESS=<file> writes per-step breadcrumbs.
 
-const MAP_ID = process.env.TB_REAL_MAP ?? "vn-camthanh";
+const MAP_ID = process.env.TB_REAL_MAP ?? "vn-hangxanh";
 const TICKS = Number(process.env.TB_REAL_MAP_TICKS ?? 900);
 const PROGRESS = process.env.TB_MATCH_PROGRESS ?? "";
 const progress = (line: string) => PROGRESS && appendFileSync(PROGRESS, `${line}\n`);

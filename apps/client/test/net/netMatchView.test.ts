@@ -161,7 +161,7 @@ describe("NetMatchView", () => {
     const wait = combatStart + 15 * TICK_RATE;
     const shrinkStart = wait + 35 * TICK_RATE;
     const shrinkEnd = shrinkStart + 20 * TICK_RATE;
-    const phase: ZonePhaseMessage = { index: 1, waitStartTick: wait, shrinkStartTick: shrinkStart, shrinkEndTick: shrinkEnd, from: { cx: 0, cz: 0, r: 710 }, to: { cx: 100, cz: -50, r: 400 }, dps: 1 };
+    const phase: ZonePhaseMessage = { index: 1, waitStartTick: wait, shrinkStartTick: shrinkStart, shrinkEndTick: shrinkEnd, from: { cx: 0, cz: 0, r: 355 }, to: { cx: 100, cz: -50, r: 200 }, dps: 1 };
     source.zonePhases.push(phase);
     view.sync(source);
     expect(view.config.timeScale).toBeCloseTo(0.5, 6);
@@ -186,18 +186,18 @@ describe("NetMatchView", () => {
 
     view.update(shrinkStart + (shrinkEnd - shrinkStart) / 2, poses, own());
     expect(view.state.zone.stage).toBe("shrinking");
-    expect(view.state.zone.current.r).toBeCloseTo(555, 3);
+    expect(view.state.zone.current.r).toBeCloseTo(277.5, 3);
     expect(view.state.zone.current.cx).toBeCloseTo(50, 3);
     expect(events.filter((e) => e.type === "zoneShrinkStarted")).toHaveLength(1);
     view.update(shrinkEnd + 1, poses, own());
     expect(view.state.zone.stage).toBe("waiting");
-    expect(view.state.zone.current).toEqual({ cx: 100, cz: -50, r: 400 });
+    expect(view.state.zone.current).toEqual({ cx: 100, cz: -50, r: 200 });
   });
 
   it("arena matches use the arena's initial circle", () => {
     const view = new NetMatchView({ mapId: "arena" });
     expect(view.state.zone.current.r).toBe(60);
-    expect(new NetMatchView({ mapId: "cz-holasovice" }).state.zone.current.r).toBe(710);
+    expect(new NetMatchView({ mapId: "vn-hangxanh" }).state.zone.current.r).toBe(355);
   });
 
   it("MatchEnd: ended phase, winner, reason, placements and stats from the server; cancelled keeps a null reason", () => {

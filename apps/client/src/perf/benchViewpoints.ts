@@ -53,8 +53,8 @@ export function resolveBenchViewpoints(map: MapData, terrain: Terrain, layout: M
     { id: "forest", label: "Forest clearing", at: poi("forest"), lookAt: town },
     { id: "radar", label: "Radar tower top", at: { building: "radar_tower", floor: WATCHTOWER_PLATFORM }, lookAt: town },
     { id: "military", label: "Military compound", at: offset(poi("military"), -30, 6), lookAt: offset(poi("military"), 40, -12) },
-    // The pit is terraced; its rim is ~24 m up, about 100 m from the center.
-    { id: "quarry", label: "Quarry rim", at: offset(poi("quarry"), -72, 72), lookAt: poi("quarry") },
+    // The pit is terraced; its rim is ~22 m up, about 85 m from the center.
+    { id: "quarry", label: "Quarry rim", at: offset(poi("quarry"), -62, 62), lookAt: poi("quarry") },
   ];
 
   const stand = (at: Placement["at"]) => {

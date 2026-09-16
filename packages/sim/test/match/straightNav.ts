@@ -7,7 +7,7 @@ import type { Vec3 } from "@twobullets/shared/movement/types";
 // every playable point is walkable, paths are the direct segment at terrain height.
 
 const GRID: NavGrid = {
-  info: { version: 0, cellSize: 0.5, buildingCellSize: 0.25, coarseCellSize: 4, originX: -500, originZ: -500, width: 2000, depth: 2000, terrainNodes: 4_000_000, buildingNodes: 0, components: 1, byteLength: 0, checksum: "straight" },
+  info: { version: 0, cellSize: 0.5, buildingCellSize: 0.25, coarseCellSize: 4, originX: -250, originZ: -250, width: 1000, depth: 1000, terrainNodes: 1_000_000, buildingNodes: 0, components: 1, byteLength: 0, checksum: "straight" },
 };
 
 export class StraightNav implements NavQuery {

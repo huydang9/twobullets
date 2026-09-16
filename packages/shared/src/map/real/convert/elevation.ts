@@ -1,12 +1,12 @@
 import type { TerrainFeature, TerrainSpec } from "../../types";
 import type { ElevationOptions, ElevationSamples } from "./types";
 
-/** Terrain square and grid shared by every real-world map (same as Map v1: 1 km playable, 140 m border). */
-export const REAL_TERRAIN = { size: 1280, resolution: 1025, playableHalfExtent: 500 } as const;
+/** Terrain square and grid shared by every real-world map (same as Map v1: 500 m playable, 70 m border). */
+export const REAL_TERRAIN = { size: 640, resolution: 513, playableHalfExtent: 250 } as const;
 /** Height of the lowest playable ground, m (keeps `killY` −40 well below everything). */
 export const REAL_BASE_HEIGHT = 20;
-/** Spacing of the stored height grid, m (65 × 65 over the 1280 m square). */
-export const HEIGHT_GRID_SPACING = 20;
+/** Spacing of the stored height grid, m (65 × 65 over the 640 m square). */
+export const HEIGHT_GRID_SPACING = 10;
 
 export interface ElevationReport {
   readonly mode: ElevationOptions["mode"];

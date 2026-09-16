@@ -20,17 +20,14 @@ import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol/version";
 // contract: dense slots, slot = team · teamSize + member, last team may be partial, bots fill via rules.fillWithBots).
 
 export const MAPS: readonly MapInfo[] = [
-  { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 1000, available: true, kind: "handmade" },
+  { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 500, available: true, kind: "handmade" },
   { id: "arena", name: { vi: "Sân tập", en: "Arena" }, sizeM: 120, available: true, kind: "dev" },
   // Real-world maps: the `<countryCode>-<place>` ids of packages/shared/src/map/real (the client's map picker and the
   // match server's level registry use the same ids).
-  { id: "cz-holasovice", name: { vi: "Holašovice (Séc)", en: "Holašovice (Czechia)" }, sizeM: 1000, available: true, kind: "realWorld" },
-  { id: "vn-camthanh", name: { vi: "Hội An – Cẩm Thanh", en: "Hội An – Cẩm Thanh (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
-  { id: "jp-shirakawago", name: { vi: "Shirakawa-go (Nhật)", en: "Shirakawa-go (Japan)" }, sizeM: 1000, available: true, kind: "realWorld" },
-  { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 500, available: true, kind: "realWorld" },
   // Shown as Phú Nhuận: the id keeps the street name the map was first generated under, so saved preferences, lobby
   // settings and the terrain seed stay valid. Player-visible names stay non-political (map/real/convert/names.ts).
-  { id: "vn-phandangluu", name: { vi: "Phú Nhuận", en: "Phu Nhuan (Vietnam)" }, sizeM: 1000, available: true, kind: "realWorld" },
+  { id: "vn-phandangluu", name: { vi: "Phú Nhuận", en: "Phu Nhuan (Vietnam)" }, sizeM: 500, available: true, kind: "realWorld" },
 ];
 export const DEFAULT_MAP_ID = "v1";
 

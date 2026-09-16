@@ -113,7 +113,8 @@ export function renderMapOverviewSvg(map: MapData, terrain: Terrain, layout: Map
 
   // Playable boundary, grid labels.
   out.push(`<rect x="${-half}" y="${-half}" width="${half * 2}" height="${half * 2}" fill="none" stroke="${COLORS.boundary}" stroke-width="2" stroke-dasharray="12 6"/>`);
-  for (let v = -400; v <= 400; v += 100) {
+  const label = Math.floor((half - 50) / 100) * 100;
+  for (let v = -label; v <= label; v += 100) {
     out.push(`<text x="${v}" y="${-half - 8}" font-size="10" text-anchor="middle" fill="#555">${v}</text>`);
     out.push(`<text x="${-half - 6}" y="${-v + 3}" font-size="10" text-anchor="end" fill="#555">${v}</text>`);
   }

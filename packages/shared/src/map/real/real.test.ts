@@ -8,34 +8,29 @@ import { INSTANCE_STRIDE, sampleWeightGrid, type ScatterRule } from "../layout/s
 import { validateMapLayout } from "../layout/validate";
 import { terrainInputsHash } from "../terrain/bake";
 import { buildTerrain, type Terrain } from "../terrain/terrain";
-import { BAKE as CZ_HOLASOVICE_BAKE } from "./cz-holasovice.bake";
-import { BAKE as JP_SHIRAKAWAGO_BAKE } from "./jp-shirakawago.bake";
 import { REAL_MAPS, type RealMapModule } from "./index";
-import { BAKE as VN_CAMTHANH_BAKE } from "./vn-camthanh.bake";
 import { BAKE as VN_HANGXANH_BAKE } from "./vn-hangxanh.bake";
 import { BAKE as VN_PHANDANGLUU_BAKE } from "./vn-phandangluu.bake";
 import { COLLIDER_STRIDE, propColliderGroups } from "../layout/collision";
 import { getPrefabCollision } from "../buildings/placement";
 import { getBuildingPrefab, isBuildingPrefabId } from "../buildings/prefabs";
 import { isPoliticalName } from "./convert/names";
+import { TARGET_POIS } from "./convert/pois";
 import { distanceToRect } from "../layout/geometry";
 import { mapPaths } from "../layout/roads";
 import { planStreetSigns, STREET_SIGN } from "../layout/streetSigns";
 
 /** Recorded by tools/map/build.ts --map <id>; regenerate the map (tools/map/osm/generate.ts) after converter changes. */
 const BAKES: Readonly<Record<string, { inputsHash: string; terrainChecksum: string; layoutChecksum: string }>> = {
-  "cz-holasovice": CZ_HOLASOVICE_BAKE,
-  "vn-camthanh": VN_CAMTHANH_BAKE,
-  "jp-shirakawago": JP_SHIRAKAWAGO_BAKE,
   "vn-hangxanh": VN_HANGXANH_BAKE,
   "vn-phandangluu": VN_PHANDANGLUU_BAKE,
 };
-/** Building caps: villages keep the default 90; the Saigon street maps (urban mode) set their own. */
+/** Building caps: the Saigon street maps (urban mode) set their own. */
 const BUILDING_CAPS: Readonly<Record<string, number>> = { "vn-hangxanh": 190, "vn-phandangluu": 190 };
 
 describe("real-world map registry", () => {
-  it("lists the presets, Holašovice first, then the custom places", () => {
-    expect(REAL_MAPS.map((m) => m.info.id)).toEqual(["cz-holasovice", "vn-camthanh", "jp-shirakawago", "vn-hangxanh", "vn-phandangluu"]);
+  it("lists the presets, Hàng Xanh first, then the custom places", () => {
+    expect(REAL_MAPS.map((m) => m.info.id)).toEqual(["vn-hangxanh", "vn-phandangluu"]);
     for (const { info } of REAL_MAPS) {
       expect(info.credits).toContain("osm");
       expect(info.bakeUrl).toBe(`assets/map/${info.id}.terrain.bin`);
@@ -109,8 +104,9 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
       const building = module.map.buildings.find((b) => b.id === aga!.building)!;
       expect(building.id).toBe("bld_1044664010");
       expect(building.prefab).toBe("tube_house_4");
-      // Estimated from the alley layout: within a few meters of the OSM footprint centroid (430.5, 366.4).
-      expect(distance(building.position[0], building.position[2], 430.5, 366.4)).toBeLessThan(4);
+      // Estimated from the alley layout: within a few meters of the OSM footprint centroid (200.8, 196.1 in the
+      // 500 m square's frame, 2026-09-16).
+      expect(distance(building.position[0], building.position[2], 200.8, 196.1)).toBeLessThan(4);
     }
   });
 
@@ -118,14 +114,14 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     expect(validateMapLayout(module.map, terrain, layout, module.validation)).toEqual([]);
   });
 
-  it("stays within its building cap, has no Training Yard, 10+ POIs and two spawns per POI", () => {
+  it("stays within its building cap, has no Training Yard, a spawn group per POI and two spawns each", () => {
     const { map, info } = module;
     // Bridges and named landmarks are laid on top of the building cap.
     const landmarkIds = new Set((map.landmarks ?? []).map((l) => l.building));
     expect(map.buildings.filter((b) => !(isBuildingPrefabId(b.prefab) && getBuildingPrefab(b.prefab).spansRoad) && !landmarkIds.has(b.id)).length).toBeLessThanOrEqual(BUILDING_CAPS[id] ?? 90);
     expect(map.buildings.length).toBe(info.stats.buildings);
     expect(map.pois.some((p) => p.kind === "training")).toBe(false);
-    expect(map.pois.length).toBeGreaterThanOrEqual(10);
+    expect(map.pois.length).toBeGreaterThanOrEqual(TARGET_POIS);
     expect(map.pois.length).toBe(info.stats.pois);
     const counts = new Map<string, number>();
     for (const spawn of map.spawns) {
@@ -204,8 +200,9 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     let worst = 0;
     let open = 0;
     let rough = 0;
-    for (let z = -495; z <= 495; z += 5) {
-      for (let x = -495; x <= 495; x += 5) {
+    const edge = module.map.terrain.playableHalfExtent - 5;
+    for (let z = -edge; z <= edge; z += 5) {
+      for (let x = -edge; x <= edge; x += 5) {
         if (sampleWeightGrid(mask, x, z) <= 0.5) continue;
         open++;
         const slope = terrain.slopeAt(x, z);
@@ -235,8 +232,9 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
 
     let wet = 0;
     const leaks: string[] = [];
-    for (let z = -490; z <= 490; z += 8) {
-      for (let x = -490; x <= 490; x += 8) {
+    const wetEdge = module.map.terrain.playableHalfExtent - 10;
+    for (let z = -wetEdge; z <= wetEdge; z += 8) {
+      for (let x = -wetEdge; x <= wetEdge; x += 8) {
         if (!module.water.some((w) => pointInPolygon(w, x, z) && polygonEdgeDistance(w, x, z) > 3)) continue;
         if (module.roads.some((r) => polylineDistance(r.points, x, z) < (r.width ?? 5) / 2 + 3)) continue;
         wet++;
@@ -252,8 +250,8 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     if (mask) {
       const stranded: string[] = [];
       let open = 0;
-      for (let z = -480; z <= 480; z += 10) {
-        for (let x = -480; x <= 480; x += 10) {
+      for (let z = -240; z <= 240; z += 10) {
+        for (let x = -240; x <= 240; x += 10) {
           if (sampleWeightGrid(mask, x, z) < 0.8) continue;
           open++;
           const ref = nav.nearest({ x, y: terrain.sampleHeight(x, z), z }, 4, scratch);

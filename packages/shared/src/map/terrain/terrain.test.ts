@@ -93,7 +93,7 @@ describe("generation", () => {
     const b = generateHeightfield({ ...SMALL_SPEC, resolution: 65 });
     expect(checksumBytes(a.heights)).toBe(checksumBytes(b.heights));
     // Changes whenever generation changes: bump TerrainSpec.version and update this value deliberately.
-    expect(checksumBytes(a.heights)).toBe("680a5902");
+    expect(checksumBytes(a.heights)).toBe("1161a79d");
   });
 
   it("changes with the seed", () => {
@@ -208,7 +208,8 @@ describe("Map v1 terrain", () => {
     const slopes = cellSlopes((x, z) => terrain.isPlayable(x, z));
     const share = (limit: number) => slopes.filter((d) => d < limit).length / slopes.length;
     expect(share(25)).toBeGreaterThan(0.94);
-    expect(share(50)).toBeGreaterThan(0.985);
+    // The quarry pit and the radar ridge are a bigger share of the 500 m square than they were of the 1 km one.
+    expect(share(50)).toBeGreaterThan(0.975);
   });
 
   it("rings the playable area with steep, high mountains", () => {
@@ -220,8 +221,8 @@ describe("Map v1 terrain", () => {
     for (let x = -half; x <= half; x += 10) for (let z = -half; z <= half; z += 10) playableMax = Math.max(playableMax, terrain.sampleHeight(x, z));
     let edgeSum = 0;
     let edgeCount = 0;
-    for (let t = -600; t <= 600; t += 10) {
-      for (const [x, z] of [[t, 620], [t, -620], [620, t], [-620, t]] as const) {
+    for (let t = -300; t <= 300; t += 10) {
+      for (const [x, z] of [[t, 310], [t, -310], [310, t], [-310, t]] as const) {
         edgeSum += terrain.sampleHeight(x, z);
         edgeCount++;
       }
@@ -231,16 +232,16 @@ describe("Map v1 terrain", () => {
 
   it("has a radar crest, a quarry pit and flat POI pads", () => {
     const [yx, yz] = TRAINING_YARD.center;
-    const radar = terrain.sampleHeight(-300, 255);
-    const quarryFloor = terrain.sampleHeight(-60, -330);
-    const quarryRim = terrain.sampleHeight(-60 + 110, -330);
-    expect(radar - terrain.sampleHeight(-100, 60)).toBeGreaterThan(20);
+    const radar = terrain.sampleHeight(-60, 185);
+    const quarryFloor = terrain.sampleHeight(-130, -110);
+    const quarryRim = terrain.sampleHeight(-130 + 100, -110);
+    expect(radar - terrain.sampleHeight(60, 100)).toBeGreaterThan(12);
     expect(quarryRim - quarryFloor).toBeGreaterThan(18);
     for (const [dx, dz] of [[0, 0], [40, 40], [-40, 30], [20, -44]] as const) {
       expect(terrain.sampleHeight(yx + dx, yz + dz)).toBeCloseTo(terrain.sampleHeight(yx, yz), 3);
     }
-    expect(terrain.slopeAt(-60, -250)).toBeLessThan(25); // quarry ramp
-    expect(terrain.surfaceAt(-60, -250)).toBe("dirt");
-    expect(terrain.surfaceAt(-100, -30)).toBe("road");
+    expect(terrain.slopeAt(-130, -30)).toBeLessThan(25); // quarry ramp
+    expect(terrain.surfaceAt(-130, -30)).toBe("dirt");
+    expect(terrain.surfaceAt(-40, 0)).toBe("road");
   });
 });

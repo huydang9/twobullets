@@ -392,7 +392,7 @@ Honda Wave/Dream/Vision, Yamaha Sirius, PCX/NMAX; cyclo (xích lô) and xe ba g�
 The generated `VN_PROP_MANIFEST` has the same measured fields as `PROP_MANIFEST_GENERATED` (`GeneratedPropAsset`) plus the hand-set `category`, `surface`, `castShadow`, `cullDistance`, `scaleRange`, `group` and `use`, so wiring is additive:
 
 1. **Contract:** append the `VN_PROP_IDS` to `PROP_IDS` (or a second `PropLibrary` id space) and merge `VN_PROP_MANIFEST` into `PROP_MANIFEST` after the generated entries; `SPECS` placeholders come from the same hints. Mirror the collision into `packages/shared/src/map/layout/props.ts` (`getMapProp`) for the server: box and cylinder shapes as-is; `vn_road_divider` hull as a box `1.54 × 0.83 × 0.64`.
-2. **Load per map:** only the real-world VN maps (`vn-hangxanh`, `vn-phandangluu`, `vn-camthanh`) load the `vn/` files; Map v1 doesn't. All 66 props are 16.5 MB, but a street set of ~25 props is ~7 MB.
+2. **Load per map:** only the real-world VN maps (`vn-hangxanh`, `vn-phandangluu`) load the `vn/` files; Map v1 doesn't. All 66 props are 16.5 MB, but a street set of ~25 props is ~7 MB.
 3. **Placement rules** (seeded, per OSM way/building; everything thin-instanced per prop × LOD × world cell as `PropInstances` already does):
 
 | Where | Props | Rule of thumb | Collision / gameplay |

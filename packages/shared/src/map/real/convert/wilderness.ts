@@ -1,7 +1,7 @@
 /**
  * Wilderness: the empty ground of a real-world map, filled the way Map v1 fills its fields.
  *
- * A 1 km square of a real city keeps only as many buildings as the cap allows, so the built-up part is a core a few
+ * A 500 m square of a real city keeps only as many buildings as the cap allows, so the built-up part is a core a few
  * hundred meters across and the rest is flat grass with an alley grid on it, which reads as unfinished. This module
  * finds that ground with a coverage mask over the map grid — buildings, water and mapped areas are "city", main streets
  * and creeks keep a narrower verge, and the alleys count for nothing — turns the distance from the city into a 0..1
@@ -22,7 +22,7 @@ import { fbm, ridged, subSeed } from "../../terrain/noise";
 import type { AreaFeature, Polygon } from "./types";
 import { HEIGHT_GRID_SPACING } from "./elevation";
 
-/** Coverage mask cell size, m (129 × 129 over the 1280 m square). */
+/** Coverage mask cell size, m (65 × 65 over the 640 m square). */
 export const COVERAGE_SPACING = 10;
 
 /** Roads at least this wide count as streets that keep a cleared verge; narrower ones are alleys the woods grow around, m. */
@@ -43,23 +43,23 @@ const MARGIN = {
 } as const;
 
 export interface WildernessOptions {
-  /** Hill height where the wilderness is at full strength, m. Default 15. */
+  /** Hill height where the wilderness is at full strength, m. Default 10. */
   readonly relief?: number;
-  /** Extra height as the ground approaches the playable edge, so the map rises into the border mountains, m. Default 13. */
+  /** Extra height as the ground approaches the playable edge, so the map rises into the border mountains, m. Default 8. */
   readonly edgeRise?: number;
   /** Steepest step between neighbouring height samples, degrees. Keeps every slope walkable. Default 14. */
   readonly maxSlopeDegrees?: number;
-  /** Distance from the built-up city over which hills and trees ramp in, m. Default 90. */
+  /** Distance from the built-up city over which hills and trees ramp in, m. Default 50. */
   readonly ramp?: number;
-  /** Cleared verge along the main streets and creeks, m. Default 30. */
+  /** Cleared verge along the main streets and creeks, m. Default 20. */
   readonly roadRamp?: number;
   /**
-   * Distance over which the hills themselves come up, m. Default 150, much longer than `ramp`: every road is flattened
+   * Distance over which the hills themselves come up, m. Default 90, much longer than `ramp`: every road is flattened
    * along a path smoothed over about 40 m, so the ground has to change slowly or the alleys crossing it end up in
    * cuttings whose banks are at the edge of what a player can climb.
    */
   readonly hillRamp?: number;
-  /** Multiplies every wilderness scatter density. Default 1. */
+  /** Multiplies every wilderness scatter density. Default 0.6 (cut for the 500 m maps, 2026-09-16). */
   readonly density?: number;
 }
 
@@ -106,18 +106,18 @@ export interface WildernessInput {
 
 export function wildernessDefaults(options: WildernessOptions = {}): Required<WildernessOptions> {
   return {
-    relief: options.relief ?? 15,
-    edgeRise: options.edgeRise ?? 13,
+    relief: options.relief ?? 10,
+    edgeRise: options.edgeRise ?? 8,
     maxSlopeDegrees: options.maxSlopeDegrees ?? 14,
-    ramp: options.ramp ?? 90,
-    roadRamp: options.roadRamp ?? 30,
-    hillRamp: options.hillRamp ?? 150,
-    density: options.density ?? 1,
+    ramp: options.ramp ?? 50,
+    roadRamp: options.roadRamp ?? 20,
+    hillRamp: options.hillRamp ?? 90,
+    density: options.density ?? 0.6,
   };
 }
 
 /** A square with less open ground than this at full strength is left exactly as it was, ha. */
-export const MIN_WILDERNESS_HA = 2;
+export const MIN_WILDERNESS_HA = 1;
 
 /**
  * Coverage mask → wilderness weight → hills. Returns null when the place has no empty ground worth filling
@@ -210,7 +210,7 @@ export function measureWilderness(input: WildernessInput): Wilderness {
       // ~40 m, so short, sharp landforms would leave them in deep cuttings with banks at the edge of what a player can climb.
       const rolling = (fbm(x / 260, z / 260, 2, seeds.hills) + 1) / 2;
       const crest = ridged(x / 420, z / 420, 2, seeds.ridges);
-      const edge = smoothstep(190, playableHalfExtent - 20, Math.max(Math.abs(x), Math.abs(z)));
+      const edge = smoothstep(playableHalfExtent * 0.38, playableHalfExtent - 20, Math.max(Math.abs(x), Math.abs(z)));
       hills[j * count + i] = w * (options.relief * (0.2 + 0.8 * rolling) * (0.55 + 0.75 * crest) + options.edgeRise * edge);
     }
   }

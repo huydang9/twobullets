@@ -12,8 +12,8 @@ import type { MapInput, MapTeammate, MapViewer, MapZoneInfo } from "./types";
 const ZOOM_LEVELS = [1, 2, 4] as const;
 const MAX_ZOOM = 8;
 const WHEEL_STEP = 1.25;
-/** Grid cell, m (A–J columns, 1–10 rows on Map v1). */
-const GRID_CELL = 100;
+/** Grid cell, m (A–J columns, 1–10 rows on a 500 m map). */
+const GRID_CELL = 50;
 const SCALE_LENGTHS = [10, 25, 50, 100, 200, 250, 500] as const;
 const COLUMN_NAMES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MAP_KEYS: readonly string[] = KEY_BINDINGS.map;

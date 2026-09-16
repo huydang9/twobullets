@@ -132,19 +132,15 @@ describe("kill feed", () => {
 });
 
 describe("spawn plan", () => {
-  it("Map v1: ten non-training POIs (four of them minor) with two spawns each", () => {
+  it("Map v1: six non-training POIs with three spawns each", () => {
     const groups = spawnsByPoi(MAP_V1.pois, MAP_V1.spawns);
     expect(groups.map((g) => [g.poi.id, g.spawns.length])).toEqual([
-      ["town", 2],
-      ["farm", 2],
-      ["military", 2],
-      ["radar", 2],
-      ["quarry", 2],
-      ["forest", 2],
-      ["millbrook", 2],
-      ["truckstop", 2],
-      ["camp", 2],
-      ["orchard", 2],
+      ["town", 3],
+      ["farm", 3],
+      ["military", 3],
+      ["radar", 3],
+      ["quarry", 3],
+      ["forest", 3],
     ]);
   });
 
@@ -169,14 +165,14 @@ describe("spawn plan", () => {
   const flat = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.sqrt((a.x - b.x) ** 2 + (a.z - b.z) ** 2);
   const pois = spawnsByPoi(MAP_V1.pois, MAP_V1.spawns).length;
 
-  it("20 solo teams: every POI used twice, never the same spawn twice", () => {
+  it("20 solo teams: every POI used three or four times, never the same spawn twice", () => {
     for (const seed of [1, 2, 3, 99]) {
       const plan = planTeamSpawns(seed, 20, 1, MAP_V1.pois, MAP_V1.spawns, () => 0);
       expect(plan).toHaveLength(20);
       const perPoi = new Map<string, number>();
       for (const p of plan) perPoi.set(p.poiId, (perPoi.get(p.poiId) ?? 0) + 1);
       expect(perPoi.size).toBe(pois);
-      expect([...perPoi.values()].every((n) => n === 2)).toBe(true);
+      expect([...perPoi.values()].every((n) => n === 3 || n === 4)).toBe(true);
       const keys = new Set(plan.map((p) => `${p.feet[0]!.x.toFixed(3)},${p.feet[0]!.z.toFixed(3)}`));
       expect(keys.size).toBe(20);
       for (let i = 0; i < plan.length; i++) for (let j = i + 1; j < plan.length; j++) expect(flat(plan[i]!.feet[0]!, plan[j]!.feet[0]!)).toBeGreaterThan(20);

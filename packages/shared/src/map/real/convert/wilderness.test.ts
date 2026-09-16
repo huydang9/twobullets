@@ -6,15 +6,15 @@ import { createReliefFunction } from "../../terrain/generate";
 import { realTerrainSpec } from "./elevation";
 import { buildWilderness, COVERAGE_SPACING, measureWilderness, wildernessDefaults, withWilderness, type WildernessInput } from "./wilderness";
 
-const TERRAIN = { size: 1280, playableHalfExtent: 500 } as const;
+const TERRAIN = { size: 640, playableHalfExtent: 250 } as const;
 
-/** A 200 m core of buildings in the middle of the square, one main street east-west, nothing else. */
+/** A 100 m core of buildings in the middle of the square, one main street east-west, nothing else. */
 function town(): WildernessInput {
   const buildings: OrientedRect[] = [];
   for (let j = 0; j < 5; j++) {
-    for (let i = 0; i < 5; i++) buildings.push({ center: [-100 + i * 50, -100 + j * 50], halfExtents: [8, 6], yaw: 0 });
+    for (let i = 0; i < 5; i++) buildings.push({ center: [-50 + i * 25, -50 + j * 25], halfExtents: [8, 6], yaw: 0 });
   }
-  const road: RoadSpec = { id: "primary_1", kind: "asphalt", width: 8, points: [[-480, 0], [480, 0]] };
+  const road: RoadSpec = { id: "primary_1", kind: "asphalt", width: 8, points: [[-240, 0], [240, 0]] };
   return { seed: 0x1234_5678, terrain: TERRAIN, buildings, areas: [], roads: [road], creeks: [], water: [] };
 }
 
@@ -30,21 +30,21 @@ describe("wilderness coverage mask", () => {
 
   it("is zero over the buildings and the main street, and full out in the open", () => {
     expect(sampleWeightGrid(w.weights, 0, 0)).toBe(0);
-    expect(sampleWeightGrid(w.weights, -100, -100)).toBe(0);
+    expect(sampleWeightGrid(w.weights, -50, -50)).toBe(0);
     // Just off the carriageway of the main street.
-    expect(sampleWeightGrid(w.weights, 400, 6)).toBe(0);
+    expect(sampleWeightGrid(w.weights, 200, 6)).toBe(0);
     // Far from both: open country.
-    expect(sampleWeightGrid(w.weights, 400, 400)).toBe(1);
-    expect(sampleWeightGrid(w.weights, -420, -430)).toBe(1);
+    expect(sampleWeightGrid(w.weights, 200, 200)).toBe(1);
+    expect(sampleWeightGrid(w.weights, -210, -215)).toBe(1);
   });
 
   it("ramps up with distance instead of jumping", () => {
     const options = wildernessDefaults();
-    const along = [0, 40, 80, 120, 200].map((d) => sampleWeightGrid(w.weights, 0, 130 + d));
+    const along = [0, 20, 40, 60, 100].map((d) => sampleWeightGrid(w.weights, 0, 70 + d));
     for (let i = 1; i < along.length; i++) expect(along[i]!).toBeGreaterThanOrEqual(along[i - 1]!);
     // The street verge is much shorter than the ramp out of town.
-    expect(sampleWeightGrid(w.weights, 400, options.roadRamp + 20)).toBeGreaterThan(0.9);
-    expect(sampleWeightGrid(w.weights, 0, 130 + options.ramp / 2)).toBeLessThan(0.9);
+    expect(sampleWeightGrid(w.weights, 200, options.roadRamp + 20)).toBeGreaterThan(0.9);
+    expect(sampleWeightGrid(w.weights, 0, 70 + options.ramp / 2)).toBeLessThan(0.9);
   });
 
   it("covers the whole square at the grid spacing", () => {
@@ -55,7 +55,7 @@ describe("wilderness coverage mask", () => {
   });
 
   it("reports the open ground it found", () => {
-    expect(w.report.areaHa).toBeGreaterThan(30);
+    expect(w.report.areaHa).toBeGreaterThan(10);
     expect(w.report.touchedHa).toBeGreaterThanOrEqual(w.report.areaHa);
     expect(w.report.cityRatio).toBeGreaterThan(0);
     expect(w.report.cityRatio).toBeLessThan(0.5);
@@ -73,11 +73,11 @@ describe("wilderness hills", () => {
 
   it("adds nothing over the city, so the mapped ground keeps its elevation", () => {
     // Exactly zero over the built-up core and the ring of samples around it (the coverage margin is wider than one cell).
-    for (const [x, z] of [[0, 0], [-100, -100], [100, 100]] as const) {
-      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) expect(heightAt(w, x + dx * 20, z + dz * 20), `${x + dx * 20}, ${z + dz * 20}`).toBe(0);
+    for (const [x, z] of [[0, 0], [-50, -50], [50, 50]] as const) {
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) expect(heightAt(w, x + dx * 10, z + dz * 10), `${x + dx * 10}, ${z + dz * 10}`).toBe(0);
     }
     // And along the main street, which crosses the open ground.
-    for (let x = -480; x <= 480; x += 20) expect(heightAt(w, x, 0), `${x}`).toBe(0);
+    for (let x = -240; x <= 240; x += 20) expect(heightAt(w, x, 0), `${x}`).toBe(0);
   });
 
   it("never digs below the mapped ground", () => {
@@ -85,8 +85,8 @@ describe("wilderness hills", () => {
   });
 
   it("raises real hills out in the open", () => {
-    expect(w.report.peak).toBeGreaterThan(8);
-    expect(heightAt(w, 400, 400) + heightAt(w, -400, 400) + heightAt(w, -400, -400) + heightAt(w, 400, -400)).toBeGreaterThan(10);
+    expect(w.report.peak).toBeGreaterThan(5);
+    expect(heightAt(w, 200, 200) + heightAt(w, -200, 200) + heightAt(w, -200, -200) + heightAt(w, 200, -200)).toBeGreaterThan(6);
   });
 
   it("keeps every step inside the walk limit", () => {
@@ -114,13 +114,13 @@ describe("wilderness hills", () => {
     for (const b of town().buildings) {
       for (let dz = -12; dz <= 12; dz += 4) for (let dx = -12; dx <= 12; dx += 4) onTown = Math.max(onTown, Math.abs(hilly(b.center[0] + dx, b.center[1] + dz) - flat(b.center[0] + dx, b.center[1] + dz)));
     }
-    for (let x = -480; x <= 480; x += 5) for (const z of [-6, 0, 6]) onTown = Math.max(onTown, Math.abs(hilly(x, z) - flat(x, z)));
+    for (let x = -240; x <= 240; x += 5) for (const z of [-6, 0, 6]) onTown = Math.max(onTown, Math.abs(hilly(x, z) - flat(x, z)));
     expect(onTown).toBeLessThan(0.2);
     // Out of town the ground climbs, and it climbs gradually: no step between samples 5 m apart.
-    expect(hilly(400, 400)).toBeGreaterThan(flat(400, 400) + 3);
+    expect(hilly(200, 200)).toBeGreaterThan(flat(200, 200) + 2);
     let step = 0;
-    let previous = hilly(0, 130);
-    for (let z = 135; z <= 480; z += 5) {
+    let previous = hilly(0, 70);
+    for (let z = 75; z <= 240; z += 5) {
       const here = hilly(0, z);
       step = Math.max(step, Math.abs(here - previous));
       previous = here;
@@ -151,7 +151,7 @@ describe("sampleWeightGrid", () => {
     expect(sampleWeightGrid(grid, 10, 5)).toBeCloseTo(0.5, 6);
     // Outside: the edge samples extend.
     expect(sampleWeightGrid(grid, -50, -50)).toBe(0);
-    expect(sampleWeightGrid(grid, 500, -50)).toBe(0);
+    expect(sampleWeightGrid(grid, 250, -50)).toBe(0);
   });
 });
 

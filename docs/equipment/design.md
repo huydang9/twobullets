@@ -403,30 +403,32 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
   - Heals: bandage (×5) 50→40, first aid 34→35, medkit 16→25.
   - Throwables (ordinary rolls): frag 34–36, smoke 29–30, flash 19–20, molotov 16. The guaranteed throwable uses the frag/smoke tables above instead.
   - Armor/backpack levels: L1 68→46, L2 26→38, L3 6→16.
-- **Density** (averages over 8 seeds, from `lootStats.test.ts`; `LOOT_STATS=1` with `--silent=false --reporter=verbose` prints them). "Buildings" is what the headless harnesses spawn; "+ outdoor" is what the client spawns:
+- **Density** (averages over 8 seeds, from `lootStats.test.ts`; `LOOT_STATS=1` with `--silent=false --reporter=verbose` prints them). "Buildings" is what the headless harnesses spawn; "+ outdoor" is what the client spawns. Re-measured on 2026-09-16, after the maps shrank to 500 × 500 m: the per-building density is unchanged, so the totals fell with the building count (Map v1 74 → 53 buildings with loot spots, vn-hangxanh 190 → 110):
 
-  | | Map v1 (74 buildings) | Map v1 + outdoor | vn-hangxanh (190 buildings) | vn-hangxanh + outdoor |
+  | | Map v1 (53 buildings) | Map v1 + outdoor | vn-hangxanh (110 buildings) | vn-hangxanh + outdoor |
   |---|---|---|---|---|
-  | Piles / items | 1,193 / 2,692 | 1,401 / 3,218 | 963 / 2,848 | 1,309 / 3,727 |
-  | Guns (rifle, shotgun, sniper, pistol) | 529 (240, 128, 94, 67) | 744 (338, 180, 134, 93) | 623 (280, 150, 111, 83) | 983 (438, 251, 156, 139) |
-  | Piles with a gun (rolled piles) | 39 % (95 %) | 48 % (97 %) | 56 % (89 %) | 68 % (93 %) |
-  | Ammo / boost | 636 / 74 | 860 / 82 | 746 / 91 | 1,126 / 104 |
-  | Throwables (frag, smoke, flash, molotov) | 448 (203, 186, 31, 28) | 460 (207, 189, 34, 30) | 367 (167, 142, 31, 27) | 382 (171, 147, 36, 28) |
-  | Heals (bandage, first aid, medkit) | 401 (176, 145, 81) | 427 (188, 153, 86) | 393 (175, 138, 80) | 438 (197, 153, 88) |
-  | Armor (L1, L2, L3) | 410 (230, 133, 46) | 439 (247, 143, 50) | 419 (224, 143, 52) | 468 (256, 157, 55) |
-  | Backpacks (L1, L2, L3) | 194 (106, 64, 24) | 205 (113, 67, 25) | 209 (114, 68, 26) | 225 (125, 73, 27) |
+  | Piles / items | 892 / 2,049 | 1,048 / 2,445 | 568 / 1,712 | 725 / 2,108 |
+  | Guns (rifle, shotgun, sniper, pistol) | 407 (183, 96, 78, 50) | 569 (255, 134, 111, 69) | 372 (174, 82, 72, 45) | 534 (249, 122, 97, 66) |
+  | Piles with a gun (rolled piles) | 40 % (95 %) | 49 % (97 %) | 56 % (89 %) | 65 % (93 %) |
+  | Ammo / boost | 491 / 57 | 660 / 65 | 447 / 52 | 618 / 57 |
+  | Throwables (frag, smoke, flash, molotov) | 338 (152, 140, 24, 23) | 346 (155, 141, 26, 24) | 221 (92, 89, 22, 18) | 230 (96, 92, 24, 19) |
+  | Heals (bandage, first aid, medkit) | 301 (130, 108, 63) | 319 (140, 113, 67) | 231 (94, 84, 53) | 250 (103, 90, 56) |
+  | Armor (L1, L2, L3) | 308 (167, 104, 37) | 330 (179, 110, 40) | 265 (133, 92, 40) | 287 (146, 98, 43) |
+  | Backpacks (L1, L2, L3) | 147 (78, 49, 20) | 156 (82, 53, 21) | 125 (64, 42, 18) | 132 (69, 45, 19) |
   | Buildings with 3+ spots holding a primary | 100 % | 100 % | 100 % | 100 % |
   | Buildings holding a throwable | 100 % | 100 % | 99 % | 99 % |
 
+  vn-phandangluu, the third shipped map, lands between them: 684 piles / 1,968 items with outdoor piles (478 guns).
+
   - Every gun lies in the same pile as its ammo.
-  - Earlier versions, Map v1 / vn-hangxanh: guns were 99 / 81 in table v1, 142 / 193 in v2, 505 / 601 in v3 (v4 and v5 keep v3's guns and ammo).
+  - The three bullets below were measured on the 1 km maps (table versions v1–v5, up to 2026-09-15); they compare loot-table versions with each other, not map sizes, so they are kept as they were. Earlier versions, Map v1 / vn-hangxanh: guns were 99 / 81 in table v1, 142 / 193 in v2, 505 / 601 in v3 (v4 and v5 keep v3's guns and ammo).
   - What v4 (the medicine and gear pass) changed, Map v1 + outdoor / vn-hangxanh + outdoor vs v3: heals 211 → 421 / 256 → 439 (medkits 27 → 90 / 27 → 91, ×3.3), armor 177 → 442 / 218 → 471 (L3 17 → 51 / 20 → 62), backpacks 95 → 205 / 120 → 228; guns and ammo held, boosts and throwables came down a little (155 → 116 / 177 → 146).
   - What **v5 (the throwables pass)** changed, Map v1 + outdoor / vn-hangxanh + outdoor vs v4: throwables 116 → 460 / 146 → 382 (×3.2 across the two maps) — frag 43 → 207 / 55 → 171, smoke 25 → 189 / 37 → 147, flash 26 → 34 / 29 → 36, molotov 22 → 30 / 25 → 28. Guns, ammo, heals, armor and backpacks are untouched (the category weights did not move; they differ by under 2 %, the reshuffle the version bump causes). Totals rose 2,840 → 3,218 and 3,495 → 3,727 items, piles 1,086 → 1,401 and 1,191 → 1,309.
-  - `lootStats.test.ts` enforces per-map floors on every category and on medkits, first aid, bandages, frags, smokes and each armor / backpack level, the frag > smoke ≫ flash > molotov order, the share of buildings holding a throwable, plus item ceilings (2,900 / 3,000 buildings-only, 3,400 / 3,950 with outdoor piles).
-- **Client cost:** ~3,200 items on Map v1 and ~3,700 on vn-hangxanh. `LootRenderer` draws thin instances, one batch per item id (about 30 draw calls at most), for items within 70 m (small items within 40 m). It rebuilds when the camera moves 4 m, walking the 8 m spatial hash without allocating (`forEachGroundLoot`). It has no hard item cap: buffers grow by doubling.
+  - `lootStats.test.ts` enforces per-map floors on every category and on medkits, first aid, bandages, frags, smokes and each armor / backpack level, the frag > smoke ≫ flash > molotov order, the share of buildings holding a throwable, plus item ceilings (2,300 / 1,900 buildings-only, 2,700 / 2,350 with outdoor piles, 2,200 for vn-phandangluu).
+- **Client cost:** ~2,450 items on Map v1 and ~2,100 on vn-hangxanh (~3,200 / ~3,700 before the maps halved). `LootRenderer` draws thin instances, one batch per item id (about 30 draw calls at most), for items within 70 m (small items within 40 m). It rebuilds when the camera moves 4 m, walking the 8 m spatial hash without allocating (`forEachGroundLoot`). It has no hard item cap: buffers grow by doubling.
   - Pickup queries stay local: 2.6 m reach at 10 Hz.
   - Bot loot scans (2 Hz, 35 m) keep only the nearest 64 items (`queryGroundLootInto` limit; the brain weighs 48), so dense towns cost O(n · 64) per scan instead of O(n²).
-  - Online (`apps/server-match/test/serverLoot.test.ts`, 20 clients on Map v1): the server drops throwables (`ServerLoot` filters the category, since it cannot simulate them yet) and any loot id ≥ `NET_LOOT_ID_LIMIT` (16,384). v5 generates 3,270 items and streams the ~2,760 non-throwable ones at 3.2 KB mean per client at join (max 5.8 KB, budget 16 KB) and 0.36 kbps mean while roaming (max 0.77, budget 6) — v4's 2,828 generated items cost 3.0 KB and 0.30 kbps, v3's 2,305 cost 2.3 KB and 0.26 kbps.
+  - Online (`apps/server-match/test/serverLoot.test.ts`, 20 clients on Map v1): the server drops throwables (`ServerLoot` filters the category, since it cannot simulate them yet) and any loot id ≥ `NET_LOOT_ID_LIMIT` (16,384). v5 generates 3,270 items and streams the ~2,760 non-throwable ones at 3.2 KB mean per client at join (max 5.8 KB, budget 16 KB) and 0.36 kbps mean while roaming (max 0.77, budget 6) — v4's 2,828 generated items cost 3.0 KB and 0.30 kbps, v3's 2,305 cost 2.3 KB and 0.26 kbps. (Measured on the 1 km Map v1; the 500 m map generates about 2,450 items, so these are upper bounds.)
   - **If networked throwables land** and `ServerLoot` stops filtering the category, Map v1 replicates ~3,220 items instead of ~2,760 (+17 %) and vn-hangxanh ~3,730, so the join cost becomes roughly 3.7 KB mean / 6.8 KB max per client and roaming ~0.42 kbps — still well inside the 16 KB and 6 kbps budgets. Nothing else has to change: `generateLoot` already numbers throwables in the same dense `lootId` sequence (filtering happens in `ServerLoot`'s constructor, not in the generator), so keeping them renumbers nothing, and the worst-case total stays under a quarter of the 16,384-id wire limit.
 - **Stability:** each spot's RNG comes from `(seed, hash(buildingId), spotIndex)`, so editing one building never reshuffles another building's loot (tested).
 - **Runtime ground loot:** a `GroundLoot` store with an 8 m spatial hash and `version` (netcode `lootVersion`).

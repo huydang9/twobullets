@@ -45,11 +45,11 @@ const FAKE_GRID: NavGrid = {
     cellSize: 0.5,
     buildingCellSize: 0.25,
     coarseCellSize: 4,
-    originX: -500,
-    originZ: -500,
-    width: 2000,
-    depth: 2000,
-    terrainNodes: 4_000_000,
+    originX: -250,
+    originZ: -250,
+    width: 1000,
+    depth: 1000,
+    terrainNodes: 1_000_000,
     buildingNodes: 0,
     components: 1,
     byteLength: 0,
@@ -71,7 +71,7 @@ export class FakeNavQuery implements NavQuery {
 
   constructor(options: FakeNavOptions = {}) {
     this.groundY = options.groundY ?? 0;
-    this.halfExtent = options.halfExtent ?? 500;
+    this.halfExtent = options.halfExtent ?? 250;
     this.boxes = [...(options.boxes ?? [])];
     this.pendingUpdates = options.pendingUpdates ?? 1;
     this.flagFn = options.flags ?? null;
@@ -91,8 +91,8 @@ export class FakeNavQuery implements NavQuery {
   flagsAt(ref: number): number {
     if (ref < 0) return 0;
     if (!this.flagFn) return NavFlag.walkable;
-    const x = (ref % 2000) * 0.5 - 500;
-    const z = Math.floor(ref / 2000) * 0.5 - 500;
+    const x = (ref % 1000) * 0.5 - 250;
+    const z = Math.floor(ref / 1000) * 0.5 - 250;
     return this.flagFn(x, z) | NavFlag.walkable;
   }
 
@@ -197,9 +197,9 @@ export class FakeNavQuery implements NavQuery {
   }
 
   private ref(x: number, z: number): number {
-    const ix = Math.max(0, Math.min(1999, Math.floor((x + 500) / 0.5)));
-    const iz = Math.max(0, Math.min(1999, Math.floor((z + 500) / 0.5)));
-    return iz * 2000 + ix;
+    const ix = Math.max(0, Math.min(999, Math.floor((x + 250) / 0.5)));
+    const iz = Math.max(0, Math.min(999, Math.floor((z + 250) / 0.5)));
+    return iz * 1000 + ix;
   }
 
   private detour(fx: number, fz: number, tx: number, tz: number): [number, number] | null {

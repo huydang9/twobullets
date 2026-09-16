@@ -37,9 +37,9 @@ describe("match config from lobby/queue settings", () => {
     expect(parseSettings({})).toEqual({ mode: "duo", maxPlayers: 10, mapId: "v1", fillWithBots: true });
     expect(parseSettings({ maxPlayers: 2.5 })).toBe("maxPlayers");
     // Real-world maps use the client's ids and are playable; unknown or old ids are rejected.
-    for (const mapId of ["cz-holasovice", "vn-camthanh", "jp-shirakawago", "vn-hangxanh", "vn-phandangluu"]) expect(parseSettings({ mapId })).toMatchObject({ mapId });
+    for (const mapId of ["vn-hangxanh", "vn-phandangluu"]) expect(parseSettings({ mapId })).toMatchObject({ mapId });
     expect(parseSettings({ mapId: "vn-hoian" })).toBe("mapId");
-    expect(MAPS.map((m) => m.id)).toEqual(["v1", "arena", "cz-holasovice", "vn-camthanh", "jp-shirakawago", "vn-hangxanh", "vn-phandangluu"]);
+    expect(MAPS.map((m) => m.id)).toEqual(["v1", "arena", "vn-hangxanh", "vn-phandangluu"]);
   });
 
   it("botDifficulty is optional, validated, inherited by updates and copied into MatchConfig", () => {

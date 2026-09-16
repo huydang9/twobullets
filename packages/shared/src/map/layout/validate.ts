@@ -30,7 +30,7 @@ export interface MapIssue {
 }
 
 export interface ValidationOptions {
-  /** Minimum distance between major POI centers, m. */
+  /** Minimum distance between major POI centers, m (default 120: the maps are a 500 m square). */
   readonly poiSpacing?: number;
   /** Minimum distance between a minor POI's center and any other POI center, m (also at least both radii + 40 m). */
   readonly minorPoiSpacing?: number;
@@ -94,14 +94,14 @@ export function validateMapLayout(map: MapData, terrain: Terrain, layout: MapLay
   }
 
   // POI spacing: major POIs keep `poiSpacing` between them; a minor POI (hamlet, camp) keeps `minorPoiSpacing` from any POI.
-  const spacing = options.poiSpacing ?? 250;
-  const minorSpacing = options.minorPoiSpacing ?? 150;
+  const spacing = options.poiSpacing ?? 120;
+  const minorSpacing = options.minorPoiSpacing ?? 80;
   const minorRadius = options.minorPoiRadius ?? 40;
   for (const poi of map.pois) {
     for (const other of map.pois) {
       if (other === poi) continue;
       const d = distance(poi.center[0], poi.center[1], other.center[0], other.center[1]);
-      const needed = poi.radius <= minorRadius || other.radius <= minorRadius ? Math.max(minorSpacing, poi.radius + other.radius + 40) : spacing;
+      const needed = poi.radius <= minorRadius || other.radius <= minorRadius ? Math.max(minorSpacing, poi.radius + other.radius + 20) : spacing;
       if (d < needed) issue("poi-spacing", `${poi.id} is ${d.toFixed(0)} m from ${other.id} (needs ${needed.toFixed(0)} m)`);
     }
   }

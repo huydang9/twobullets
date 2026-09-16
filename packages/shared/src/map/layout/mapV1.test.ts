@@ -27,9 +27,9 @@ describe("Map v1 layout", () => {
     expect(of("building-entrance")).toEqual([]);
   });
 
-  it("spreads the seven major POIs at least 250 m apart, and the four minor ones at least 150 m from any POI", () => {
-    expect(MAP_V1.pois).toHaveLength(11);
-    expect(MAP_V1.pois.filter((p) => p.radius <= 40).map((p) => p.id)).toEqual(["millbrook", "truckstop", "camp", "orchard"]);
+  it("spreads the seven POIs over the 500 m square, at least 120 m apart", () => {
+    expect(MAP_V1.pois).toHaveLength(7);
+    expect(MAP_V1.pois.filter((p) => p.radius <= 40)).toEqual([]);
     expect(of("poi-spacing")).toEqual([]);
   });
 
@@ -104,6 +104,6 @@ describe("Map v1 layout", () => {
     for (const [dx, dz] of [[-40, -40], [40, 40], [-40, 36], [30, -20]] as const) {
       expect(terrain.sampleHeight(x + dx, z + dz)).toBeCloseTo(h, 3);
     }
-    expect(distance(x, z, 0, 0)).toBeGreaterThan(250);
+    expect(distance(x, z, 0, 0)).toBeGreaterThan(150);
   });
 });

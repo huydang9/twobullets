@@ -16,7 +16,7 @@ import { TerrainMaterial } from "./TerrainMaterial";
 import { TerrainRenderer } from "./TerrainRenderer";
 import { createHorizonMesh } from "./horizon";
 
-/** Camera far plane for 1 km views plus the horizon mountains, m. */
+/** Camera far plane for the outdoor maps plus the horizon mountains, m. */
 export const LARGE_WORLD_FAR_PLANE = 4000;
 
 export interface DevMapWorld {

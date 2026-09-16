@@ -29,7 +29,7 @@ Contents:
 |---|---|---|
 | Bot control | A bot is a `BotBrain` that writes one `PlayerInput` (+ small `BotIntents`) per 60 Hz tick. Movement, weapons and equipment are the shared steps; no teleports, no speed or damage scaling | Server-ready (M5 lobby bots are just another input source); no cheating by construction |
 | Where the match runs | A headless **`MatchSim`** in `packages/sim/src/match` (NullEngine + Havok, Node-safe) owns bots, projectiles, rules, zone. The client hosts it; the offline human stays on the existing `PlayerController`/`CombatSystem`/`EquipmentSystem` path and joins as a `MatchExternalActor` | Same code in Node tests and the browser; no risky refactor of the verified offline player; M5 server replaces the external actor with networked players |
-| Navigation | **Deterministic 2.5D grid built from MapData** (terrain 0.5 m + per-prefab building span layers 0.25 m + 4 m coarse guide grid), time-sliced A*. Not Recast | Pure TS, no WASM dependency in `shared`, builds in ~0.5 s, bit-identical in Node and browser, cheap cost overlays (zone, danger, cover) |
+| Navigation | **Deterministic 2.5D grid built from MapData** (terrain 0.5 m + per-prefab building span layers 0.25 m + 4 m coarse guide grid), time-sliced A*. Not Recast | Pure TS, no WASM dependency in `shared`, builds in ~0.3 s, bit-identical in Node and browser, cheap cost overlays (zone, danger, cover) |
 | Hit registration for bot bullets | Shared procedural rig (`hitreg/rig.ts`, ADR 0003/0206) against every actor pose, including the human | Needed headless (no skinned meshes in Node); it is the M4 server model anyway |
 | Human bullets on bots | Existing Havok bone hitboxes on the bot's `SoldierCharacter` (unchanged `CombatSystem` path) | Matches what the human sees; blood/wound code already works. Converges on the rig in M4 |
 | Brain model | Utility AI picks a goal at 4 Hz with hysteresis; each goal is a small state machine; a motor layer turns move/aim targets into `PlayerInput` every tick | Easy to tune per difficulty, cheap, debuggable (goal + sub-state labels) |
@@ -131,14 +131,14 @@ Friendly fire is on in every row. Kill credit follows `DamageOutcome.killerId`; 
 | Input | Exact analytic data: heightfield, prefab box/wedge parts, rooms/openings/stairs/entrances, prop collider groups | Triangle soup (2 M terrain triangles + buildings + props) |
 | Determinism | Integer/float TS, same checksum in Node and browser (tested) | Float WASM, deterministic per build; harder to checksum |
 | Dependency | None (fits ADR 0005: `shared` has zero runtime deps) | WASM package in `shared` or a `sim`-only nav, breaking pure bots |
-| Build (1 km²) | ~0.5 s Node, ~0.7 s in the map worker | 5–20 s single-thread at 0.2 m cells, ~100+ MB peak |
-| Memory | ~15 MB static + ~2 MB search scratch | 20–60 MB navmesh + tiles |
+| Build (0.25 km²) | ~0.3 s Node, ~0.45 s in the map worker | 5–20 s single-thread at 0.2 m cells, ~100+ MB peak |
+| Memory | ~5 MB static + ~5 MB search scratch | 20–60 MB navmesh + tiles |
 | Cost overlays (zone, danger, cover, vegetation) | Per-cell flags, trivial | Area types + query filters; dynamic costs awkward |
 | Weakness | Stair-step paths (fixed by string pulling), large grids need hierarchy | Better corridor quality, crowd avoidance we don't need |
 
 ### 3.2 Layers
 
-1. **Terrain layer** (world-aligned, `cellSize` 0.5 m over the playable square: 2000 × 2000 cells, `Uint8Array` of `NavFlag` bits, `Uint16Array` component ids).
+1. **Terrain layer** (world-aligned, `cellSize` 0.5 m over the playable square: 1000 × 1000 cells, `Uint8Array` of `NavFlag` bits, `Uint16Array` component ids).
    - Walkable when slope ≤ 40° (`Terrain.slopeTanAt`, margin under the 50° controller limit) and inside `playableHalfExtent`.
    - Blocked: every prop collider from `propColliderGroups(layout)` (cylinders and yaw boxes, fences too since they block movement), rasterized with `agentRadius` 0.3 m inflation; every building `base` rect (interiors come from layer 2).
    - Flags: `road` from the surface mask, `vegetation` from bush/fern instances (no collider), `nearObstacle` for cells within 1 cell of a blocked cell.
@@ -147,7 +147,7 @@ Friendly fire is on in every row. Kill credit follows `DamageOutcome.killerId`; 
    - Per column, up to 4 **spans**: the top of each `floor`/`stairs`/`foundation`/`structure` part a capsule can stand on, with ≥ 1.8 m clearance (walkable) or ≥ 1.15 m (`crouchOnly`), tested with `PartBvh.overlapsBox` inflated by `agentRadius`.
    - Neighbours connect when |Δy| ≤ `MOVEMENT.maxStepHeight` (0.35 m), which links stair treads to landings automatically. `door` flags come from `openings`, `stairs` from flights, `indoor` from rooms.
    - Placement links: each prefab `entrance` and every perimeter span within 0.35 m of the terrain height outside connects to the nearest walkable terrain cell (world transform by `localToWorld`).
-3. **Coarse guide grid** (4 m, 250 × 250): walkable if the fine cells in it share a dominant component; edge costs from the fine traversable fraction. Used for long routes only.
+3. **Coarse guide grid** (4 m, 125 × 125): walkable if the fine cells in it share a dominant component; edge costs from the fine traversable fraction. Used for long routes only.
 
 `NavNodeRef` packs terrain cells first (`iz × width + ix`), then building spans (per-placement base offset + prefab span index).
 
@@ -162,18 +162,20 @@ Friendly fire is on in every row. Kill credit follows `DamageOutcome.killerId`; 
 - **Smoothing:** string pulling with `lineWalkable` (a supercover line over one layer; crossing a door or stair span keeps that waypoint). Output `NavPath` holds feet-height points and flags (walk through doors/stairs, crouch on `crouchOnly`).
 - `sampleRing` returns seeded walkable candidates for cover, strafe, flee and loot approach.
 
-### 3.4 Estimates (Map v1, M2 P-core, Node 24)
+### 3.4 Measured (Map v1, M2 P-core, Node 24, `tools/bench/bots/nav.ts`)
 
 | Part | Size | Build |
 |---|---|---|
-| Terrain flags, 4 M cells × 1 B | 4.0 MB | slope pass ~0.16 s |
-| Component ids, 4 M × 2 B | 8.0 MB | flood fill ~0.15 s |
-| Prop and building rasterization (3,857 colliders, 43 bases, 2,103 bushes) | in the flags | ~0.03 s |
-| Building spans, 12 prefabs (~1,300 m² × 16 cells/m² × ~1.5 spans) ≈ 31 k spans | ~0.4 MB | ~0.08 s |
-| Placement links (43 buildings) | < 0.05 MB | < 0.01 s |
-| Coarse grid 62.5 k cells + portal costs | ~0.5 MB | ~0.05 s |
-| **Static total** | **≈ 13–15 MB** | **≈ 0.5 s** (worker ≈ 0.7 s) |
-| Search scratch (fine window 102 k + coarse 62.5 k nodes × 10 B) | ≈ 1.7 MB | per request |
+| Terrain flags, 1 M cells × 1 B | 1.0 MB | slope 28 ms, road 32 ms, `nearObstacle` 31 ms |
+| Component ids, 1 M × 2 B | 2.0 MB | flood fill 68 ms |
+| Prop and building rasterization (1,355 prop instances, 62 bases) | in the flags | 21 ms |
+| Building spans, 12 prefabs: 35,144 prefab spans → 103,837 placed (101,774 walkable) | ≈ 1.9 MB | prefab layers 36 ms |
+| Placement links (62 buildings, 925 links, 0 overflow columns) | < 0.05 MB | 22 ms |
+| Coarse grid 125 × 125 cells + portal costs | ≈ 0.2 MB | 48 ms |
+| **Static total** | **5.03 MB** (5.05 MB serialized) | **0.30 s** (worker ≈ 0.45 s) |
+| Search scratch (fine window + coarse nodes) | 4.93 MB | per request |
+
+Of the 1 M terrain cells, 946 k are walkable (94.6 %); 22.3 k are slope-blocked, 14.3 k prop-blocked and 17.4 k building-blocked. 64 components, main component 0.239 km², 344 islands under 8 m² cleared. Random queries: short (20–100 m) p50 171 expansions / 0.09 ms, long (100–450 m) p50 3,423 / 0.84 ms; every POI pair resolves.
 
 - **Client:** build in the map worker after the layout (the nav module is pure, so it runs there) and transfer the arrays.
 - **Bake:** add a gzip bake like the terrain (estimate ~0.5 MB) only if the worker build exceeds 1.5 s.
@@ -380,20 +382,20 @@ Pure module `shared/match/{zone,rules,spawns}.ts`; `MatchSim` feeds it facts and
 
 ### 8.2 Zone
 
-The initial circle is center (0, 0), r 710 m (covers the ±500 m square). Phase N is announced when phase N − 1's shrink ends; phase 1 is announced 60 s into combat.
+The initial circle is center (0, 0), r 355 m (250·√2, so it covers the ±250 m square). Phase N is announced when phase N − 1's shrink ends; phase 1 is announced 30 s into combat.
 
 | Phase | Announced | Wait | Shrink | End radius | Damage outside |
 |---|---|---|---|---|---|
-| 1 | 1:00 | 120 s | 60 s (3:00–4:00) | 400 m | 1 HP/s |
-| 2 | 4:00 | 60 s | 45 s (5:00–5:45) | 250 m | 2 HP/s |
-| 3 | 5:45 | 45 s | 40 s (6:30–7:10) | 150 m | 3 HP/s |
-| 4 | 7:10 | 40 s | 30 s (7:50–8:20) | 90 m | 5 HP/s |
-| 5 | 8:20 | 30 s | 30 s (8:50–9:20) | 45 m | 8 HP/s |
-| 6 | 9:20 | 25 s | 25 s (9:45–10:10) | 20 m | 12 HP/s |
-| 7 | 10:10 | 20 s | 25 s (10:30–10:55) | 0 m | 20 HP/s |
+| 1 | 0:30 | 70 s | 40 s (1:40–2:20) | 200 m | 1 HP/s |
+| 2 | 2:20 | 35 s | 30 s (2:55–3:25) | 125 m | 2 HP/s |
+| 3 | 3:25 | 30 s | 25 s (3:55–4:20) | 75 m | 3 HP/s |
+| 4 | 4:20 | 25 s | 20 s (4:45–5:05) | 45 m | 5 HP/s |
+| 5 | 5:05 | 20 s | 20 s (5:25–5:45) | 25 m | 8 HP/s |
+| 6 | 5:45 | 20 s | 15 s (6:05–6:20) | 12 m | 12 HP/s |
+| 7 | 6:20 | 20 s | 15 s (6:40–6:55) | 0 m | 20 HP/s |
 
-- **Length:** the circle closes at 10:55 of combat (11:00 with the countdown), so matches last about 10–11.5 min. The time cap is 12:00 of combat.
-- **Centers:** seeded by `hash32(seed, phase)`. The new center lies within `from.r − to.r` of the previous center and within ±(500 − `edgeMargin` (40) − 0.5 × `to.r`) of the origin. It is re-rolled (up to 16 tries, then the previous center) when an injected `isValidCenter(x, z)` (nav: walkable, main component) fails.
+- **Length:** the circle closes at 6:55 of combat, so matches last about 7 min. The time cap is 8:00 of combat. The waits, shrinks and the dps ladder were set on 2026-09-15; only the radii halved with the map on 2026-09-16 (`ZONE_PLAYABLE_HALF_EXTENT` 250).
+- **Centers:** seeded by `hash32(seed, phase)`. The new center lies within `from.r − to.r` of the previous center and within ±(250 − `edgeMargin` (20) − 0.5 × `to.r`) of the origin. It is re-rolled (up to 16 tries, then the previous center) when an injected `isValidCenter(x, z)` (nav: walkable, main component) fails.
 - **`zoneAt(tick)`:** lerp center and radius during the shrink. The pure function is shared by the rules, HUD, bots and the future client (netcode §8.2 wire fields match `ZonePhase`).
 - **Damage:** every 6 ticks, `dps × 0.1` of `kind: "zone"` to actors whose horizontal distance to the center exceeds `current.r`, downed included, no armor. A zone knock or kill has cause `"zone"`.
 - **Warnings:** `zoneWarning` events 30 s and 10 s before each shrink.
@@ -518,7 +520,7 @@ DEV console `__twobullets.match`:
   - every building entrance and ≥ 98 % of loot spots reachable from the town square
   - watchtower platform reachable
   - build < 2 s, bytes < 24 MB
-- **Zone:** `zoneAt` continuity at phase boundaries, containment of each next circle, seeded determinism, the schedule sums to 10:55, `timeScale`.
+- **Zone:** `zoneAt` continuity at phase boundaries, containment of each next circle, seeded determinism, the schedule sums to 6:55, `timeScale`.
 - **Rules:** knock vs kill by team state, team wipe credit to the knocker, placements with same-tick wipes, `allDead`, time-cap ranking, death drop contents.
 - **Aim model:** error distributions per difficulty against an analytic strafing target (median error ordered easy > normal > hard); recoil compensation reduces vertical drift; the fire gate never opens with a teammate on the line.
 - **Brain fixtures** (hand-built `BotWorldView` + fake nav):
@@ -604,4 +606,4 @@ Four implementation agents, exclusive write ownership. All read the contracts; c
 2. **After the human dies:** keep the match running with spectate, or end the offline match for the human right away? *Default: death screen with "Spectate teammate" and "New match".*
 3. **Death boxes:** drop the whole inventory as a ground pile on death? *Default: yes.*
 4. **Teammate bot difficulty:** the same as the selected difficulty, or always hard? *Default: same as selected.*
-5. **Match pacing:** the zone table gives ~11 min with a 1:00 first announcement and 20 HP/s final damage. *Default: as tabled; `?zoneScale` for testing.*
+5. **Match pacing:** the zone table gives ~7 min with a 0:30 first announcement and 20 HP/s final damage. *Default: as tabled; `?zoneScale` for testing.*
