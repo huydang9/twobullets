@@ -13,7 +13,7 @@ import { ITEMS, type ItemCategory, type ItemId } from "./items";
 import { createRng, hash32, hashString, len2, len3, pickWeighted } from "./math";
 
 /** Bump when tables or generation change; part of the match content hash (netcode §8.3). */
-export const LOOT_TABLE_VERSION = 5;
+export const LOOT_TABLE_VERSION = 6;
 
 type Tier = 0 | 1 | 2;
 type TierTable<K extends string> = readonly [Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>, Readonly<Partial<Record<K, number>>>];
@@ -43,9 +43,9 @@ export const LOOT = {
 
   /** Rolls after a pile's gun (the weapon weight is a second gun). */
   category: [
-    { weapon: 8, ammo: 14, heal: 33, boost: 9, throwable: 12, armor: 34, backpack: 14, attachment: 0 },
-    { weapon: 9, ammo: 14, heal: 31, boost: 9, throwable: 13, armor: 35, backpack: 14, attachment: 0 },
-    { weapon: 10, ammo: 13, heal: 28, boost: 10, throwable: 14, armor: 37, backpack: 13, attachment: 0 },
+    { weapon: 8, ammo: 14, heal: 33, boost: 9, throwable: 17, armor: 34, backpack: 14, attachment: 0 },
+    { weapon: 9, ammo: 14, heal: 31, boost: 9, throwable: 18, armor: 35, backpack: 14, attachment: 0 },
+    { weapon: 10, ammo: 13, heal: 28, boost: 10, throwable: 19, armor: 37, backpack: 13, attachment: 0 },
   ] satisfies TierTable<LootCategory>,
   weapon: [
     { weapon_pistol: 18, weapon_shotgun: 30, weapon_rifle: 42, weapon_sniper: 10 },
@@ -62,16 +62,17 @@ export const LOOT = {
   guaranteedPrimary: { minSpots: 3, spotsPerPrimary: 8, chance: [0.9, 0.95, 1] },
   /**
    * Medicine, gear and throwables live in buildings, so every building with at least `minSpots` loot spots should hold
-   * 1 + floor(spots / spotsPer) of each kind; each missing one is rolled from the building's tier tables with
-   * `chance` and placed on a free spot as a new pile, else joined to a pile with room.
+   * base (default 1) + floor(spots / spotsPer) of each kind; each missing one is rolled from the building's tier tables
+   * with `chance` and placed on a free spot as a new pile, else joined to a pile with room. Throwables use base 2 (table
+   * v6) so the small houses of real maps hold a few, not one.
    */
   guaranteedSupplies: {
     chance: [0.85, 0.92, 1],
     heal: { minSpots: 1, spotsPer: 5 },
     armor: { minSpots: 2, spotsPer: 5 },
     backpack: { minSpots: 3, spotsPer: 11 },
-    throwable: { minSpots: 1, spotsPer: 4 },
-  } as Readonly<{ chance: readonly number[] } & Record<SupplyKind, { minSpots: number; spotsPer: number }>>,
+    throwable: { minSpots: 1, spotsPer: 2.2, base: 2 },
+  } as Readonly<{ chance: readonly number[] } & Record<SupplyKind, { minSpots: number; spotsPer: number; base?: number }>>,
   /** A loose ammo roll picks the ammo of a gun already found in the same building with this chance. */
   matchingAmmoChance: 0.6,
   ammo: [
@@ -86,18 +87,20 @@ export const LOOT = {
   ] satisfies TierTable<ItemId>,
   boost: [{ energy_drink: 65, painkiller: 35 }, { energy_drink: 60, painkiller: 40 }, { energy_drink: 55, painkiller: 45 }] satisfies TierTable<ItemId>,
   throwable: [
-    { frag: 34, smoke: 30, flash: 20, molotov: 16 },
-    { frag: 34, smoke: 30, flash: 20, molotov: 16 },
-    { frag: 36, smoke: 29, flash: 19, molotov: 16 },
+    { frag: 34, smoke: 30, flash: 19, molotov: 17 },
+    { frag: 34, smoke: 30, flash: 19, molotov: 17 },
+    { frag: 35, smoke: 29, flash: 19, molotov: 17 },
   ] satisfies TierTable<ItemId>,
   /**
-   * Tables for the guaranteed throwable (table v5), picked by how many the building already holds: the first is nearly
-   * always a frag and the second a smoke, so looting two or three buildings reliably turns up one of each. Flash and
-   * molotov come mostly from ordinary rolls.
+   * Tables for the guaranteed throwable, cycled by how many the building already holds: the first is nearly always a
+   * frag and the second a smoke (table v5), so looting two or three buildings reliably turns up one of each; the third
+   * leans to flash and molotov and the fourth is frag or smoke again (table v6).
    */
   supplyThrowable: [
     { frag: 84, smoke: 9, flash: 4, molotov: 3 },
     { frag: 15, smoke: 78, flash: 4, molotov: 3 },
+    { frag: 16, smoke: 14, flash: 37, molotov: 33 },
+    { frag: 50, smoke: 38, flash: 7, molotov: 5 },
   ] satisfies readonly Readonly<Partial<Record<ItemId, number>>>[],
   /** Armor and backpack level weights (L1, L2, L3). */
   level: [
@@ -236,8 +239,11 @@ export function generateLoot(seed: number, pois: readonly PointOfInterest[], bui
         drafts.push({ spotIndex: free, items: [...instances] });
         return;
       }
+      // A full building's top-ups join a pile with a gun where one has room, so they don't pile up on each other.
       const roomy = drafts.filter((d) => d.items.length + instances.length <= LOOT.maxItemsPerPile + 1);
-      if (roomy.length > 0) roomy[Math.floor(random() * roomy.length)]!.items.push(...instances);
+      const armed = roomy.filter((d) => d.items.some((item) => ITEMS[item.itemId].category === "weapon"));
+      const pool = armed.length > 0 ? armed : roomy;
+      if (pool.length > 0) pool[Math.floor(random() * pool.length)]!.items.push(...instances);
     };
 
     const guarantee = LOOT.guaranteedPrimary;
@@ -253,7 +259,7 @@ export function generateLoot(seed: number, pois: readonly PointOfInterest[], bui
     for (const kind of SUPPLY_KINDS) {
       const rule = supplies[kind];
       if (spots.length < rule.minSpots) continue;
-      const want = 1 + Math.floor(spots.length / rule.spotsPer);
+      const want = (rule.base ?? 1) + Math.floor(spots.length / rule.spotsPer);
       for (let k = context.supplies[kind]; k < want; k++) {
         if (supplyRng() >= supplies.chance[tier]!) continue;
         addTopUp(rollCategory(kind, supplyRng, context, true), supplyRng);

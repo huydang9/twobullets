@@ -37,7 +37,7 @@ interface Stats {
   bigPrimary: number;
   /** Guns whose pile also holds their ammo. */
   gunsWithAmmo: number;
-  /** Buildings holding at least one throwable, one frag and one smoke (table v5's guaranteed throwable). */
+  /** Buildings holding at least one throwable, one frag and one smoke (the guaranteed throwable, tables v5 and v6). */
   anyThrowable: number;
   anyFrag: number;
   anySmoke: number;
@@ -158,21 +158,22 @@ function report(name: string, s: Stats): Report {
 
 /**
  * Floors per building-only map: guns, ammo and boosts keep their table v3 levels, heals, armor and backpacks the
- * levels table v4 raised them to (the medicine and gear pass), throwables the levels table v5 raised them to (the
- * guaranteed throwable). Set a few percent under the measured averages, so a table edit that quietly thins them out
- * fails here.
+ * levels table v4 raised them to (the medicine and gear pass), throwables the levels table v6 doubled them to (flash
+ * and molotov about 3x). Set a few percent under the measured averages, so a table edit that quietly thins them out
+ * fails here. Table v6 reseeded every building and its extra throwables dilute the other rolls a little, so some
+ * floors sit a few percent under their older levels.
  */
 const FLOORS = {
   // Map v1 halved to a 500 m square on 2026-09-16: 53 buildings with loot spots instead of 85, so the totals fall with
   // the building count while the per-building density is unchanged.
   "Map v1": {
-    categories: { weapon: 385, ammo: 465, heal: 285, throwable: 320, armor: 290, boost: 53, backpack: 139 },
-    items: { medkit: 59, first_aid: 102, bandage: 123, frag: 144, smoke: 132, "helmet_1+vest_1": 158, "helmet_2+vest_2": 98, "helmet_3+vest_3": 34, backpack_2: 46, backpack_3: 18 },
+    categories: { weapon: 375, ammo: 452, heal: 285, throwable: 600, armor: 290, boost: 50, backpack: 139 },
+    items: { medkit: 59, first_aid: 99, bandage: 123, frag: 232, smoke: 208, flash: 84, molotov: 72, "helmet_1+vest_1": 158, "helmet_2+vest_2": 98, "helmet_3+vest_3": 34, backpack_2: 46, backpack_3: 16 },
   },
   // Regenerated as a 500 m square on 2026-09-16: 110 buildings instead of 190.
   "vn-hangxanh": {
-    categories: { weapon: 353, ammo: 424, heal: 219, throwable: 210, armor: 250, boost: 49, backpack: 118 },
-    items: { medkit: 50, first_aid: 79, bandage: 89, frag: 87, smoke: 84, "helmet_1+vest_1": 126, "helmet_2+vest_2": 87, "helmet_3+vest_3": 37, backpack_2: 40, backpack_3: 17 },
+    categories: { weapon: 353, ammo: 424, heal: 219, throwable: 418, armor: 243, boost: 48, backpack: 118 },
+    items: { medkit: 50, first_aid: 76, bandage: 89, frag: 162, smoke: 138, flash: 61, molotov: 54, "helmet_1+vest_1": 118, "helmet_2+vest_2": 87, "helmet_3+vest_3": 33, backpack_2: 40, backpack_3: 16 },
   },
 } as const;
 
@@ -193,9 +194,9 @@ function expectPlenty(name: keyof typeof FLOORS, r: Report, minGuns: number): vo
   expect(r.item("helmet_2+vest_2")).toBeGreaterThan(r.item("helmet_3+vest_3"));
   expect(r.item("bandage")).toBeGreaterThan(r.item("first_aid"));
   expect(r.item("first_aid")).toBeGreaterThan(r.item("medkit"));
-  // Throwables (table v5): frag and smoke are the common two, then flash, then molotov.
+  // Throwables (table v6): frag and smoke are the common two, then flash, then molotov.
   expect(r.item("frag")).toBeGreaterThan(r.item("smoke"));
-  expect(r.item("smoke")).toBeGreaterThan(r.item("flash") * 2);
+  expect(r.item("smoke")).toBeGreaterThan(r.item("flash") * 1.5);
   expect(r.item("flash")).toBeGreaterThan(r.item("molotov"));
   // Nearly every building holds one, so looting two or three reliably turns up a frag and a smoke.
   expect(r.throwableShare).toBeGreaterThan(0.95);
@@ -227,15 +228,15 @@ function outdoorWorld(map: MapData): OutdoorLootWorld {
 describe("loot weapon availability", () => {
   it("Map v1", () => {
     const r = report("Map v1", measure(MAP_V1.pois, MAP_V1.buildings));
-    expectPlenty("Map v1", r, 385);
-    expect(r.items).toBeLessThan(2300);
+    expectPlenty("Map v1", r, 375);
+    expect(r.items).toBeLessThan(2400);
   });
 
   it("vn-hangxanh", async () => {
     const { map } = await loadRealMap("vn-hangxanh");
     const r = report("vn-hangxanh", measure(map.pois, map.buildings));
     expectPlenty("vn-hangxanh", r, 353);
-    expect(r.items).toBeLessThan(1900);
+    expect(r.items).toBeLessThan(2000);
   }, 60_000);
 
   it("Map v1 with outdoor piles", () => {
@@ -243,7 +244,7 @@ describe("loot weapon availability", () => {
     const r = report("Map v1 + outdoor", measure(MAP_V1.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
     // What the client spawns: LootRenderer draws about 3,200 items at ~30 draw calls (docs/equipment/design.md §6).
-    expect(r.items).toBeLessThan(2700);
+    expect(r.items).toBeLessThan(2800);
     expectOutdoorPlacement(MAP_V1.pois, world.layout.buildings, world);
   }, 120_000);
 
@@ -252,7 +253,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-hangxanh + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    expect(r.items).toBeLessThan(2350);
+    expect(r.items).toBeLessThan(2450);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
   it("vn-phandangluu with outdoor piles", async () => {
@@ -260,7 +261,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-phandangluu + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    expect(r.items).toBeLessThan(2200);
+    expect(r.items).toBeLessThan(2300);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
 });

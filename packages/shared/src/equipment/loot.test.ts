@@ -69,16 +69,16 @@ describe("loot generation", () => {
   it("gives every building loot, nearly every pile a gun, and plenty for 20 players on the 500 m map", () => {
     const withLoot = new Set(layout.piles.map((p) => p.buildingId));
     expect(withLoot.size).toBe(buildings.filter((b) => isBuildingPrefabId(b.prefab) && b.prefab !== "container_closed").length);
-    expect(layout.piles.length).toBeGreaterThan(820);
-    expect(layout.piles.length).toBeLessThan(1000);
-    expect(layout.items.length).toBeGreaterThan(1900);
-    expect(layout.items.length).toBeLessThan(2300);
+    expect(layout.piles.length).toBeGreaterThan(1050);
+    expect(layout.piles.length).toBeLessThan(1200);
+    expect(layout.items.length).toBeGreaterThan(2100);
+    expect(layout.items.length).toBeLessThan(2400);
     for (const pile of layout.piles) {
       expect(pile.items.length).toBeGreaterThanOrEqual(1);
       expect(pile.items.length).toBeLessThanOrEqual(LOOT.maxItemsPerPile + 1);
       expect(pile.outdoor).toBeUndefined();
     }
-    // Rolled piles (2+ items) nearly always hold a gun; single-item piles are the guaranteed heal/armor top-ups.
+    // Rolled piles (2+ items) nearly always hold a gun; single-item piles are the guaranteed heal/armor/throwable top-ups.
     const rolled = layout.piles.filter((p) => p.items.length > 1);
     const armed = rolled.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "weapon"));
     expect(armed.length / rolled.length).toBeGreaterThan(0.85);
@@ -86,26 +86,28 @@ describe("loot generation", () => {
     expect(counts.weapon).toBeGreaterThanOrEqual(380);
     expect(counts.ammo).toBeGreaterThanOrEqual(counts.weapon!);
     expect(counts.heal).toBeGreaterThanOrEqual(280);
-    expect(counts.throwable).toBeGreaterThanOrEqual(320);
+    expect(counts.throwable).toBeGreaterThanOrEqual(590);
     expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(280);
     expect(counts.backpack).toBeGreaterThanOrEqual(130);
     // Heals and gear are findable: a medkit in every few buildings, armor of every level (table v4).
     const ids = itemCounts(layout);
     expect(ids.medkit).toBeGreaterThanOrEqual(50);
-    expect(ids.first_aid).toBeGreaterThanOrEqual(90);
+    expect(ids.first_aid).toBeGreaterThanOrEqual(85);
     expect(ids.bandage).toBeGreaterThanOrEqual(115);
-    // Throwables are findable too (table v5): frag and smoke carry the category, molotov stays the rarest.
+    // Throwables are plentiful (table v6): frag and smoke carry the category, flash and molotov are no longer scarce.
     expect(ids.frag).toBeGreaterThan(ids.smoke!);
     expect(ids.smoke).toBeGreaterThan(ids.flash!);
     expect(ids.flash).toBeGreaterThan(ids.molotov!);
-    expect(ids.frag).toBeGreaterThanOrEqual(135);
-    expect(ids.smoke).toBeGreaterThanOrEqual(120);
+    expect(ids.frag).toBeGreaterThanOrEqual(225);
+    expect(ids.smoke).toBeGreaterThanOrEqual(205);
+    expect(ids.flash).toBeGreaterThanOrEqual(80);
+    expect(ids.molotov).toBeGreaterThanOrEqual(70);
     for (const slot of ["helmet", "vest", "backpack"] as const) {
       expect(ids[`${slot}_1`], `${slot}_1`).toBeGreaterThanOrEqual(60);
       expect(ids[`${slot}_2`], `${slot}_2`).toBeGreaterThanOrEqual(32);
       expect(ids[`${slot}_3`], `${slot}_3`).toBeGreaterThanOrEqual(10);
     }
-    // Every building with loot spots holds at least one heal, and nearly every one a throwable (table v5).
+    // Every building with loot spots holds at least one heal, and nearly every one a throwable (tables v5 and v6).
     const holders = (match: (id: ItemId) => boolean) =>
       new Set(layout.piles.filter((p) => p.items.some((i) => match(i.itemId))).map((p) => p.buildingId));
     const healBuildings = holders((id) => ITEMS[id].category === "heal");
