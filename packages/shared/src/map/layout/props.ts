@@ -93,6 +93,16 @@ const DEFS = [
   { id: "hay_bale_wall", category: "prop", footprint: 1.6, collision: { kind: "box", size: [2.9, 1.16, 0.47], bulletproof: true }, surface: "grass", sink: 0.03, cover: true },
   { id: "sandbag_barrier", category: "prop", footprint: 2.3, collision: { kind: "box", size: [4.5, 1, 0.7], bulletproof: true }, surface: "dirt", sink: 0.03, cover: true },
   { id: "cable_spool", category: "prop", footprint: 0.75, collision: { kind: "cylinder", radius: 0.7, height: 1.4 }, surface: "wood", cover: true },
+  // Vietnamese plants (tools/environment/vn, 2026-09-15): the wilderness woodland on the Saigon maps. Palm trunks are
+  // thin but solid; bamboo, banana and shrubs are walk-through sight cover, like the other bushes.
+  { id: "vn_palm_coconut", category: "tree", footprint: 2.8, collision: { kind: "cylinder", radius: 0.2, height: 7.5 }, surface: "wood", sink: 0.2, cover: true },
+  { id: "vn_palm_coconut_trio", category: "tree", footprint: 4.6, collision: { kind: "cylinder", radius: 0.33, height: 6.8 }, surface: "wood", sink: 0.2, cover: true },
+  { id: "vn_bamboo_clump", category: "bush", footprint: 1, collision: { kind: "none" }, surface: "grass", sink: 0.05 },
+  { id: "vn_banana_plant", category: "bush", footprint: 0.85, collision: { kind: "none" }, surface: "grass" },
+  { id: "vn_monstera", category: "bush", footprint: 0.87, collision: { kind: "none" }, surface: "grass" },
+  { id: "vn_tropical_shrub_1", category: "bush", footprint: 1.44, collision: { kind: "none" }, surface: "grass", sink: 0.05 },
+  { id: "vn_tropical_shrub_3", category: "bush", footprint: 0.95, collision: { kind: "none" }, surface: "grass", sink: 0.05 },
+  { id: "vn_tropical_shrub_5", category: "bush", footprint: 1, collision: { kind: "none" }, surface: "grass" },
   // An open scanned face (no back): place with its back into a slope or cliff, facing downhill.
   { id: "rock_face_large", category: "rock", footprint: 2.6, collision: { kind: "box", size: [3.8, 3.2, 2.6], bulletproof: true }, surface: "concrete", sink: 0.4, cover: true },
   { id: "rock_boulder_large", category: "rock", footprint: 1.4, collision: { kind: "box", size: [2.1, 1.75, 2.1], bulletproof: true }, surface: "concrete", alignToTerrain: true, sink: 0.2, cover: true },

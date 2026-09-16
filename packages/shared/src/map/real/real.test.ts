@@ -4,6 +4,7 @@ import { mapNavProbes, resolveProbes } from "../../bots/nav/mapProbes";
 import { createNavQuery } from "../../bots/nav/navQuery";
 import { distance, pointInPolygon, polygonEdgeDistance, polylineDistance } from "../layout/geometry";
 import { buildMapLayout, type MapLayout } from "../layout/mapLayout";
+import { INSTANCE_STRIDE, sampleWeightGrid, type ScatterRule } from "../layout/scatter";
 import { validateMapLayout } from "../layout/validate";
 import { terrainInputsHash } from "../terrain/bake";
 import { buildTerrain, type Terrain } from "../terrain/terrain";
@@ -154,6 +155,69 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     }
   });
 
+  it("fills its empty ground with woodland that keeps off the city, and leaves the mapped ground level", () => {
+    const scatters = module.map.scatters as readonly ScatterRule[];
+    const wild = scatters.filter((rule) => rule.id.startsWith("wild_"));
+    if (wild.length === 0) {
+      // Village maps have no wilderness: their groves and field cover already fill the space between settlements.
+      expect(scatters.some((rule) => rule.weightGrid)).toBe(false);
+      return;
+    }
+    // One shared coverage mask, and the city-only rules read the same one inverted.
+    const mask = wild[0]!.weightGrid!;
+    expect(scatters.filter((rule) => rule.weightGrid).every((rule) => rule.weightGrid === mask)).toBe(true);
+    expect(scatters.some((rule) => rule.weightGridInvert)).toBe(true);
+    expect(mask.values.length).toBe(mask.columns * mask.rows);
+
+    // The Vietnamese plants are placed by the wilderness rules alone, so every one of them marks wilderness ground.
+    const plants = layout.props.filter((set) => set.prop.startsWith("vn_"));
+    expect(plants.length).toBeGreaterThan(0);
+    const offMask: string[] = [];
+    const inTown: string[] = [];
+    const onRoad: string[] = [];
+    const steep: string[] = [];
+    for (const set of plants) {
+      for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
+        const [x, z] = [set.data[i]!, set.data[i + 2]!];
+        const where = `${set.prop} (${x.toFixed(0)}, ${z.toFixed(0)})`;
+        if (sampleWeightGrid(mask, x, z) <= 0) offMask.push(where);
+        if (layout.buildings.some((b) => distanceToRect(b.bounds, x, z) < 0.5)) inTown.push(where);
+        if (module.roads.some((r) => polylineDistance(r.points, x, z) < (r.width ?? 5) / 2)) onRoad.push(where);
+        if (module.water.some((w) => pointInPolygon(w, x, z))) inTown.push(where);
+        if (terrain.slopeAt(x, z) > 42) steep.push(`${where} ${terrain.slopeAt(x, z).toFixed(0)}°`);
+      }
+    }
+    expect(offMask.slice(0, 5)).toEqual([]);
+    expect(inTown.slice(0, 5)).toEqual([]);
+    expect(onRoad.slice(0, 5)).toEqual([]);
+    expect(steep.slice(0, 5)).toEqual([]);
+
+    // The mapped city keeps the elevation it had before the hills: pads and roads sit where they did. The wilderness
+    // grid is the last terrain feature (`withWilderness` appends it).
+    const bare = buildTerrain({ ...module.map.terrain, features: module.map.terrain.features.slice(0, -1) }, module.map.flatten);
+    let raised = 0;
+    for (const b of module.map.buildings) raised = Math.max(raised, Math.abs(terrain.sampleHeight(b.position[0], b.position[2]) - bare.sampleHeight(b.position[0], b.position[2])));
+    expect(raised).toBeLessThan(0.3);
+
+    // Every hillside the woods stand on is walkable, and almost all of it is easy going. The steepest samples are the
+    // banks where an alley is flattened across a slope; the character controller walks up to about 50°.
+    let worst = 0;
+    let open = 0;
+    let rough = 0;
+    for (let z = -495; z <= 495; z += 5) {
+      for (let x = -495; x <= 495; x += 5) {
+        if (sampleWeightGrid(mask, x, z) <= 0.5) continue;
+        open++;
+        const slope = terrain.slopeAt(x, z);
+        worst = Math.max(worst, slope);
+        if (slope > 30) rough++;
+      }
+    }
+    expect(worst).toBeGreaterThan(2);
+    expect(worst).toBeLessThan(48);
+    expect(rough / open).toBeLessThan(0.01);
+  }, 60_000);
+
   it("reaches every POI, spawn, entrance and ground-floor room, 97 %+ of loot, and never the fenced water", () => {
     const grid = buildNavGrid({ map: module.map, terrain, layout });
     expect(grid.stats!.overflowColumns).toBe(0);
@@ -182,5 +246,22 @@ describe.each(REAL_MAPS.map((entry) => [entry.info.id, entry] as const))("real-w
     }
     expect(leaks.slice(0, 10)).toEqual([]);
     if (module.info.stats.waterHa > 1) expect(wet).toBeGreaterThan(0);
+
+    // The woods must not wall anything off: every patch of open ground is walkable to from the city.
+    const mask = (module.map.scatters as readonly ScatterRule[]).find((rule) => rule.id.startsWith("wild_"))?.weightGrid;
+    if (mask) {
+      const stranded: string[] = [];
+      let open = 0;
+      for (let z = -480; z <= 480; z += 10) {
+        for (let x = -480; x <= 480; x += 10) {
+          if (sampleWeightGrid(mask, x, z) < 0.8) continue;
+          open++;
+          const ref = nav.nearest({ x, y: terrain.sampleHeight(x, z), z }, 4, scratch);
+          if (ref < 0 || grid.componentOf(ref) !== grid.layout.mainComponent) stranded.push(`(${x}, ${z})`);
+        }
+      }
+      expect(open).toBeGreaterThan(50);
+      expect(stranded.slice(0, 10)).toEqual([]);
+    }
   }, 60_000);
 });

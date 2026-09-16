@@ -14,6 +14,7 @@ import { registerBuiltInLoaders } from "@babylonjs/loaders/dynamic";
 import type {} from "@babylonjs/loaders/glTF/glTFFileLoader.types";
 import { configureDecoders } from "../assets/decoders";
 import type { AssetManifest, DecoderUrls } from "../assets/manifest";
+import { VN_PROP_MANIFEST } from "../assets/vnPropsManifest";
 import { PROP_MANIFEST_GENERATED } from "./environmentManifest";
 import { ENVIRONMENT_ASSET_ROOT } from "./materials";
 import { ditherCutoutCoverage } from "./props/lodFadePlugin";
@@ -76,6 +77,15 @@ export const PROP_IDS = [
   "grass_clump_short",
   "grass_clump_medium",
   "grass_clump_tall",
+  // Vietnamese plants (tools/environment/vn): the wilderness woodland on the Saigon maps.
+  "vn_palm_coconut",
+  "vn_palm_coconut_trio",
+  "vn_bamboo_clump",
+  "vn_banana_plant",
+  "vn_monstera",
+  "vn_tropical_shrub_1",
+  "vn_tropical_shrub_3",
+  "vn_tropical_shrub_5",
 ] as const;
 
 export type PropId = (typeof PROP_IDS)[number];
@@ -208,6 +218,15 @@ const SPECS: Readonly<Record<PropId, PropSpec>> = {
   grass_clump_short: grass([0.4, 0.2, 0.4]),
   grass_clump_medium: grass([0.7, 0.45, 0.7]),
   grass_clump_tall: grass([0.8, 0.9, 0.8]),
+  vn_palm_coconut: { ...tree([4.4, 9, 4.4]), scaleRange: [0.85, 1.2] },
+  vn_palm_coconut_trio: { ...tree([7.4, 8.2, 7.7]), scaleRange: [0.85, 1.2] },
+  // Walk-through sight cover; their own cull distances come from the Vietnamese set's measurements.
+  vn_bamboo_clump: { ...bush([1.8, 4.1, 1.7]), cullDistance: 400 },
+  vn_banana_plant: { ...bush([1.5, 2.9, 1.5]), cullDistance: 250 },
+  vn_monstera: { ...bush([1.5, 0.85, 1.5]), cullDistance: 120 },
+  vn_tropical_shrub_1: { ...bush([2.5, 1.7, 2.6]), cullDistance: 140 },
+  vn_tropical_shrub_3: { ...bush([1.8, 1.8, 1.7]), cullDistance: 140 },
+  vn_tropical_shrub_5: { ...bush([1.9, 0.94, 1.9]), cullDistance: 140 },
 };
 
 function stubAsset(id: PropId): PropAsset {
@@ -232,10 +251,14 @@ function stubAsset(id: PropId): PropAsset {
   };
 }
 
-/** Every prop: measured data where the pipeline has produced it, placeholders otherwise. */
+/**
+ * Every prop: measured data where the pipeline has produced it, placeholders otherwise. The Vietnamese set has its own
+ * generated manifest (tools/environment/vn); the map props taken from it read their files, LODs, bounds and collision
+ * there, and their gameplay metadata from SPECS above like every other prop.
+ */
 export const PROP_MANIFEST: Readonly<Record<PropId, PropAsset>> = Object.fromEntries(
   PROP_IDS.map((id) => {
-    const generated = PROP_MANIFEST_GENERATED[id];
+    const generated: GeneratedPropAsset | undefined = PROP_MANIFEST_GENERATED[id] ?? (VN_PROP_MANIFEST as Partial<Record<string, GeneratedPropAsset>>)[id];
     return [id, generated ? { ...stubAsset(id), ...generated, ready: true } : stubAsset(id)];
   }),
 ) as Record<PropId, PropAsset>;

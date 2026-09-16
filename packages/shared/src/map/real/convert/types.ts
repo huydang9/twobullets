@@ -1,4 +1,5 @@
 import type { Vec2Tuple } from "../../types";
+import type { WildernessOptions } from "./wilderness";
 
 /**
  * Input contract of the real-world map converter: the parts of an Overpass API `out geom` response it reads, plus a
@@ -103,6 +104,12 @@ export interface PlaceConfig {
   readonly landmarks?: readonly { readonly osmId: number; readonly name: string; readonly prefab?: string; /** OSM way id of the street its entrance faces (default the nearest road). */ readonly frontsWay?: number }[];
   /** Dense city mode (Saigon streets); absent for villages, whose output it never changes. See `convert/urban.ts`. */
   readonly urban?: UrbanOptions;
+  /**
+   * Hills and tropical woodland over the ground the OSM square never covers (`convert/wilderness.ts`). Defaults to on
+   * for city maps, which have no village groves to fill their outskirts, and off for villages, whose output it never
+   * changes. `false` turns it off.
+   */
+  readonly wilderness?: WildernessOptions | false;
 }
 
 /** How a dense city square is built: tube-house rows along the real streets, paved alleys, landmark names. */

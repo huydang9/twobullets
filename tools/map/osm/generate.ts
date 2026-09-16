@@ -127,6 +127,7 @@ console.info(
       landmarks: r.landmarks,
       elevation: r.elevation,
       landuse: r.landuse,
+      wilderness: r.wilderness,
       waterFenceMeters: r.waterFenceMeters,
       iterations: r.iterations,
       issues: r.issues.length,

@@ -6,6 +6,7 @@ import type { PointOfInterest, PropScatter, Vec2Tuple } from "../../types";
 import type { FenceLine } from "../fences";
 import { clipPolylineToSquare, clipRingToSquare, simplifyPolyline, simplifyRing } from "./geometry";
 import type { AreaFeature, LineFeature, PlaceConfig, Polygon } from "./types";
+import type { Wilderness } from "./wilderness";
 
 type Palette = PropScatter["props"];
 
@@ -35,6 +36,34 @@ const BUSHES: Palette = [
   { prop: "bush_a", weight: 2 },
   { prop: "bush_b", weight: 1 },
   { prop: "bush_c", weight: 1 },
+];
+/**
+ * Tropical woodland for the wilderness: Map v1's broadleaf kit plus the Vietnamese palms. Only one palm variant is
+ * used: a palm trunk blocks bullets, so its batches are never distance-culled, and each extra kind of tree costs a draw
+ * call per map cell it lands in. The canopy layer takes the same palm at a larger scale instead (`vn_palm_coconut_trio`
+ * stays in the catalog for hand placement).
+ */
+const WILD_CANOPY: Palette = [
+  { prop: "tree_broadleaf_a", weight: 2 },
+  { prop: "vn_palm_coconut", weight: 1 },
+];
+const WILD_FOREST: Palette = [
+  { prop: "tree_broadleaf_b", weight: 3 },
+  { prop: "tree_broadleaf_a", weight: 2 },
+  { prop: "vn_palm_coconut", weight: 2 },
+];
+const WILD_THICKET: Palette = [
+  { prop: "vn_bamboo_clump", weight: 3 },
+  { prop: "vn_banana_plant", weight: 2 },
+];
+const WILD_UNDERGROWTH: Palette = [
+  { prop: "fern", weight: 3 },
+  { prop: "vn_tropical_shrub_1", weight: 2 },
+  { prop: "vn_tropical_shrub_3", weight: 2 },
+  { prop: "vn_tropical_shrub_5", weight: 2 },
+  { prop: "bush_a", weight: 1.5 },
+  { prop: "bush_c", weight: 1 },
+  { prop: "vn_monstera", weight: 1 },
 ];
 
 /** Scatter areas stay this far inside the playable edge, m. */
@@ -250,6 +279,44 @@ export interface LanduseReport {
 }
 
 /**
+ * Woodland for the ground the OSM square never covers: canopy, forest, bamboo thickets, undergrowth and rock/log cover,
+ * all multiplied by the wilderness coverage weight so the trees thin out as they approach the city and stop at its
+ * streets. Clearing masks keep it from becoming a wall of trunks, and every rule keeps the trees' own clearance, so bots
+ * and players always have a way through.
+ */
+export function wildernessScatters(wilderness: Wilderness, playable: readonly Vec2Tuple[]): ScatterRule[] {
+  const { weights } = wilderness;
+  const d = wilderness.options.density;
+  const wild = { weightGrid: weights, area: playable, excludeSurfaces: ["road", "dirt"] as const };
+  return [
+    // Big trunks first, so the smaller trees grow around them.
+    { id: "wild_canopy", ...wild, props: WILD_CANOPY, density: 0.4 * d, mask: { wavelength: 140, threshold: 0.3, softness: 0.15 }, maxSlopeDegrees: 32, minDistance: 9, scaleRange: [1, 1.35] },
+    { id: "wild_forest", ...wild, props: WILD_FOREST, density: 2 * d, mask: { wavelength: 80, threshold: 0.36, softness: 0.1 }, maxSlopeDegrees: 35, scaleRange: [0.8, 1.25] },
+    { id: "wild_thicket", ...wild, props: WILD_THICKET, density: 2.4 * d, mask: { wavelength: 50, threshold: 0.42, softness: 0.12 }, maxSlopeDegrees: 38, clearance: 1, scaleRange: [0.85, 1.3] },
+    { id: "wild_undergrowth", ...wild, props: WILD_UNDERGROWTH, density: 3.5 * d, mask: { wavelength: 60, threshold: 0.28, softness: 0.18 }, maxSlopeDegrees: 40, scaleRange: [0.75, 1.3] },
+    // Cover to fight from. One boulder and one log type only: both block bullets, so they are never distance-culled and
+    // every extra kind of them costs a draw call per map cell it lands in (docs/perf/benchmark.md).
+    {
+      id: "wild_cover",
+      ...wild,
+      props: [
+        { prop: "rock_boulder_large", weight: 1.5 },
+        { prop: "rock_small", weight: 2 },
+        { prop: "bush_c", weight: 2 },
+      ],
+      density: 0.11 * d,
+      // Fallen logs only as cluster anchors, so they gather in a handful of spots instead of dotting every map cell.
+      cluster: { count: [2, 4], radius: 7, anchor: { props: [{ prop: "rock_boulder_large", weight: 2 }, { prop: "log_fallen", weight: 3 }], chance: 0.3, scaleRange: [0.9, 1.3] } },
+      mask: { wavelength: 160, threshold: 0.42, softness: 0.12 },
+      maxSlopeDegrees: 30,
+      scaleRange: [0.7, 1.2],
+    },
+    // Loose rock on the hillsides (Map v1's slope layers, which only fire on real relief).
+    { id: "wild_slope_rocks", ...wild, props: [{ prop: "rock_small", weight: 4 }, { prop: "rock_boulder_large", weight: 1 }], density: 0.5 * d, minSlopeDegrees: 12, maxSlopeDegrees: 45, scaleRange: [0.7, 1.4] },
+  ];
+}
+
+/**
  * Scatter rules from land use, in the spirit of Map v1: forests and woods (one rule each, largest first, plus
  * undergrowth), scrub and wetland bushes, orchards, garden trees in residential areas, tree rows, hay in farmland, then
  * the map-wide cover layers (field cover clusters, lone oaks, slope rocks, gap-filling boulders, meadow bushes, grass).
@@ -263,6 +330,7 @@ export function convertLanduse(
   water: readonly Polygon[],
   openings: readonly LineOpening[],
   config: PlaceConfig,
+  wilderness: Wilderness | null = null,
 ): { scatters: ScatterRule[]; report: LanduseReport } {
   const tropical = config.climate === "tropical";
   // City maps: street trees, parks and urban cover (parked cars, utility boxes, barrels) instead of village groves.
@@ -367,9 +435,14 @@ export function convertLanduse(
       }
     });
 
-  // Map-wide cover (Map v1's layers).
+  // Empty ground the OSM square never covers: hills with tropical woodland, in the spirit of Map v1's fields.
+  if (wilderness) for (const rule of wildernessScatters(wilderness, playable)) add(rule);
+
+  // Map-wide cover (Map v1's layers). City dressing stays in the city: the inverted weight keeps it out of the woods.
+  const cityOnly = wilderness ? { weightGrid: wilderness.weights, weightGridInvert: true } : {};
   if (urban) {
     add({
+      ...cityOnly,
       id: "urban_cover",
       props: [
         { prop: "car_covered", weight: 3 },
@@ -405,10 +478,15 @@ export function convertLanduse(
     excludeSurfaces: ["road"],
     scaleRange: [0.7, 1.2],
   });
-  add({ id: "slope_boulders", props: [{ prop: "rock_boulder_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 18, maxSlopeDegrees: 35, exclude: poiCores, minDistance: 25, scaleRange: [0.9, 1.6] });
-  add({ id: "slope_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 25, maxSlopeDegrees: 45, exclude: poiCores, minDistance: 40, faceDownhill: true, scaleRange: [0.9, 1.2] });
-  add({ id: "slope_rocks", props: [{ prop: "rock_small", weight: 4 }, { prop: "rock_moss_b", weight: 1 }, { prop: "rock_boulder_a", weight: 1 }], area: playable, density: 0.6, minSlopeDegrees: 17, maxSlopeDegrees: 60, scaleRange: [0.7, 1.4] });
-  add({ id: "cover_fill", props: [{ prop: urban ? "car_covered" : "rock_boulder_large", weight: 1 }], area: playable, density: 0.06, bareRadius: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...woodRings, ...poiCores], scaleRange: [0.9, 1.3] });
+  // Map v1's slope layers, for the real relief. A wilderness map dresses its own hills with `wild_slope_rocks`, whose
+  // palette is deliberately narrow: bullet-blocking props are never distance-culled, so each extra kind of them costs a
+  // draw call per map cell it lands in (docs/perf/benchmark.md).
+  if (!wilderness) {
+    add({ id: "slope_boulders", props: [{ prop: "rock_boulder_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 18, maxSlopeDegrees: 35, exclude: poiCores, minDistance: 25, scaleRange: [0.9, 1.6] });
+    add({ id: "slope_faces", props: [{ prop: "rock_face_large", weight: 1 }], area: playable, density: 0.1, minSlopeDegrees: 25, maxSlopeDegrees: 45, exclude: poiCores, minDistance: 40, faceDownhill: true, scaleRange: [0.9, 1.2] });
+    add({ id: "slope_rocks", props: [{ prop: "rock_small", weight: 4 }, { prop: "rock_moss_b", weight: 1 }, { prop: "rock_boulder_a", weight: 1 }], area: playable, density: 0.6, minSlopeDegrees: 17, maxSlopeDegrees: 60, scaleRange: [0.7, 1.4] });
+  }
+  add({ ...(urban ? cityOnly : {}), id: "cover_fill", props: [{ prop: urban ? "car_covered" : "rock_boulder_large", weight: 1 }], area: playable, density: 0.06, bareRadius: 25, maxSlopeDegrees: 30, excludeSurfaces: ["road"], exclude: [...woodRings, ...poiCores], scaleRange: [0.9, 1.3] });
   add({ id: "meadow_bushes", props: BUSHES, area: playable, density: urban ? 0.05 : 0.12, mask: { wavelength: 70, threshold: 0.45 }, maxSlopeDegrees: 30, excludeSurfaces: ["road", "rock"], scaleRange: [0.7, 1.3] });
   // Grass (client-side detail around the viewer): water zones only, fence gaps don't matter for it.
   rules.push({ id: "grass", props: [{ prop: "grass_clump_short", weight: 3 }, { prop: "grass_clump_medium", weight: 2 }, { prop: "grass_clump_tall", weight: 1 }], area: playable, density: 30, mask: { wavelength: 28, threshold: 0.42, softness: 0.2 }, maxSlopeDegrees: 35, excludeSurfaces: ["road", "dirt", "rock"], exclude: waterZones, scaleRange: [0.7, 1.3], detail: true });

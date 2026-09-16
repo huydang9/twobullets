@@ -9,6 +9,37 @@ import { getMapProp, type MapPropDef, type PropCategory } from "./props";
 import { mapPaths } from "./roads";
 
 /**
+ * A coverage/density field on a regular grid, row-major from `origin` (the south-west sample). `values` holds one
+ * digit "0".."9" per cell, so a 10 m grid over a 1 km map is a readable ~17 KB string in a generated module instead of
+ * 17 000 numbers. Sampled bilinearly; outside the grid the edge samples extend.
+ */
+export interface WeightGrid {
+  readonly origin: Vec2Tuple;
+  readonly spacing: number;
+  readonly columns: number;
+  readonly rows: number;
+  /** `columns × rows` digits "0".."9", row-major: weight = digit / 9. */
+  readonly values: string;
+}
+
+const ZERO_CODE = 48;
+
+/** Bilinear weight 0..1 at a world point; edge samples extend outside the grid. */
+export function sampleWeightGrid(grid: WeightGrid, x: number, z: number): number {
+  const { columns, rows, values } = grid;
+  const gx = Math.min(columns - 1, Math.max(0, (x - grid.origin[0]) / grid.spacing));
+  const gz = Math.min(rows - 1, Math.max(0, (z - grid.origin[1]) / grid.spacing));
+  const ix = Math.min(columns - 2, Math.floor(gx));
+  const iz = Math.min(rows - 2, Math.floor(gz));
+  const tx = gx - ix;
+  const tz = gz - iz;
+  const at = (i: number, j: number) => values.charCodeAt(j * columns + i) - ZERO_CODE;
+  const a = at(ix, iz) + (at(ix + 1, iz) - at(ix, iz)) * tx;
+  const b = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
+  return (a + (b - a) * tz) / 9;
+}
+
+/**
  * Seeded scatter rule. Extends MapData's PropScatter with the knobs map v1 needs; every extra field is optional, so
  * a plain PropScatter still expands.
  */
@@ -17,6 +48,13 @@ export interface ScatterRule extends PropScatter {
   readonly seed?: number;
   /** Noise density mask: clearings and clumps. `threshold` 0..1 is the noise level where density reaches half. */
   readonly mask?: { readonly wavelength: number; readonly threshold: number; readonly softness?: number };
+  /**
+   * Density weight per world cell, multiplied into the spot's chance (real-world maps: the wilderness coverage mask,
+   * which is 0 over the mapped city and rises to 1 in the empty ground). One grid is shared by every rule that uses it.
+   */
+  readonly weightGrid?: WeightGrid;
+  /** Uses `1 - weight` instead, so one shared grid can drive both the wilderness rules and the city-only ones. */
+  readonly weightGridInvert?: boolean;
   /** Density fades to zero this far inside the area outline, m. */
   readonly edgeFade?: number;
   /** Only on slopes at least this steep (rocks on hillsides), degrees. */
@@ -219,6 +257,12 @@ export class ScatterContext {
         if (inExclusion(compiled.exclusions, x, z)) continue;
 
         let chance = 1;
+        // Cheapest test first: the coverage weight is zero over most of a city map.
+        if (rule.weightGrid) {
+          const w = sampleWeightGrid(rule.weightGrid, x, z);
+          chance = rule.weightGridInvert ? 1 - w : w;
+          if (chance <= 0) continue;
+        }
         if (rule.mask) {
           const noise = (fbm(x / rule.mask.wavelength, z / rule.mask.wavelength, 3, seed ^ 0x51ed) + 1) / 2;
           const soft = rule.mask.softness ?? 0.08;

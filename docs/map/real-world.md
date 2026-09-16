@@ -160,8 +160,62 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
   - park and grass rules (trees and bushes in `leisure=park/garden/playground`, `landuse=grass`, squares);
   - street trees along roads ≥ 5.5 m wide (they land in the walk-throughs and open lots, since houses and pads keep them out);
   - `urban_cover` clusters (covered cars, utility boxes, barrels, road barriers, the odd car wreck or pipe stack);
-  - fewer garden trees and meadow bushes.
+  - fewer garden trees and meadow bushes;
+  - **wilderness** hills and tropical woodland over the ground the cap leaves empty (below).
 - **POI names:** markets, schools, churches, pagodas, apartment blocks and hospitals name POIs. Numbered quarters ("Khu phố 12") come after them.
+
+### Wilderness: hills and woodland on the empty ground
+
+A city square keeps only `buildingCap` buildings, so the built-up part is a core a few hundred meters across and the rest is flat grass with an alley grid on it. `convert/wilderness.ts` fills that ground the way Map v1 fills its fields. It is on by default for `urban` maps and off for villages (whose groves and field cover already do the job); `PlaceConfig.wilderness` tunes it or turns it off with `false`, and village output is unchanged either way.
+
+**Coverage mask** (10 m grid over the whole 1280 m square, so 129 × 129):
+
+| Source | Counts as | Margin |
+|---|---|---|
+| Buildings the map places (a placement run with nothing excluded, so the mask never moves while the fix-until-valid loop drops one) | city | 26 m |
+| Bridge decks (their approaches must stay level, or the bridge no longer meets its banks) | city | 30 m |
+| Water, land use, leisure and natural areas (parks, schoolyards, pitches, woods: already dressed) | city | 12 m |
+| Streets 5.5 m wide or more | verge | 6 m |
+| Creek beds | verge | 10 m |
+| Alleys (hẻm) | nothing: the woods grow round them | |
+
+Two exact Euclidean distance transforms turn that into a weight per cell:
+
+- **Scatter weight** = min(ramp 90 m off the city, ramp 30 m off a street), quantized to one digit per cell and stored once per map as `WILDERNESS` in the generated module. Every woodland rule multiplies its density by it; `urban_cover` and `cover_fill` read it inverted, so parked cars and utility boxes stay in town.
+- **Hill weight** = min(ramp 150 m off the city, ramp 150 m off a street). Much longer, because a road is flattened along a path smoothed over about 40 m: ground that changes faster leaves the alleys crossing it in cuttings with banks at the edge of what a player can climb.
+
+**Terrain.** The hill weight scales two long-wavelength noise layers (260 m rolling, 420 m ridges, two octaves each) plus an `edgeRise` that lifts the ground from 190 m out toward the playable edge, so the map climbs into the border mountains. The result is a second `heightGrid` feature (65 × 65 at 20 m), added on top of any real-elevation grid. It is **exactly 0 over the city**, so the mapped ground keeps its elevation and no building lands on a slope. A slope-limiting pass pulls neighbouring samples together until no 20 m step exceeds 14°, each sample moving in proportion to its own weight so a city sample never moves.
+
+**Woodland** (`wildernessScatters` in `convert/landuse.ts`), placed before the map-wide cover layers so the big trunks go down first:
+
+| Rule | Density /100 m² | Props |
+|---|---|---|
+| `wild_canopy` | 0.4, `minDistance` 9 m | `tree_broadleaf_a`, `vn_palm_coconut` at 1.0–1.35 scale |
+| `wild_forest` | 2 | `tree_broadleaf_b`, `tree_broadleaf_a`, `vn_palm_coconut` |
+| `wild_thicket` | 2.4 | `vn_bamboo_clump`, `vn_banana_plant` |
+| `wild_undergrowth` | 3.5 | `fern`, `vn_tropical_shrub_1/3/5`, `bush_a`, `bush_c`, `vn_monstera` |
+| `wild_cover` | 0.11 clusters of 2–4 | `rock_boulder_large`, `rock_small`, `bush_c`; one cluster in three is anchored by a fallen log or a big boulder |
+| `wild_slope_rocks` | 0.5, from 12° | `rock_small`, `rock_boulder_large` |
+
+Every rule carries a noise mask, so the woods have clearings rather than a wall of trunks, and every tree keeps its catalog clearance (about 5 m between trunks), so bots and players always have a way through. Map v1's generic `slope_boulders` / `slope_faces` / `slope_rocks` are skipped on a wilderness map: `wild_slope_rocks` dresses the hills with a deliberately narrow palette instead, because a prop that blocks bullets is never distance-culled and each extra kind of them costs a draw call per 250 m cell it lands in.
+
+**Vietnamese plants.** `vn_palm_coconut`, `vn_palm_coconut_trio`, `vn_bamboo_clump`, `vn_banana_plant`, `vn_monstera` and `vn_tropical_shrub_1/3/5` joined the gameplay prop catalog (`layout/props.ts`) and the client manifest (`world/propAssets.ts` reads their files, LODs and bounds from `VN_PROP_MANIFEST`). Palm trunks are solid cover (0.2 m radius); bamboo, banana and the shrubs are walk-through sight cover like the other bushes. Credits are in `docs/assets-vietnam.md` and `public/assets/environment/credits.json`.
+
+| | Hàng Xanh | Phú Nhuận |
+|---|---|---|
+| Built-up share of the playable square | 40 % | 32 % |
+| Woodland at half density or more | 9.5 ha | 17.5 ha |
+| Any woodland at all | 40.9 ha | 53.1 ha |
+| Hills above the city level | up to 12.7 m | up to 20.5 m |
+| Steepest ground under the woods | 29° | 42° (0.01 % of samples over 40°) |
+| Prop instances | 2,456 → 7,443 | 1,500 → 8,232 |
+| Draw calls / frame (`tools/bench/render/world.ts`, street loop) | 281 → 289 (+2.8 %) | 246 → 272 (+10.5 %) |
+| Triangles / frame | 1,790k → 1,795k (+0.3 %) | 1,848k → 1,882k (+1.8 %) |
+| Peak RSS, headless bench | 905 → 771 MB | 898 → 846 MB |
+| Terrain bake | 2.46 → 2.49 MB | 2.62 → 2.56 MB |
+| Map module | 245 → 285 KB (17 KB of it the mask) | 189 → 230 KB |
+
+Loot and spawns stay in the city: POIs come from placed buildings, so no new POI, loot pile or spawn lands in the woods. Spawn circles, POI cores, water, fence gaps, roads and building pads are all excluded from the woodland rules, so the zone can close anywhere without trapping anyone.
 
 ## Names
 
@@ -200,10 +254,11 @@ Two Saigon squares use `PlaceConfig.urban` and a per-map `buildingCap`. Without 
 | POIs | 17, 34 spawns | 16, 32 spawns |
 | Roads | 316, 31.0 km paved | 389, 35.8 km paved |
 | Water | Rạch Văn Thánh, Rạch Cầu Bông, Rạch Bà Láng, Hồ Văn Thánh: 2.7 ha, 2.3 km fence | Kênh Thị Nghè corner: 0.4 ha, 197 m fence |
-| Prop instances | 2,456 | 1,500 |
+| Prop instances | 7,443 (2,456 before the wilderness) | 8,232 (1,500 before) |
 | Validation / reachability | 0 issues, 1 pass; 17/17, 34/34, 201/201, loot 100 % | 0 issues, 1 pass; 16/16, 32/32, 197/197, loot 100 % |
+| Wilderness | 9.5 ha of woodland, hills to 12.7 m | 17.5 ha, hills to 20.5 m |
 | Loot (seeds 11–13) | 257–268 piles, 472–512 items | 246–256 piles, 453–488 items |
-| Bot match (seed 1, duo, real brains) | last team, 8.7 min, 8 kills / 5 knocks / 1 revive, 11 stuck incidents (longest 10 s), tick p50/p99 0.39/1.55 ms | last team, 8.9 min, 8 / 7 / 3, 10 stuck (20 s), 0.40/1.46 ms |
+| Bot match (seed 1, duo, real brains) | last team, 5.4 min of combat, 8 kills / 5 knocks / 1 revive, 7 stuck incidents (longest 20 s), tick p50/p99 0.32/1.13 ms | last team, 6.5 min, 8 / 7 / 3, 5 stuck (10 s), 0.32/1.21 ms |
 
 POI names:
 - **Hàng Xanh:** Ngã Tư Hàng Xanh, its Bắc / Đông / Tây / Nam parts, Khu phố 62, 43, 34, 60, Chung Cư Saigonland, Chung cư Mỹ Đức, Khu du lịch Văn Thánh.
@@ -283,6 +338,14 @@ Road names on the map screen and street signs (see "Names" below):
 | Hàng Xanh | Chung cư Mỹ Đức | (276, −287) and (224, −355) | Two high-rises on their real footprints, podium stair up to the terrace |
 | Hàng Xanh | Chùa Phước Viên / market | (69, −59) / (−44, −62) | Pagoda gate, courtyard and roof; open market hall next to the junction |
 | Hàng Xanh | Nhà Thờ Hàng Xanh | (−292, 226) | Church nave, bell tower and spire |
+| Hàng Xanh | West hill | (−470, 100) | The tallest wilderness rise (+11.8 m); woods all round, city to the east |
+| Hàng Xanh | West woods | (−430, 60) → walk east to (−250, 60) | How the woods thin out as the city starts: no hard line |
+| Hàng Xanh | South woods | (60, −400) | +7 m of hill under palms, bamboo and banana; boulder and log cover clusters |
+| Hàng Xanh | North woods | (100, 310) | +7 m, clearings in the canopy mask |
+| Phú Nhuận | South hill | (130, −470) | The tallest rise on either map (+20 m), dense woodland |
+| Phú Nhuận | East woods | (450, −40) → (410, 50) | +8 to +12 m of rolling ground, thickets and undergrowth |
+| Phú Nhuận | Alleys through the woods | walk (90, −390) → (130, −470) | Alleys still cross the hills: check the cut banks are climbable |
+| Phú Nhuận | South-west corner | (−480, −480) | Woods running into the border mountains |
 | Phú Nhuận | Center high-rise | (6, −65) | 16-floor tower right off the main street, shop podium, facade bands |
 | Phú Nhuận | North landmarks | (−269, 365), (−218, 378), (−128, 324) | Market hall, office tower, high-rise |
 | Phú Nhuận | Churches / petrol station | (272, 201), (−300, −202) / (−282, −265) | Pink church with bell tower; canopy and pump islands |

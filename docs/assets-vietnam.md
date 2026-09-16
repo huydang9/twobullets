@@ -1,6 +1,6 @@
 # Vietnamese street assets (Saigon maps)
 
-Free, license-verified 3D models for the Hàng Xanh and Phú Nhuận maps: what was found, what is built, what needs the owner's Sketchfab login, what was rejected, and how the map runtime should use it. **Nothing here is placed in a map yet**; `apps/client/src/world/**` and `packages/shared/src/map/**` belong to the map work.
+Free, license-verified 3D models for the Hàng Xanh and Phú Nhuận maps: what was found, what is built, what needs the owner's Sketchfab login, what was rejected, and how the map runtime should use it. Eight of these (palm, bamboo, banana, monstera, three shrubs, boulder/log kit) are placed in the wilderness of Hàng Xanh and Phú Nhuận; the rest are catalogued for later street dressing.
 
 **Status (2026-09-15):** 66 props built from 51 source models (Poly Haven CC0, OpenGameArt Yughues/Nobiax CC0 and CC-BY, ambientCG CC0), **16.5 MB** in `public/assets/environment/vn/` (51 GLBs). The realistic Vietnam-specific models (Honda Cub-style motorbikes, bánh mì cart, blue plastic stools, tangled-cable poles, lanterns, nón lá, flame trees) exist only on Sketchfab, whose downloads need a login: see [Needs the owner's login](#needs-the-owners-login).
 

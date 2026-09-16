@@ -193,6 +193,7 @@ Crossing open ground between POIs should never be a death run or trivially safe.
   - `minDistance` between the rule's own instances;
   - `bareRadius`: only where no `isHardCover` prop or building is that close;
   - `edgeBand`: only near the area outline.
+  - `weightGrid` (+ `weightGridInvert`): a 0..1 density field on a regular grid, one digit "0".."9" per cell, multiplied into the spot's chance. Real-world city maps share one such grid, the wilderness coverage mask (`docs/map/real-world.md`): the woodland rules read it, the city dressing rules read it inverted.
 - **Candidates.** One seeded candidate per cell of a jittered lattice anchored at the world origin, so any sub-rectangle expands to exactly the same instances.
 - **Per-spot tests** (integer-hash randomness, `sinCos`-based slope thresholds):
   - polygon membership and the noise mask;

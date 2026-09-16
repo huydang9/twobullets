@@ -15,6 +15,7 @@ import { buildingCandidates, buildingId, DEFAULT_BUILDING_CAP, PlacementSpace, p
 import { isBuildingPrefabId } from "../../buildings/prefabs";
 import { realTerrainSpec, type ElevationReport } from "./elevation";
 import { convertLanduse, insideAny, trimRoadsAtWater, waterEdges, waterPolygons, type LanduseReport } from "./landuse";
+import { buildWilderness, withWilderness, type Wilderness, type WildernessReport } from "./wilderness";
 import { buildingPads } from "./pads";
 import { isPoliticalName } from "./names";
 import { parseOsm } from "./parse";
@@ -68,6 +69,8 @@ export interface ConvertReport {
   readonly pois: PoiReport & { readonly count: number };
   readonly spawns: number;
   readonly landuse: LanduseReport;
+  /** Empty ground filled with hills and woodland (null when the square is mapped edge to edge or wilderness is off). */
+  readonly wilderness: WildernessReport | null;
   readonly waterFenceMeters: number;
   readonly iterations: number;
   readonly issues: readonly MapIssue[];
@@ -103,6 +106,8 @@ export interface ConvertResult {
   readonly report: ConvertReport;
 }
 
+const NONE_EXCLUDED: ReadonlySet<string> = new Set();
+
 /** Row houses in a city stand this close to each other (frontage rows pack them `ROW_GAP` apart), m. */
 export const URBAN_BUILDING_GAP = 0.1;
 
@@ -125,7 +130,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   }
   const projection = createProjection(config.lat, config.lon);
   const parsed = parseOsm(input.osm, projection, 640);
-  const { spec, report: elevation } = realTerrainSpec(config.seed ?? seedFromId(config.id), input.elevation, config.elevation);
+  const { spec: baseSpec, report: elevation } = realTerrainSpec(config.seed ?? seedFromId(config.id), input.elevation, config.elevation);
 
   const urban = config.urban;
   const converted = convertRoads(parsed.lines, urban !== undefined);
@@ -140,11 +145,36 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
   const props = fenceProps(fences);
   const openings = fenceOpenings(fences);
   const flattenPaths = mapPaths({ flatten: [...creeks, ...roads.map(roadFlatten)] });
-  const isolated = water.length > 0 ? isolatedLand(config, spec, creeks, roads, props) : () => false;
+  // Water isolation depends on the fences, not on the wilderness hills, so it is measured on the base terrain.
+  const isolated = water.length > 0 ? isolatedLand(config, baseSpec, creeks, roads, props) : () => false;
   const footprints = buildingCandidates(parsed.buildings, urban !== undefined, urban ? parsed.amenities : []).filter((c) => !isolated(c.centroid[0], c.centroid[1]));
   const candidates = urban ? [...rankFootprints(footprints, roads), ...frontageCandidates(roads, parsed.buildings, parsed.areas, urban).filter((c) => !isolated(c.centroid[0], c.centroid[1]))] : footprints;
   const cap = config.buildingCap ?? DEFAULT_BUILDING_CAP;
   log(`${config.id}: ${roads.length} roads (${roadReport.asphaltKm} km asphalt, ${roadReport.dirtKm} km dirt), ${creeks.length} creek beds, ${water.length} water areas (${edges.length} m of fence), ${candidates.length} building candidates${urban ? ` (${footprints.length} OSM footprints, ${candidates.length - footprints.length} frontage slots)` : ""}`);
+
+  // Empty ground (no building, water or mapped area, and away from the main streets) becomes hills and woodland. The
+  // coverage mask is built once, from a placement run with nothing excluded, so it never moves while the fix-until-valid
+  // loop drops the odd building.
+  const wildernessOption = config.wilderness ?? (urban ? {} : false);
+  let wilderness: Wilderness | null = null;
+  if (wildernessOption !== false) {
+    const space = new PlacementSpace(flattenPaths, water);
+    for (const bridge of bridges) space.addPlaced(bridge.bounds);
+    const placement = placeBuildings(candidates, space, urban ? { cap, excluded: NONE_EXCLUDED, cellQuota: urbanDefaults(urban).cellQuota } : { cap, excluded: NONE_EXCLUDED });
+    wilderness = buildWilderness({
+      seed: baseSpec.seed,
+      terrain: baseSpec,
+      buildings: placement.buildings.map((b) => b.bounds),
+      bridges: bridges.map((b) => b.bounds),
+      areas: parsed.areas,
+      roads,
+      creeks,
+      water,
+      options: wildernessOption,
+    });
+  }
+  const spec = withWilderness(baseSpec, wilderness);
+  if (wilderness) log(`${config.id}: wilderness ${wilderness.report.areaHa} ha (built-up ${Math.round(wilderness.report.cityRatio * 100)} %), hills up to ${wilderness.report.peak} m, max slope ${wilderness.report.maxSlopeDegrees}°`);
 
   const excluded = new Set<string>();
   const blockedSpawns = new Set<string>();
@@ -178,7 +208,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
     });
     for (const b of keptBridges) buildings.push({ id: b.id, prefab: b.prefab, position: b.position, yaw: b.yaw, snapToTerrain: true });
     const { spawns, short } = pickSpawns(poiResult.pois, terrain, placed.buildings, props, space, blockedSpawns, isolated);
-    const { scatters, report: landuse } = convertLanduse(parsed.areas, parsed.lines, roads, poiResult.pois, water, openings, config);
+    const { scatters, report: landuse } = convertLanduse(parsed.areas, parsed.lines, roads, poiResult.pois, water, openings, config, wilderness);
     const landmarks: MapLandmark[] = [];
     const missingLandmarks: number[] = [];
     for (const wanted of config.landmarks ?? []) {
@@ -237,6 +267,7 @@ export function convertRealMap(input: ConvertInput, options: ConvertOptions = {}
         pois: { ...poiResult.report, count: poiResult.pois.length },
         spawns: spawns.length,
         landuse,
+        wilderness: wilderness?.report ?? null,
         waterFenceMeters: edges.length,
         iterations: iteration,
         issues: changed ? issues : unhandled,

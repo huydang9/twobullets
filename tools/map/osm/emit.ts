@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ConvertResult } from "../../../packages/shared/src/map/real/convert/assemble.ts";
 import type { PlaceConfig } from "../../../packages/shared/src/map/real/convert/types.ts";
+import type { WeightGrid } from "../../../packages/shared/src/map/layout/scatter.ts";
 import type { RealMapInfo } from "../../../packages/shared/src/map/real/types.ts";
 import { REPO_ROOT } from "../lib/resolve.ts";
 
@@ -33,33 +34,64 @@ function list(name: string, type: string, items: readonly unknown[], exported = 
   return `${exported ? "export " : ""}const ${name}: ${type} = [\n${body}\n];\n`;
 }
 
+interface ScatterLike {
+  readonly exclude?: readonly (readonly (readonly [number, number])[])[];
+  readonly weightGrid?: WeightGrid;
+}
+
 /**
  * Scatter rules with their `exclude` polygons (POI cores, water, fence gaps: the same few shapes in every rule) moved
- * into one shared `ZONES` table.
+ * into one shared `ZONES` table, and the wilderness coverage mask (the same grid in every rule that uses it) into a
+ * single `WILDERNESS` constant, one line per grid row.
  */
-function scatterSource(rules: readonly { readonly exclude?: readonly (readonly (readonly [number, number])[])[] }[]): string {
+function scatterSource(rules: readonly ScatterLike[]): string {
   const zones: string[] = [];
   const index = new Map<string, number>();
+  let grid: WeightGrid | undefined;
   const lines = rules.map((rule) => {
-    if (!rule.exclude || rule.exclude.length === 0) return `  ${literal(rule)},`;
-    const refs = rule.exclude.map((polygon) => {
-      const key = literal(polygon);
-      if (!index.has(key)) {
-        index.set(key, zones.length);
-        zones.push(key);
-      }
-      return `ZONES[${index.get(key)}]!`;
-    });
-    const { exclude: _exclude, ...rest } = rule;
+    const { exclude, weightGrid, ...rest } = rule;
+    if (weightGrid) grid = weightGrid;
+    const extra: string[] = [];
+    if (weightGrid) extra.push("weightGrid: WILDERNESS");
+    if (exclude && exclude.length > 0) {
+      const refs = exclude.map((polygon) => {
+        const key = literal(polygon);
+        if (!index.has(key)) {
+          index.set(key, zones.length);
+          zones.push(key);
+        }
+        return `ZONES[${index.get(key)}]!`;
+      });
+      extra.push(`exclude: [${refs.join(", ")}]`);
+    }
     const body = literal(rest);
-    return `  ${body.slice(0, -2)}, exclude: [${refs.join(", ")}] },`;
+    if (extra.length === 0) return `  ${body},`;
+    return `  ${body === "{}" ? `{ ${extra.join(", ")} }` : `${body.slice(0, -2)}, ${extra.join(", ")} }`},`;
   });
+  const rows: string[] = [];
+  if (grid) for (let j = 0; j < grid.rows; j++) rows.push(`    ${JSON.stringify(grid.values.slice(j * grid.columns, (j + 1) * grid.columns))}`);
+  const wilderness = grid
+    ? `/**
+ * How far each ${grid.spacing} m cell is from the mapped city, 0 (street, building, water or mapped area) to 9 (open
+ * country), row-major from the south-west corner. Terrain hills and the wilderness scatter rules both scale by it.
+ */
+const WILDERNESS: WeightGrid = {
+  origin: ${literal(grid.origin)},
+  spacing: ${grid.spacing},
+  columns: ${grid.columns},
+  rows: ${grid.rows},
+  values:
+${rows.join(" +\n")},
+};
+
+`
+    : "";
   return `/** Areas scatter rules leave empty: POI cores, woods, water, fence gaps. */
 const ZONES: readonly (readonly Vec2Tuple[])[] = [
 ${zones.map((z) => `  ${z},`).join("\n")}
 ];
 
-const SCATTERS: readonly ScatterRule[] = [
+${wilderness}const SCATTERS: readonly ScatterRule[] = [
 ${lines.join("\n")}
 ];
 `;
@@ -107,20 +139,31 @@ export function writeRealMapModule(result: ConvertResult, config: PlaceConfig): 
 export const INFO: RealMapInfo = ${literal(infoFor(result, config))};
 `;
   const terrain = { ...parts.terrain, features: [] as unknown[] };
-  const grid = parts.terrain.features.find((f) => f.kind === "heightGrid");
-  const heightRows: string[] = [];
-  if (grid && grid.kind === "heightGrid") for (let j = 0; j < grid.rows; j++) heightRows.push(`  ${grid.heights.slice(j * grid.columns, (j + 1) * grid.columns).join(", ")},`);
+  // Height grids (real elevation, wilderness hills) go into their own constants, one row per line.
+  const grids = parts.terrain.features.filter((f) => f.kind === "heightGrid");
+  const gridDocs = ["Real relief above the lowest playable point", "Wilderness hills above the mapped ground"];
+  const gridNames = grids.map((_, i) => (grids.length > 1 ? `HEIGHTS_${i + 1}` : "HEIGHTS"));
+  const gridSource = grids
+    .map((grid, i) => {
+      const rows: string[] = [];
+      for (let j = 0; j < grid.rows; j++) rows.push(`  ${grid.heights.slice(j * grid.columns, (j + 1) * grid.columns).join(", ")},`);
+      return `/** ${gridDocs[Math.min(i, gridDocs.length - 1)]}, m (${grid.columns} × ${grid.rows}, ${grid.spacing} m apart from the south-west corner). */\nconst ${gridNames[i]}: readonly number[] = [\n${rows.join("\n")}\n];\n`;
+    })
+    .join("\n");
+  const featureSource = parts.terrain.features
+    .map((f) => (f.kind === "heightGrid" ? `{ kind: "heightGrid", origin: ${literal(f.origin)}, spacing: ${f.spacing}, columns: ${f.columns}, rows: ${f.rows}, heights: ${gridNames[grids.indexOf(f)]} }` : literal(f)))
+    .join(", ");
   const module = `${header}import { roadFlatten, type RoadSpec } from "../layout/roads";
 import type { LayoutBuilding } from "../layout/buildings";
-import type { ScatterRule } from "../layout/scatter";
+import type { ScatterRule${parts.scatters.some((s) => s.weightGrid) ? ", WeightGrid" : ""} } from "../layout/scatter";
 import type { FlattenRegion, MapData, ${parts.landmarks.length > 0 ? "MapLandmark, " : ""}MapSpawn, PointOfInterest, ${parts.roadLabels.length > 0 ? "RoadLabel, " : ""}TerrainSpec, Vec2Tuple } from "../types";
 import { fenceOpenings, fenceProps, type FenceLine } from "./fences";
 import { INFO } from "./${config.id}.info";
 import type { RealMapModule } from "./types";
 
-${grid && grid.kind === "heightGrid" ? `/** Real relief above the lowest playable point, m (${grid.columns} × ${grid.rows}, ${grid.spacing} m apart from the south-west corner). */\nconst HEIGHTS: readonly number[] = [\n${heightRows.join("\n")}\n];\n\n` : ""}const TERRAIN: TerrainSpec = {
+${gridSource}${gridSource ? "\n" : ""}const TERRAIN: TerrainSpec = {
   ...${literal(terrain)},
-  features: [${grid && grid.kind === "heightGrid" ? `{ kind: "heightGrid", origin: ${literal(grid.origin)}, spacing: ${grid.spacing}, columns: ${grid.columns}, rows: ${grid.rows}, heights: HEIGHTS }` : ""}],
+  features: [${featureSource}],
 };
 
 /** One pad per building (terraced where neighbours sit level). */
