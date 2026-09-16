@@ -252,4 +252,12 @@ describe("loot weapon availability", () => {
     expect(r.items).toBeLessThan(3950);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
+  it("vn-phandangluu with outdoor piles", async () => {
+    const { map } = await loadRealMap("vn-phandangluu");
+    const world = outdoorWorld(map);
+    const r = report("vn-phandangluu + outdoor", measure(map.pois, world.layout.buildings, world));
+    expect(r.outdoorGuns).toBeGreaterThan(20);
+    expect(r.items).toBeLessThan(4200);
+    expectOutdoorPlacement(map.pois, world.layout.buildings, world);
+  }, 180_000);
 });
