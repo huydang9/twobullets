@@ -21,8 +21,11 @@ interface Stats {
   items: number;
   categories: Record<string, number>;
   weapons: Record<string, number>;
-  /** Piles holding a gun. */
+  /** Every item id (heal kinds, armor and backpack levels). */
+  byItem: Record<string, number>;
+  /** Piles holding a gun, and piles of 2+ items (the rolled ones; single items are supply top-ups). */
   armedPiles: number;
+  rolledPiles: number;
   outdoorPiles: number;
   outdoorGuns: number;
   /** Buildings with loot spots. */
@@ -37,7 +40,7 @@ interface Stats {
 }
 
 function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuilding[], outdoor?: OutdoorLootWorld): Stats {
-  const total: Stats = { piles: 0, items: 0, categories: {}, weapons: {}, armedPiles: 0, outdoorPiles: 0, outdoorGuns: 0, buildings: 0, anyGun: 0, primary: 0, big: 0, bigPrimary: 0, gunsWithAmmo: 0 };
+  const total: Stats = { piles: 0, items: 0, categories: {}, weapons: {}, byItem: {}, armedPiles: 0, rolledPiles: 0, outdoorPiles: 0, outdoorGuns: 0, buildings: 0, anyGun: 0, primary: 0, big: 0, bigPrimary: 0, gunsWithAmmo: 0 };
   const spotCount = new Map(buildings.flatMap((b) => (isBuildingPrefabId(b.prefab) ? [[b.id, getPrefabLootSpots(b.prefab).length] as const] : [])));
   for (const seed of SEEDS) {
     const layout = generateLoot(seed, pois, buildings, outdoor);
@@ -47,10 +50,12 @@ function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuild
     const primary = new Set<string>();
     for (const pile of layout.piles) {
       if (pile.outdoor) total.outdoorPiles++;
+      if (pile.items.length > 1) total.rolledPiles++;
       let armed = false;
       for (const item of pile.items) {
         const def = ITEMS[item.itemId];
         total.categories[def.category] = (total.categories[def.category] ?? 0) + 1;
+        total.byItem[item.itemId] = (total.byItem[item.itemId] ?? 0) + 1;
         if (def.category !== "weapon") continue;
         armed = true;
         total.weapons[item.itemId] = (total.weapons[item.itemId] ?? 0) + 1;
@@ -85,6 +90,8 @@ interface Report {
   bigPrimaryShare: number;
   threeBuildings: number;
   avg: (category: string) => number;
+  /** One item id, or several joined with "+" (e.g. "helmet_3+vest_3"). */
+  item: (id: string) => number;
   weapon: (id: string) => number;
 }
 
@@ -100,11 +107,12 @@ function report(name: string, s: Stats): Report {
     items: avg(s.items),
     piles: avg(s.piles),
     outdoorGuns: avg(s.outdoorGuns),
-    armedPileShare: s.armedPiles / s.piles,
+    armedPileShare: s.armedPiles / s.rolledPiles,
     gunsWithAmmoShare: s.gunsWithAmmo / Math.max(1, guns),
     bigPrimaryShare,
     threeBuildings,
     avg: (category) => avg(category === "armor" ? (s.categories.helmet ?? 0) + (s.categories.vest ?? 0) : (s.categories[category] ?? 0)),
+    item: (id) => avg(id.split("+").reduce((n, key) => n + (s.byItem[key] ?? 0), 0)),
     weapon: (id) => avg(s.weapons[id] ?? 0),
   };
   if (print) {
@@ -114,7 +122,8 @@ function report(name: string, s: Stats): Report {
       [
         `${name} (avg of ${n} seeds): ${r.piles} piles, ${r.items} items, ${avg(s.buildings)} buildings (${avg(s.big)} with >= 3 spots)`,
         `  categories: ${table(s.categories)}`,
-        `  guns ${r.guns}: ${table(s.weapons)}; piles with a gun ${pct(r.armedPileShare)}; guns with ammo in the pile ${pct(r.gunsWithAmmoShare)}`,
+        `  items: ${table(s.byItem)}`,
+        `  guns ${r.guns}: ${table(s.weapons)}; piles with a gun ${pct(s.armedPiles / s.piles)} (rolled piles, 2+ items: ${pct(r.armedPileShare)}); guns with ammo in the pile ${pct(r.gunsWithAmmoShare)}`,
         `  outdoor piles ${avg(s.outdoorPiles)} with ${r.outdoorGuns} guns`,
         `  building has a gun ${pct(s.anyGun / s.buildings)}, a primary ${pct(primaryShare)}; >= 3 spots has a primary ${pct(bigPrimaryShare)}`,
         `  3 random buildings hold a primary ${pct(threeBuildings)}`,
@@ -124,13 +133,23 @@ function report(name: string, s: Stats): Report {
   return r;
 }
 
-/** Table version 1 (before the weapon passes): heals, throwables and armor must not drop below it. */
-const V1_LEVELS = {
-  "Map v1": { heal: 94, throwable: 66, armor: 80, boost: 51, backpack: 46 },
-  "vn-hangxanh": { heal: 81, throwable: 55, armor: 68, boost: 38, backpack: 35 },
+/**
+ * Floors per building-only map: guns, ammo, boosts and throwables keep their table v3 levels, heals, armor and
+ * backpacks the levels table v4 raised them to (the medicine and gear pass). Set a few percent under the measured
+ * averages, so a table edit that quietly thins them out fails here.
+ */
+const FLOORS = {
+  "Map v1": {
+    categories: { weapon: 500, ammo: 600, heal: 375, throwable: 95, armor: 385, boost: 62, backpack: 180 },
+    items: { medkit: 78, first_aid: 125, bandage: 165, "helmet_1+vest_1": 210, "helmet_2+vest_2": 120, "helmet_3+vest_3": 40, backpack_2: 55, backpack_3: 20 },
+  },
+  "vn-hangxanh": {
+    categories: { weapon: 595, ammo: 710, heal: 375, throwable: 120, armor: 395, boost: 82, backpack: 195 },
+    items: { medkit: 78, first_aid: 130, bandage: 160, "helmet_1+vest_1": 205, "helmet_2+vest_2": 130, "helmet_3+vest_3": 52, backpack_2: 65, backpack_3: 24 },
+  },
 } as const;
 
-function expectPlenty(name: keyof typeof V1_LEVELS, r: Report, minGuns: number): void {
+function expectPlenty(name: keyof typeof FLOORS, r: Report, minGuns: number): void {
   expect(r.guns).toBeGreaterThanOrEqual(minGuns);
   expect(r.armedPileShare).toBeGreaterThan(0.85);
   expect(r.gunsWithAmmoShare).toBe(1);
@@ -140,7 +159,13 @@ function expectPlenty(name: keyof typeof V1_LEVELS, r: Report, minGuns: number):
   expect(r.weapon("weapon_rifle")).toBeGreaterThan(r.weapon("weapon_shotgun"));
   expect(r.weapon("weapon_shotgun")).toBeGreaterThan(r.weapon("weapon_sniper"));
   expect(r.weapon("weapon_sniper")).toBeGreaterThan(r.weapon("weapon_pistol"));
-  for (const [category, level] of Object.entries(V1_LEVELS[name])) expect(r.avg(category), category).toBeGreaterThanOrEqual(level);
+  for (const [category, level] of Object.entries(FLOORS[name].categories)) expect(r.avg(category), category).toBeGreaterThanOrEqual(level);
+  for (const [id, level] of Object.entries(FLOORS[name].items)) expect(r.item(id), id).toBeGreaterThanOrEqual(level);
+  // Armor and packs stay a ladder: L1 common, L2 fairly common, L3 rare.
+  expect(r.item("helmet_1+vest_1")).toBeGreaterThan(r.item("helmet_2+vest_2"));
+  expect(r.item("helmet_2+vest_2")).toBeGreaterThan(r.item("helmet_3+vest_3"));
+  expect(r.item("bandage")).toBeGreaterThan(r.item("first_aid"));
+  expect(r.item("first_aid")).toBeGreaterThan(r.item("medkit"));
 }
 
 /** Outdoor piles stand on playable, gentle terrain at its height, clear of buildings. */
@@ -167,21 +192,23 @@ function outdoorWorld(map: MapData): OutdoorLootWorld {
 describe("loot weapon availability", () => {
   it("Map v1", () => {
     const r = report("Map v1", measure(MAP_V1.pois, MAP_V1.buildings));
-    expectPlenty("Map v1", r, 450);
-    expect(r.items).toBeLessThan(2400);
+    expectPlenty("Map v1", r, 500);
+    expect(r.items).toBeLessThan(2600);
   });
 
   it("vn-hangxanh", async () => {
     const { map } = await loadRealMap("vn-hangxanh");
     const r = report("vn-hangxanh", measure(map.pois, map.buildings));
-    expectPlenty("vn-hangxanh", r, 550);
-    expect(r.items).toBeLessThan(2800);
+    expectPlenty("vn-hangxanh", r, 595);
+    expect(r.items).toBeLessThan(2900);
   }, 60_000);
 
   it("Map v1 with outdoor piles", () => {
     const world = outdoorWorld(MAP_V1);
     const r = report("Map v1 + outdoor", measure(MAP_V1.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
+    // What the client spawns: LootRenderer draws about 3,000 items at ~30 draw calls (docs/equipment/design.md §6).
+    expect(r.items).toBeLessThan(3300);
     expectOutdoorPlacement(MAP_V1.pois, world.layout.buildings, world);
   }, 120_000);
 
@@ -190,6 +217,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-hangxanh + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
+    expect(r.items).toBeLessThan(3900);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
 });

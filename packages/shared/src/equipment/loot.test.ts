@@ -27,6 +27,12 @@ function categoryCounts(layout: LootLayout): Record<string, number> {
   return counts;
 }
 
+function itemCounts(layout: LootLayout): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of layout.items) counts[item.itemId] = (counts[item.itemId] ?? 0) + 1;
+  return counts;
+}
+
 describe("loot generation", () => {
   const layout = generateLoot(SEED, MAP_V1.pois, buildings);
 
@@ -63,24 +69,39 @@ describe("loot generation", () => {
   it("gives every building loot, nearly every pile a gun, and plenty for 20 players on a 1 km map", () => {
     const withLoot = new Set(layout.piles.map((p) => p.buildingId));
     expect(withLoot.size).toBe(buildings.filter((b) => isBuildingPrefabId(b.prefab) && b.prefab !== "container_closed").length);
-    expect(layout.piles.length).toBeGreaterThan(400);
-    expect(layout.piles.length).toBeLessThan(650);
-    expect(layout.items.length).toBeGreaterThan(1200);
-    expect(layout.items.length).toBeLessThan(2400);
+    expect(layout.piles.length).toBeGreaterThan(700);
+    expect(layout.piles.length).toBeLessThan(1000);
+    expect(layout.items.length).toBeGreaterThan(1900);
+    expect(layout.items.length).toBeLessThan(2600);
     for (const pile of layout.piles) {
       expect(pile.items.length).toBeGreaterThanOrEqual(1);
       expect(pile.items.length).toBeLessThanOrEqual(LOOT.maxItemsPerPile + 1);
       expect(pile.outdoor).toBeUndefined();
     }
-    const armed = layout.piles.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "weapon"));
-    expect(armed.length / layout.piles.length).toBeGreaterThan(0.85);
+    // Rolled piles (2+ items) nearly always hold a gun; single-item piles are the guaranteed heal/armor top-ups.
+    const rolled = layout.piles.filter((p) => p.items.length > 1);
+    const armed = rolled.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "weapon"));
+    expect(armed.length / rolled.length).toBeGreaterThan(0.85);
     const counts = categoryCounts(layout);
     expect(counts.weapon).toBeGreaterThanOrEqual(450);
     expect(counts.ammo).toBeGreaterThanOrEqual(counts.weapon!);
-    expect(counts.heal).toBeGreaterThanOrEqual(90);
-    expect(counts.throwable).toBeGreaterThanOrEqual(60);
-    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(75);
-    expect(counts.backpack).toBeGreaterThanOrEqual(40);
+    expect(counts.heal).toBeGreaterThanOrEqual(330);
+    expect(counts.throwable).toBeGreaterThanOrEqual(80);
+    expect((counts.helmet ?? 0) + (counts.vest ?? 0)).toBeGreaterThanOrEqual(340);
+    expect(counts.backpack).toBeGreaterThanOrEqual(150);
+    // Heals and gear are findable: a medkit in every few buildings, armor of every level (table v4).
+    const ids = itemCounts(layout);
+    expect(ids.medkit).toBeGreaterThanOrEqual(65);
+    expect(ids.first_aid).toBeGreaterThanOrEqual(110);
+    expect(ids.bandage).toBeGreaterThanOrEqual(140);
+    for (const slot of ["helmet", "vest", "backpack"] as const) {
+      expect(ids[`${slot}_1`], `${slot}_1`).toBeGreaterThanOrEqual(80);
+      expect(ids[`${slot}_2`], `${slot}_2`).toBeGreaterThanOrEqual(40);
+      expect(ids[`${slot}_3`], `${slot}_3`).toBeGreaterThanOrEqual(12);
+    }
+    // Every building with loot spots holds at least one heal.
+    const healBuildings = new Set(layout.piles.filter((p) => p.items.some((i) => ITEMS[i.itemId].category === "heal")).map((p) => p.buildingId));
+    expect(healBuildings.size / withLoot.size).toBeGreaterThan(0.9);
     // Every gun lies next to its ammo.
     for (const pile of layout.piles) {
       for (const item of pile.items) {
