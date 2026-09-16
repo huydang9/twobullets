@@ -113,6 +113,12 @@ export interface NetStats {
   extrapolatedPct: number;
   interrupted: boolean;
   disconnectReason: string;
+  /**
+   * The disconnect is the normal end, not a lost connection: this client quit (leave, abandon, results hand-off), the
+   * server confirmed the leave, or the match had already ended (MatchEnd seen), whatever closed the socket afterwards
+   * (Disconnect, a clean close, or 1006 when the match process exits).
+   */
+  disconnectExpected: boolean;
 }
 
 export interface NetClientOptions {
@@ -277,6 +283,7 @@ export class NetClient {
       extrapolatedPct: 0,
       interrupted: false,
       disconnectReason: "",
+      disconnectExpected: false,
     };
     const onMessage = (bytes: Uint8Array, recvMs: number) => this.handleMessage(bytes, recvMs);
     session.onDatagram(onMessage);
@@ -398,13 +405,13 @@ export class NetClient {
     this.writer.reset();
     encodeDisconnect(this.writer, { reason: DisconnectReason.clientLeave, detail: 0 });
     this.sendStream();
-    this.setState("disconnected", t("net.reason.clientLeave"));
+    this.setState("disconnected", t("net.reason.clientLeave"), true);
     this.session.close(CLOSE_CODE_CLIENT_LEAVE);
   }
 
   /** The transport closed underneath (wire from `OpenedTransport.onClose`). */
   handleTransportClosed(code: number): void {
-    if (this.stats.state !== "disconnected") this.setState("disconnected", describeCloseCode(code));
+    if (this.stats.state !== "disconnected") this.setState("disconnected", describeCloseCode(code), this.matchEnd !== null);
   }
 
   private handleMessage(bytes: Uint8Array, recvMs: number): void {
@@ -443,7 +450,8 @@ export class NetClient {
       }
       case MsgId.Disconnect: {
         const message = decodeDisconnect(reader);
-        this.setState("disconnected", message ? describeDisconnectReason(message.reason) : t("net.reason.byServer"));
+        const expected = this.matchEnd !== null || message?.reason === DisconnectReason.clientLeave;
+        this.setState("disconnected", message ? describeDisconnectReason(message.reason) : t("net.reason.byServer"), expected);
         break;
       }
       case MsgId.Resync:
@@ -701,12 +709,13 @@ export class NetClient {
     this.session.close(CLOSE_CODE_CLIENT_LEAVE);
   }
 
-  private setState(state: NetConnectionState, reason: string): void {
+  private setState(state: NetConnectionState, reason: string, expected = false): void {
     if (this.stats.state === state) return;
     this.stats.state = state;
     this.stateStartedMs = this.clock.now();
     if (state === "disconnected") {
       this.stats.disconnectReason = reason;
+      this.stats.disconnectExpected = expected;
       this.netClock.stop();
     }
     this.onStateChange?.(state, this);

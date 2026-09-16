@@ -1,6 +1,6 @@
 import { clampMaxPlayers, DEFAULT_MATCH_PLAYERS, DEFAULT_TEAM_MODE, TEAM_MODE_SIZE, teamCount, type DevJoinTokenResponse, type MatchConfig, type MatchToAgent, type TeamMode } from "@twobullets/contracts";
 import { LinkConditioner, NETWORK_PROFILES, type Clock, type NetworkProfileName, type Session } from "@twobullets/netcode";
-import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol";
+import { CONTENT_HASH, DisconnectReason, PROTOCOL_VERSION } from "@twobullets/protocol";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { createHash } from "node:crypto";
 import { createDevClaims, DEV_JOIN_SECRET_DEFAULT, devHmacKey, JoinTokenVerifier, signDevJoinToken } from "./auth/joinToken";
@@ -78,6 +78,9 @@ export function localMatchConfig(matchId: string, matchSeed: number, maxPlayers:
 }
 
 const PERFORMANCE_CLOCK: Clock = { now: () => performance.now() };
+
+/** `stop()`: how long sockets get to finish their close handshake before they are terminated, ms. */
+export const STOP_CLOSE_GRACE_MS = 2000;
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const clock = options.clock ?? PERFORMANCE_CLOCK;
@@ -176,8 +179,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     },
     async stop() {
       await host.drain();
-      // Let the Disconnect frames and close handshakes flush before sockets are terminated.
-      const deadline = Date.now() + 250;
+      sessions.closePending(DisconnectReason.serverShutdown);
+      // Every session got Disconnect and a close frame; wait for the close handshakes (one round trip each, longer on a
+      // real network or a busy tab) before anything is terminated, which the browser would report as 1006. Returns as
+      // soon as the last socket closed.
+      const deadline = Date.now() + STOP_CLOSE_GRACE_MS;
       while (ws.connectionCount() > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
       await ws.close();
     },

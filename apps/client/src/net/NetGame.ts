@@ -298,7 +298,8 @@ export class NetGame {
         loot: this.presenter?.equipmentView.loot ?? null,
         throwables: this.throwablesValue,
         onCommandResult: (result) => this.matchValue?.onCommandResult(result),
-        onStateChange: (state, c) => console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}` : ""}`),
+        onStateChange: (state, c) =>
+          console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}${c.stats.disconnectExpected ? " (normal end)" : ""}` : ""}`),
       });
       transport.onClose((code) => client.handleTransportClosed(code));
       this.clientValue = client;

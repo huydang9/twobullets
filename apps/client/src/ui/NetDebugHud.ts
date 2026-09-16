@@ -29,6 +29,17 @@ const f0 = (v: number) => v.toFixed(0);
 const f1 = (v: number) => v.toFixed(1);
 
 /**
+ * The connection banner's text, or "" for none. A disconnect that is the normal end (the match ended, or this player
+ * quit) shows nothing: the result screen or the front door takes over, so "Mất kết nối" would read as an error.
+ */
+export function connectionBannerText(stats: Pick<NetStats, "state" | "interrupted" | "disconnectReason" | "disconnectExpected">): string {
+  if (stats.state === "handshaking") return t("net.connecting");
+  if (stats.state === "syncing") return t("net.syncing");
+  if (stats.state === "disconnected") return stats.disconnectExpected ? "" : t("net.disconnected", { reason: stats.disconnectReason || t("net.reason.connectionClosed") });
+  return stats.interrupted ? t("net.interrupted") : "";
+}
+
+/**
  * DEV net debug panel (F6): RTT, jitter, loss, input buffer depth, interpolation delay, corrections, resyncs, bytes
  * per second and transport. The connection banner (connecting, interrupted, disconnected + reason) is always shown.
  * Refreshes text 4× per second.
@@ -101,11 +112,7 @@ export class NetDebugHud {
   }
 
   private updateBanner(stats: NetStats): void {
-    let message = "";
-    if (stats.state === "handshaking") message = t("net.connecting");
-    else if (stats.state === "syncing") message = t("net.syncing");
-    else if (stats.state === "disconnected") message = t("net.disconnected", { reason: stats.disconnectReason || t("net.reason.connectionClosed") });
-    else if (stats.interrupted) message = t("net.interrupted");
+    const message = connectionBannerText(stats);
     this.banner.hidden = message === "";
     if (message !== "" && this.bannerText.data !== message) this.bannerText.data = message;
   }

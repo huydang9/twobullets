@@ -69,6 +69,8 @@ export function startWsServer(options: WsServerOptions): Promise<WsServerHandle>
         connectionCount: () => wss.clients.size,
         close: () =>
           new Promise<void>((done) => {
+            // A terminated socket reaches the browser as 1006 ("connection lost"): callers let the close handshakes finish first.
+            if (wss.clients.size > 0) options.log?.(`[ws] stop: terminating ${wss.clients.size} socket(s) that did not finish closing`);
             for (const ws of wss.clients) ws.terminate();
             wss.close();
             http.closeAllConnections();

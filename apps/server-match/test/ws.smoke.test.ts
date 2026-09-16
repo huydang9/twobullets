@@ -61,4 +61,46 @@ describe("ws transport (localhost)", () => {
       ws.terminate();
     }
   }, 30_000);
+
+  // A terminated socket reaches a browser as close code 1006, which the client shows as "connection lost". Stopping the
+  // process (the match ended, drain) must close every socket with a reason instead.
+  it("stop closes a socket still before Hello with serverShutdown, and waits for a peer slow to answer the close", async () => {
+    const lines: string[] = [];
+    server = await startServer({ mode: "local", host: "127.0.0.1", port: 0, log: (line) => lines.push(line) });
+    const dev = (await (await fetch(`http://127.0.0.1:${server.port}/dev/token?sub=slow&team=0`)).json()) as DevJoinTokenResponse;
+    const open = async (): Promise<WebSocket> => {
+      const ws = new WebSocket(dev.url);
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve());
+        ws.once("error", reject);
+      });
+      return ws;
+    };
+    const idle = await open();
+    const slow = await open();
+    const clock = { now: () => performance.now() };
+    const client = new HeadlessClient({ session: new WsSession(slow, clock), clock, token: dev.token, seed: 2 });
+    client.hello();
+    const pump = setInterval(() => client.update(), 4);
+    try {
+      expect(await until(() => client.welcome !== null && client.snapshotsReceived > 0, 5000)).toBe(true);
+      const idleClosed = new Promise<number>((resolve) => idle.once("close", (code) => resolve(code)));
+      const slowClosed = new Promise<number>((resolve) => slow.once("close", (code) => resolve(code)));
+      // The attached client reads nothing for 600 ms (a busy tab, a long round trip): its close reply comes late.
+      const raw = (slow as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+      raw.pause();
+      setTimeout(() => raw.resume(), 600);
+      const stopped = server.stop();
+      server = null;
+      await stopped;
+      expect(await idleClosed).toBe(4000 + DisconnectReason.serverShutdown);
+      expect(await slowClosed).toBe(4000 + DisconnectReason.serverShutdown);
+      expect(client.disconnect?.reason).toBe(DisconnectReason.serverShutdown);
+      expect(lines.filter((l) => l.includes("terminating"))).toEqual([]);
+    } finally {
+      clearInterval(pump);
+      idle.terminate();
+      slow.terminate();
+    }
+  }, 30_000);
 });

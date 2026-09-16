@@ -79,6 +79,11 @@ export class SessionManager {
     };
   }
 
+  /** Shutdown: connections still before attach (no Hello yet, or waiting for the match) get `Disconnect{reason}` and a clean close. */
+  closePending(reason: DisconnectReason): void {
+    for (const conn of [...this.pending]) if (conn.state === "hello" || conn.state === "admitting") this.reject(conn, reason, "shutting down");
+  }
+
   /** Hello timeouts; call about once per second. */
   sweep(nowMs: number): void {
     for (const conn of this.pending) {
