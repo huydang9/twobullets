@@ -37,10 +37,14 @@ interface Stats {
   bigPrimary: number;
   /** Guns whose pile also holds their ammo. */
   gunsWithAmmo: number;
+  /** Buildings holding at least one throwable, one frag and one smoke (table v5's guaranteed throwable). */
+  anyThrowable: number;
+  anyFrag: number;
+  anySmoke: number;
 }
 
 function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuilding[], outdoor?: OutdoorLootWorld): Stats {
-  const total: Stats = { piles: 0, items: 0, categories: {}, weapons: {}, byItem: {}, armedPiles: 0, rolledPiles: 0, outdoorPiles: 0, outdoorGuns: 0, buildings: 0, anyGun: 0, primary: 0, big: 0, bigPrimary: 0, gunsWithAmmo: 0 };
+  const total: Stats = { piles: 0, items: 0, categories: {}, weapons: {}, byItem: {}, armedPiles: 0, rolledPiles: 0, outdoorPiles: 0, outdoorGuns: 0, buildings: 0, anyGun: 0, primary: 0, big: 0, bigPrimary: 0, gunsWithAmmo: 0, anyThrowable: 0, anyFrag: 0, anySmoke: 0 };
   const spotCount = new Map(buildings.flatMap((b) => (isBuildingPrefabId(b.prefab) ? [[b.id, getPrefabLootSpots(b.prefab).length] as const] : [])));
   for (const seed of SEEDS) {
     const layout = generateLoot(seed, pois, buildings, outdoor);
@@ -48,6 +52,9 @@ function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuild
     total.items += layout.items.length;
     const gun = new Set<string>();
     const primary = new Set<string>();
+    const throwable = new Set<string>();
+    const frag = new Set<string>();
+    const smoke = new Set<string>();
     for (const pile of layout.piles) {
       if (pile.outdoor) total.outdoorPiles++;
       if (pile.items.length > 1) total.rolledPiles++;
@@ -56,6 +63,11 @@ function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuild
         const def = ITEMS[item.itemId];
         total.categories[def.category] = (total.categories[def.category] ?? 0) + 1;
         total.byItem[item.itemId] = (total.byItem[item.itemId] ?? 0) + 1;
+        if (def.category === "throwable") {
+          throwable.add(pile.buildingId);
+          if (item.itemId === "frag") frag.add(pile.buildingId);
+          if (item.itemId === "smoke") smoke.add(pile.buildingId);
+        }
         if (def.category !== "weapon") continue;
         armed = true;
         total.weapons[item.itemId] = (total.weapons[item.itemId] ?? 0) + 1;
@@ -71,6 +83,9 @@ function measure(pois: readonly PointOfInterest[], buildings: readonly LootBuild
       total.buildings++;
       if (gun.has(id)) total.anyGun++;
       if (primary.has(id)) total.primary++;
+      if (throwable.has(id)) total.anyThrowable++;
+      if (frag.has(id)) total.anyFrag++;
+      if (smoke.has(id)) total.anySmoke++;
       if (spots >= 3) {
         total.big++;
         if (primary.has(id)) total.bigPrimary++;
@@ -89,6 +104,10 @@ interface Report {
   gunsWithAmmoShare: number;
   bigPrimaryShare: number;
   threeBuildings: number;
+  /** Share of buildings holding a throwable, and the odds three of them hold a frag / a smoke. */
+  throwableShare: number;
+  threeFrag: number;
+  threeSmoke: number;
   avg: (category: string) => number;
   /** One item id, or several joined with "+" (e.g. "helmet_3+vest_3"). */
   item: (id: string) => number;
@@ -111,6 +130,9 @@ function report(name: string, s: Stats): Report {
     gunsWithAmmoShare: s.gunsWithAmmo / Math.max(1, guns),
     bigPrimaryShare,
     threeBuildings,
+    throwableShare: s.anyThrowable / s.buildings,
+    threeFrag: 1 - (1 - s.anyFrag / s.buildings) ** 3,
+    threeSmoke: 1 - (1 - s.anySmoke / s.buildings) ** 3,
     avg: (category) => avg(category === "armor" ? (s.categories.helmet ?? 0) + (s.categories.vest ?? 0) : (s.categories[category] ?? 0)),
     item: (id) => avg(id.split("+").reduce((n, key) => n + (s.byItem[key] ?? 0), 0)),
     weapon: (id) => avg(s.weapons[id] ?? 0),
@@ -127,6 +149,7 @@ function report(name: string, s: Stats): Report {
         `  outdoor piles ${avg(s.outdoorPiles)} with ${r.outdoorGuns} guns`,
         `  building has a gun ${pct(s.anyGun / s.buildings)}, a primary ${pct(primaryShare)}; >= 3 spots has a primary ${pct(bigPrimaryShare)}`,
         `  3 random buildings hold a primary ${pct(threeBuildings)}`,
+        `  building has a throwable ${pct(r.throwableShare)}; 3 random buildings hold a frag ${pct(r.threeFrag)}, a smoke ${pct(r.threeSmoke)}`,
       ].join("\n"),
     );
   }
@@ -134,18 +157,19 @@ function report(name: string, s: Stats): Report {
 }
 
 /**
- * Floors per building-only map: guns, ammo, boosts and throwables keep their table v3 levels, heals, armor and
- * backpacks the levels table v4 raised them to (the medicine and gear pass). Set a few percent under the measured
- * averages, so a table edit that quietly thins them out fails here.
+ * Floors per building-only map: guns, ammo and boosts keep their table v3 levels, heals, armor and backpacks the
+ * levels table v4 raised them to (the medicine and gear pass), throwables the levels table v5 raised them to (the
+ * guaranteed throwable). Set a few percent under the measured averages, so a table edit that quietly thins them out
+ * fails here.
  */
 const FLOORS = {
   "Map v1": {
-    categories: { weapon: 500, ammo: 600, heal: 375, throwable: 95, armor: 385, boost: 62, backpack: 180 },
-    items: { medkit: 78, first_aid: 125, bandage: 165, "helmet_1+vest_1": 210, "helmet_2+vest_2": 120, "helmet_3+vest_3": 40, backpack_2: 55, backpack_3: 20 },
+    categories: { weapon: 500, ammo: 600, heal: 375, throwable: 425, armor: 385, boost: 62, backpack: 180 },
+    items: { medkit: 78, first_aid: 125, bandage: 165, frag: 190, smoke: 172, "helmet_1+vest_1": 210, "helmet_2+vest_2": 120, "helmet_3+vest_3": 40, backpack_2: 55, backpack_3: 20 },
   },
   "vn-hangxanh": {
-    categories: { weapon: 595, ammo: 710, heal: 375, throwable: 120, armor: 395, boost: 82, backpack: 195 },
-    items: { medkit: 78, first_aid: 130, bandage: 160, "helmet_1+vest_1": 205, "helmet_2+vest_2": 130, "helmet_3+vest_3": 52, backpack_2: 65, backpack_3: 24 },
+    categories: { weapon: 595, ammo: 710, heal: 375, throwable: 345, armor: 395, boost: 82, backpack: 195 },
+    items: { medkit: 78, first_aid: 130, bandage: 160, frag: 155, smoke: 132, "helmet_1+vest_1": 205, "helmet_2+vest_2": 130, "helmet_3+vest_3": 50, backpack_2: 65, backpack_3: 24 },
   },
 } as const;
 
@@ -166,6 +190,14 @@ function expectPlenty(name: keyof typeof FLOORS, r: Report, minGuns: number): vo
   expect(r.item("helmet_2+vest_2")).toBeGreaterThan(r.item("helmet_3+vest_3"));
   expect(r.item("bandage")).toBeGreaterThan(r.item("first_aid"));
   expect(r.item("first_aid")).toBeGreaterThan(r.item("medkit"));
+  // Throwables (table v5): frag and smoke are the common two, then flash, then molotov.
+  expect(r.item("frag")).toBeGreaterThan(r.item("smoke"));
+  expect(r.item("smoke")).toBeGreaterThan(r.item("flash") * 2);
+  expect(r.item("flash")).toBeGreaterThan(r.item("molotov"));
+  // Nearly every building holds one, so looting two or three reliably turns up a frag and a smoke.
+  expect(r.throwableShare).toBeGreaterThan(0.95);
+  expect(r.threeFrag).toBeGreaterThan(0.95);
+  expect(r.threeSmoke).toBeGreaterThan(0.93);
 }
 
 /** Outdoor piles stand on playable, gentle terrain at its height, clear of buildings. */
@@ -193,22 +225,22 @@ describe("loot weapon availability", () => {
   it("Map v1", () => {
     const r = report("Map v1", measure(MAP_V1.pois, MAP_V1.buildings));
     expectPlenty("Map v1", r, 500);
-    expect(r.items).toBeLessThan(2600);
+    expect(r.items).toBeLessThan(2900);
   });
 
   it("vn-hangxanh", async () => {
     const { map } = await loadRealMap("vn-hangxanh");
     const r = report("vn-hangxanh", measure(map.pois, map.buildings));
     expectPlenty("vn-hangxanh", r, 595);
-    expect(r.items).toBeLessThan(2900);
+    expect(r.items).toBeLessThan(3000);
   }, 60_000);
 
   it("Map v1 with outdoor piles", () => {
     const world = outdoorWorld(MAP_V1);
     const r = report("Map v1 + outdoor", measure(MAP_V1.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    // What the client spawns: LootRenderer draws about 3,000 items at ~30 draw calls (docs/equipment/design.md §6).
-    expect(r.items).toBeLessThan(3300);
+    // What the client spawns: LootRenderer draws about 3,200 items at ~30 draw calls (docs/equipment/design.md §6).
+    expect(r.items).toBeLessThan(3400);
     expectOutdoorPlacement(MAP_V1.pois, world.layout.buildings, world);
   }, 120_000);
 
@@ -217,7 +249,7 @@ describe("loot weapon availability", () => {
     const world = outdoorWorld(map);
     const r = report("vn-hangxanh + outdoor", measure(map.pois, world.layout.buildings, world));
     expect(r.outdoorGuns).toBeGreaterThan(20);
-    expect(r.items).toBeLessThan(3900);
+    expect(r.items).toBeLessThan(3950);
     expectOutdoorPlacement(map.pois, world.layout.buildings, world);
   }, 180_000);
 });

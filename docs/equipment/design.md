@@ -349,7 +349,7 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
 
 ## 6. Loot spawning
 
-`generateLoot(seed, pois, buildings, outdoor?)` takes MapLayout `ResolvedBuilding`s (Y resolved) plus `MapData.pois`, and returns `{ piles, items }`. Items get sequential `lootId`s. It is pure and reproducible in Node; `LOOT_TABLE_VERSION = 4` goes into the content hash. The client (`EquipmentSystem` map mode, which `OfflineMatch` uses), the headless harnesses and the match server (B5, `serverLevel.createLoot`) call it at match start for Map v1 and the real maps alike; nothing is baked into map data, so offline and online hold the same loot.
+`generateLoot(seed, pois, buildings, outdoor?)` takes MapLayout `ResolvedBuilding`s (Y resolved) plus `MapData.pois`, and returns `{ piles, items }`. Items get sequential `lootId`s. It is pure and reproducible in Node; `LOOT_TABLE_VERSION = 5` goes into the content hash. The client (`EquipmentSystem` map mode, which `OfflineMatch` uses), the headless harnesses and the match server (B5, `serverLevel.createLoot`) call it at match start for Map v1 and the real maps alike; nothing is baked into map data, so offline and online hold the same loot.
 
 - **Spots:** `getPrefabLootSpots` (1.5 m grid, on floors, clear of geometry), transformed to world space.
 - **Pile chance per spot, by POI tier:**
@@ -365,15 +365,18 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
   - **Minimum piles:** a building gets at least ⌈√spots × 1.1⌉ piles on seeded free spots, so a 5-spot shophouse holds 3 and a 55-spot warehouse at least 9.
 - **Pile contents:** a gun with 2–3 stacks of its ammo (88 / 92 / 95 % of piles by tier), then 1 roll plus a chance of a 2nd, 3rd and 4th (45 / 55 / 62 % each). Rolling stops at 6 items, so a pile holds 1–7. Items sit on a 0.3 m ring (0.5 m for 4+ items).
 - **Primary top-up:** a building with 3+ loot spots should hold 1 + ⌊spots / 8⌋ primaries (rifle, shotgun, sniper). Each missing one is added with 90 / 95 / 100 % chance by tier, from the tier's weapon table without pistols, with 2–3 stacks of its ammo: on a free spot as a new pile, else joining a pile with room.
-- **Guaranteed supplies (table v4):** medicine and gear live in buildings, so a building should also hold 1 + ⌊spots / spotsPer⌋ heals, armor pieces and backpacks. Each missing one is rolled from the building's tier tables with 85 / 92 / 100 % chance by tier and placed like the primary top-up (a free spot as a new pile, else a pile with room; free spots indoors are preferred over balconies and roofs), so a player who loots two or three buildings has a real heal and a vest.
+- **Guaranteed supplies (heals, armor and backpacks table v4; throwables table v5):** medicine, gear and throwables live in buildings, so a building should also hold 1 + ⌊spots / spotsPer⌋ of each kind. Each missing one is rolled from the building's tier tables with 85 / 92 / 100 % chance by tier and placed like the primary top-up (a free spot as a new pile, else a pile with room; free spots indoors are preferred over balconies and roofs), so a player who loots two or three buildings has a real heal, a vest, a frag and a smoke.
 
   | Kind | Min spots | Spots per item | 5-spot shophouse | 55-spot warehouse |
   |---|---|---|---|---|
   | heal | 1 | 5 | 2 | 12 |
   | armor | 2 | 5 | 2 | 12 |
   | backpack | 3 | 11 | 1 | 6 |
+  | throwable | 1 | 4 | 2 | 14 |
 
-  - These top-ups are the single-item piles, so the share of *all* piles holding a gun falls to 51–75 % while 94–98 % of the *rolled* (2+ item) piles still hold one. Gun and ammo counts are unchanged by them.
+  - Top-ups are rolled in that order (`SUPPLY_KINDS`), throwables last, so the earlier kinds keep their RNG draws.
+  - The **guaranteed throwable** does not use the ordinary throwable table: it alternates two frag/smoke tables by how many throwables the building already holds — `{ frag 84, smoke 9, flash 4, molotov 3 }` for an even count, `{ frag 15, smoke 78, flash 4, molotov 3 }` for an odd one. A building with two guaranteed throwables therefore almost always holds one frag *and* one smoke; flash and molotov come mostly from ordinary rolls. Measured: 99 % of buildings hold a throwable, and three random buildings hold a frag 98–100 % / a smoke 95–100 % of the time.
+  - These top-ups are the single-item piles, so the share of *all* piles holding a gun falls to 39–69 % while 89–97 % of the *rolled* (2+ item) piles still hold one. Gun and ammo counts are unchanged by them.
 - **Matching ammo:** a loose ammo roll takes the ammo of a gun already rolled in the same building 60 % of the time.
 - **Outdoor piles** (only when `outdoor = { flatten, terrain, layout }` is passed; `Game.ts` passes it, the headless harnesses don't): a gun with its ammo, plus one roll half the time.
   - **Roadsides:** a station every 20 m along every painted road (`mapPaths`), 1.2 m past a seeded edge. Chance 35 / 50 / 65 % inside a POI by tier, 20 % elsewhere.
@@ -398,29 +401,33 @@ Per-tick order in `stepPlayerEquipment`: vitals (boost pulse, decay, bleed, flas
 - **Within categories:**
   - Weapons: pistol 18→10, shotgun 30→20, rifle 42→48, sniper 10→22. Military POIs scale sniper weight ×1.5.
   - Heals: bandage (×5) 50→40, first aid 34→35, medkit 16→25.
-  - Throwables: frag 35–38, smoke 24–25, flash 20–22, molotov 18.
+  - Throwables (ordinary rolls): frag 34–36, smoke 29–30, flash 19–20, molotov 16. The guaranteed throwable uses the frag/smoke tables above instead.
   - Armor/backpack levels: L1 68→46, L2 26→38, L3 6→16.
 - **Density** (averages over 8 seeds, from `lootStats.test.ts`; `LOOT_STATS=1` with `--silent=false --reporter=verbose` prints them). "Buildings" is what the headless harnesses spawn; "+ outdoor" is what the client spawns:
 
   | | Map v1 (74 buildings) | Map v1 + outdoor | vn-hangxanh (190 buildings) | vn-hangxanh + outdoor |
   |---|---|---|---|---|
-  | Piles / items | 875 / 2,304 | 1,086 / 2,840 | 836 / 2,601 | 1,194 / 3,503 |
-  | Guns (rifle, shotgun, sniper, pistol) | 515 (230, 123, 92, 70) | 733 (326, 176, 133, 97) | 616 (283, 146, 109, 78) | 985 (442, 251, 154, 138) |
-  | Piles with a gun (rolled piles) | 51 % (97 %) | 61 % (98 %) | 64 % (94 %) | 75 % (97 %) |
-  | Ammo / boost / throwable | 619 / 68 / 104 | 850 / 74 / 116 | 744 / 89 / 128 | 1,131 / 102 / 146 |
-  | Heals (bandage, first aid, medkit) | 396 (177, 135, 85) | 421 (188, 143, 90) | 394 (170, 139, 85) | 439 (192, 156, 91) |
-  | Armor (L1, L2, L3) | 409 (228, 133, 47) | 442 (248, 143, 51) | 421 (224, 140, 57) | 471 (253, 156, 62) |
-  | Backpacks (L1, L2, L3) | 193 (109, 60, 23) | 205 (115, 66, 25) | 209 (112, 70, 27) | 228 (125, 75, 28) |
+  | Piles / items | 1,193 / 2,692 | 1,401 / 3,218 | 963 / 2,848 | 1,309 / 3,727 |
+  | Guns (rifle, shotgun, sniper, pistol) | 529 (240, 128, 94, 67) | 744 (338, 180, 134, 93) | 623 (280, 150, 111, 83) | 983 (438, 251, 156, 139) |
+  | Piles with a gun (rolled piles) | 39 % (95 %) | 48 % (97 %) | 56 % (89 %) | 68 % (93 %) |
+  | Ammo / boost | 636 / 74 | 860 / 82 | 746 / 91 | 1,126 / 104 |
+  | Throwables (frag, smoke, flash, molotov) | 448 (203, 186, 31, 28) | 460 (207, 189, 34, 30) | 367 (167, 142, 31, 27) | 382 (171, 147, 36, 28) |
+  | Heals (bandage, first aid, medkit) | 401 (176, 145, 81) | 427 (188, 153, 86) | 393 (175, 138, 80) | 438 (197, 153, 88) |
+  | Armor (L1, L2, L3) | 410 (230, 133, 46) | 439 (247, 143, 50) | 419 (224, 143, 52) | 468 (256, 157, 55) |
+  | Backpacks (L1, L2, L3) | 194 (106, 64, 24) | 205 (113, 67, 25) | 209 (114, 68, 26) | 225 (125, 73, 27) |
   | Buildings with 3+ spots holding a primary | 100 % | 100 % | 100 % | 100 % |
+  | Buildings holding a throwable | 100 % | 100 % | 99 % | 99 % |
 
   - Every gun lies in the same pile as its ammo.
-  - Earlier versions, Map v1 / vn-hangxanh: guns were 99 / 81 in table v1, 142 / 193 in v2, 505 / 601 in v3 (v4 keeps v3's guns, ammo and throwable mix).
-  - What v4 (the medicine and gear pass) changed, Map v1 + outdoor / vn-hangxanh + outdoor vs v3: heals 211 → 421 / 256 → 439 (medkits 27 → 90 / 27 → 91, ×3.3), armor 177 → 442 / 218 → 471 (L3 17 → 51 / 20 → 62), backpacks 95 → 205 / 120 → 228; guns and ammo held (727 → 733 / 976 → 985 and 838 → 850 / 1,111 → 1,131), boosts and throwables came down a little (103 → 74 / 142 → 102 and 155 → 116 / 177 → 146) but stay far above the table v1 levels.
-  - `lootStats.test.ts` enforces per-map floors on every category and on medkits, first aid, bandages and each armor / backpack level, plus item ceilings (2,600 / 2,900 buildings-only, 3,300 / 3,900 with outdoor piles).
-- **Client cost:** ~2,800 items on Map v1 and ~3,500 on vn-hangxanh. `LootRenderer` draws thin instances, one batch per item id (about 30 draw calls at most), for items within 70 m (small items within 40 m). It rebuilds when the camera moves 4 m, walking the 8 m spatial hash without allocating (`forEachGroundLoot`). It has no hard item cap: buffers grow by doubling.
+  - Earlier versions, Map v1 / vn-hangxanh: guns were 99 / 81 in table v1, 142 / 193 in v2, 505 / 601 in v3 (v4 and v5 keep v3's guns and ammo).
+  - What v4 (the medicine and gear pass) changed, Map v1 + outdoor / vn-hangxanh + outdoor vs v3: heals 211 → 421 / 256 → 439 (medkits 27 → 90 / 27 → 91, ×3.3), armor 177 → 442 / 218 → 471 (L3 17 → 51 / 20 → 62), backpacks 95 → 205 / 120 → 228; guns and ammo held, boosts and throwables came down a little (155 → 116 / 177 → 146).
+  - What **v5 (the throwables pass)** changed, Map v1 + outdoor / vn-hangxanh + outdoor vs v4: throwables 116 → 460 / 146 → 382 (×3.2 across the two maps) — frag 43 → 207 / 55 → 171, smoke 25 → 189 / 37 → 147, flash 26 → 34 / 29 → 36, molotov 22 → 30 / 25 → 28. Guns, ammo, heals, armor and backpacks are untouched (the category weights did not move; they differ by under 2 %, the reshuffle the version bump causes). Totals rose 2,840 → 3,218 and 3,495 → 3,727 items, piles 1,086 → 1,401 and 1,191 → 1,309.
+  - `lootStats.test.ts` enforces per-map floors on every category and on medkits, first aid, bandages, frags, smokes and each armor / backpack level, the frag > smoke ≫ flash > molotov order, the share of buildings holding a throwable, plus item ceilings (2,900 / 3,000 buildings-only, 3,400 / 3,950 with outdoor piles).
+- **Client cost:** ~3,200 items on Map v1 and ~3,700 on vn-hangxanh. `LootRenderer` draws thin instances, one batch per item id (about 30 draw calls at most), for items within 70 m (small items within 40 m). It rebuilds when the camera moves 4 m, walking the 8 m spatial hash without allocating (`forEachGroundLoot`). It has no hard item cap: buffers grow by doubling.
   - Pickup queries stay local: 2.6 m reach at 10 Hz.
   - Bot loot scans (2 Hz, 35 m) keep only the nearest 64 items (`queryGroundLootInto` limit; the brain weighs 48), so dense towns cost O(n · 64) per scan instead of O(n²).
-  - Online (`apps/server-match/test/serverLoot.test.ts`, 20 clients on Map v1): v4's 2,828 items cost 3.0 KB mean at join (max 5.9 KB, budget 16 KB) and 0.30 kbps mean while roaming (max 0.74, budget 6) — v3's 2,305 items cost 2.3 KB and 0.26 kbps.
+  - Online (`apps/server-match/test/serverLoot.test.ts`, 20 clients on Map v1): the server drops throwables (`ServerLoot` filters the category, since it cannot simulate them yet) and any loot id ≥ `NET_LOOT_ID_LIMIT` (16,384). v5 generates 3,270 items and streams the ~2,760 non-throwable ones at 3.2 KB mean per client at join (max 5.8 KB, budget 16 KB) and 0.36 kbps mean while roaming (max 0.77, budget 6) — v4's 2,828 generated items cost 3.0 KB and 0.30 kbps, v3's 2,305 cost 2.3 KB and 0.26 kbps.
+  - **If networked throwables land** and `ServerLoot` stops filtering the category, Map v1 replicates ~3,220 items instead of ~2,760 (+17 %) and vn-hangxanh ~3,730, so the join cost becomes roughly 3.7 KB mean / 6.8 KB max per client and roaming ~0.42 kbps — still well inside the 16 KB and 6 kbps budgets. Nothing else has to change: `generateLoot` already numbers throwables in the same dense `lootId` sequence (filtering happens in `ServerLoot`'s constructor, not in the generator), so keeping them renumbers nothing, and the worst-case total stays under a quarter of the 16,384-id wire limit.
 - **Stability:** each spot's RNG comes from `(seed, hash(buildingId), spotIndex)`, so editing one building never reshuffles another building's loot (tested).
 - **Runtime ground loot:** a `GroundLoot` store with an 8 m spatial hash and `version` (netcode `lootVersion`).
   - Store operations: `takeGroundItem`, `setGroundQuantity`, `dropGroundItem`, `queryGroundLoot`.
