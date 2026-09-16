@@ -19,8 +19,12 @@
  * v8: quitting a match: `MatchCommand` (0x50, C→S `leave` / `endForAll`) and `MatchCommandResult` (0x51, S→C
  * ok/denied/unavailable/unknown); `Roster` players carry a `host` bit (who may end the match for everyone); `MatchEnd`
  * gains reason `hostEnded` (5).
+ * v9: server-authoritative throwables: the `throwItem` input action (kind, style, cooked fuse), `ThrowableUpdate`
+ * (0x52) on the control stream (grenades in flight, detonations, smoke and fire areas, and a flash for the player it
+ * blinded, all area-of-interest limited like loot), and a throwable-count part in the owner items group. The starting
+ * kit and the match's ground loot carry throwables again.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 export const CONTENT_HASH = 0x4bc5f495;
 
 export interface CompatKey {

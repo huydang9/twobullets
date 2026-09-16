@@ -22,7 +22,7 @@ import type { RaycastFn } from "@twobullets/shared/weapons/types";
 import type { Player } from "./Player";
 
 // Server-authoritative ground loot (plan.md B5, protocol v7). The match's loot is the offline generator's for the level
-// and seed (practice's exact piles and ids) without throwables, which the server doesn't simulate. Players act through
+// and seed: practice's exact piles and ids, throwables included since v9 (ServerThrowables). Players act through
 // `pickup` (loot id + weapon slot), `drop` (shared drop arg) and `equipAttach` (swap primaries) input actions, checked
 // against reach, line of sight and the shared inventory rules; a death drops the whole inventory as a pile at the body.
 // Replication is per client and area-of-interest based (protocol loot.ts): each tick every connected player's view
@@ -49,7 +49,7 @@ export type PickupReject = "gone" | "notAlive" | "reach" | "sight" | "busy" | "i
 export interface ServerLootStats {
   /** Items on the ground now. */
   items: number;
-  /** Items the generator made that the match left out (throwables, ids past the wire limit). */
+  /** Items the generator made that the match left out (ids past the wire limit). */
   filtered: number;
   pickups: number;
   pickupsRejected: number;
@@ -142,7 +142,7 @@ export class ServerLoot {
   constructor(options: ServerLootOptions) {
     const kept: LootItem[] = [];
     for (const item of options.items) {
-      if (ITEMS[item.itemId].category === "throwable" || item.lootId >= NET_LOOT_ID_LIMIT) this.stats.filtered++;
+      if (item.lootId >= NET_LOOT_ID_LIMIT) this.stats.filtered++;
       else kept.push(item);
     }
     this.source = kept;

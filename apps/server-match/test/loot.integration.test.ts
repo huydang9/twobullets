@@ -83,12 +83,12 @@ function standBeside(h: Harness, p: Player, position: readonly [number, number, 
 }
 
 describe("networked loot (arena)", () => {
-  it("loot is the offline arena test piles without throwables, and a client hears the items around it", async () => {
+  it("loot is the offline arena test piles (throwables included, v9), and a client hears the items around it", async () => {
     const { h, players } = await setup(1);
     const loot = h.match.loot!;
-    const offline = createTestLoot(ARENA_LEVEL.spawnPoints);
-    const expected = offline.filter((item) => ITEMS[item.itemId].category !== "throwable");
-    expect(loot.stats.filtered).toBe(offline.length - expected.length);
+    const expected = createTestLoot(ARENA_LEVEL.spawnPoints);
+    expect(loot.stats.filtered).toBe(0);
+    expect(expected.some((item) => ITEMS[item.itemId].category === "throwable")).toBe(true);
     expect([...loot.ground.items.values()].sort((a, b) => a.lootId - b.lootId)).toEqual(expected);
     // The whole 120 m arena is inside the area of interest.
     const mirror = players[0]!.client.loot;
@@ -237,7 +237,7 @@ describe("networked loot (arena)", () => {
     h.match.combat!.zoneDamage(a.player, 100);
     expect(a.player.life).toBe("dead");
     const pile = [...loot.ground.items.values()].filter((item) => item.pileId === NET_DEATH_PILE_BASE + a.player.slot);
-    expect(pile.map((item) => item.itemId).sort()).toEqual(["ammo_556", "ammo_9mm", "backpack_1", "weapon_pistol", "weapon_rifle"]);
+    expect(pile.map((item) => item.itemId).sort()).toEqual(["ammo_556", "ammo_9mm", "backpack_1", "frag", "smoke", "weapon_pistol", "weapon_rifle"]);
     for (const item of pile) expect(Math.sqrt((item.position[0] - feet.x) ** 2 + (item.position[2] - feet.z) ** 2)).toBeLessThan(0.6);
     expect(a.player.inventory.weapons).toEqual([null, null, null]);
     h.run(100);

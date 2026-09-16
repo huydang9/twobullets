@@ -6,6 +6,7 @@ import { decodeInputPacket } from "../messages/input";
 import { decodePing } from "../messages/ping";
 import { decodeRoster } from "../messages/roster";
 import { decodeLootUpdate } from "../messages/loot";
+import { decodeThrowableUpdate } from "../messages/throwables";
 import { createSnapshotBuffer, decodeSnapshotHeader, decodeSnapshotInto, type Snapshot } from "../messages/snapshot";
 
 // Debug decoding of one message to JSON-friendly data (ADR 0204: "debugging needs a decoder tool").
@@ -92,6 +93,11 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
       break;
     case MsgId.LootUpdate: {
       const ops = decodeLootUpdate(r);
+      message = ops === null ? null : { ops };
+      break;
+    }
+    case MsgId.ThrowableUpdate: {
+      const ops = decodeThrowableUpdate(r);
       message = ops === null ? null : { ops };
       break;
     }

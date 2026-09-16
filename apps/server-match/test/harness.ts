@@ -97,6 +97,8 @@ export interface HarnessOptions {
   readonly level?: MatchLevel;
   /** Edits the local match config (roster, rules). */
   readonly configure?: (config: MatchConfig) => MatchConfig;
+  /** Bot brain override (scripted bots in tests). */
+  readonly botBrainFactory?: ServerMatchOptions["botBrainFactory"];
 }
 
 export async function createHarness(havok: HavokModule, options: HarnessOptions = {}): Promise<Harness> {
@@ -132,6 +134,7 @@ export async function createHarness(havok: HavokModule, options: HarnessOptions 
   const match = host.createMatch(options.configure ? options.configure(baseConfig) : baseConfig, {
     lifecycle: options.lifecycle ?? null,
     ...(options.level ? { level: options.level } : {}),
+    ...(options.botBrainFactory ? { botBrainFactory: options.botBrainFactory } : {}),
     onPhase: (phase) => lifecyclePhases.push(phase),
     onResult: (result) => results.push(result),
     onClosed: () => (closed.value = true),

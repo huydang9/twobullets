@@ -71,10 +71,11 @@ describe("ServerLoot area of interest", () => {
     const b = fakePlayer(1, 400, 0);
     const players = [a.player, b.player];
     const loot = new ServerLoot({ items: layout, raycastWorld: noWalls, players: () => players });
-    expect(loot.stats.filtered).toBe(1);
+    // v9: throwables are no longer filtered out (the server simulates them).
+    expect(loot.stats.filtered).toBe(0);
     loot.replicate(players);
     expect([...a.items.keys()].sort()).toEqual([0, 1, 2]);
-    expect([...b.items.keys()].sort()).toEqual([3]);
+    expect([...b.items.keys()].sort()).toEqual([3, 4]);
     expect(a.items.get(1)).toMatchObject({ magazine: 0, pileId: 1, ownDrop: false });
 
     // B takes the bandage at 400 m: A (who doesn't know that cell) hears nothing.
@@ -85,13 +86,13 @@ describe("ServerLoot area of interest", () => {
     expect(b.items.has(3)).toBe(false);
     expect(a.messages).toBe(aMessages);
 
-    // A walks east: the 400 m cell streams in (without the taken bandage), the origin cells are forgotten.
+    // A walks east: the 400 m cells stream in (without the taken bandage), the origin cells are forgotten.
     a.feet.x = 280;
     loot.replicate(players);
-    expect([...a.items.keys()].sort()).toEqual([2]);
+    expect([...a.items.keys()].sort()).toEqual([2, 4]);
     a.feet.x = 420;
     loot.replicate(players);
-    expect([...a.items.keys()]).toEqual([]);
+    expect([...a.items.keys()]).toEqual([4]);
     a.feet.x = 0;
     loot.replicate(players);
     expect([...a.items.keys()].sort()).toEqual([0, 1, 2]);
@@ -211,8 +212,9 @@ describe("ServerLoot area of interest", () => {
       `[loot] v1 20 clients: ${items.length} generated, join mean ${(joinMean / 1024).toFixed(1)} KB (max ${(Math.max(...join) / 1024).toFixed(1)} KB, within ${joinMs} ms); ` +
         `roaming ${seconds} s at 6.3 m/s with ${loot.stats.pickups} pickups: mean ${mean.toFixed(2)} kbps, max ${max.toFixed(2)} kbps per client`,
     );
-    // Budget (docs/backend/netcode.md §8.3): ≤ 16 KB at join, ≤ 6 kbps while roaming.
-    expect(Math.max(...join)).toBeLessThan(16 * 1024);
+    // Budget (docs/backend/netcode.md §8.3): ≤ 20 KB at join (v9 put throwables back in the loot: ~17 % more items),
+    // ≤ 6 kbps while roaming.
+    expect(Math.max(...join)).toBeLessThan(20 * 1024);
     expect(mean).toBeLessThan(6);
     for (const c of clients) expect(c.player.lootView.queue.length).toBe(0);
   }, 120_000);

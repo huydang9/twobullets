@@ -11,7 +11,7 @@ import type { Hud } from "../ui/Hud";
 import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
 import { PauseMenu, toPauseAction, type PauseMenuAction } from "../ui/match/PauseMenu";
-import { commandRefusalKey, pauseOptions } from "../ui/match/pauseOptions";
+import { commandRefusalKey, deathQuitOptions, pauseOptions } from "../ui/match/pauseOptions";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
 import { deathCauseText, MATCH_STRINGS } from "../ui/match/strings";
 import type { MapRuntime } from "../world/mapRuntime";
@@ -90,19 +90,23 @@ export class NetMatch {
     this.deathScreen = new DeathScreen(deps.layer);
     this.resultScreen = new ResultScreen(deps.layer);
     this.pauseMenu = new PauseMenu(deps.layer, {
-      // The menu closes when the lock actually arrives (`onLockChange`), not here.
+      // The menu closes when the lock actually arrives (`onLockChange`), not here. Over a death or result screen there
+      // is no lock to take back, so it just closes onto the screen it covered.
       onResume: () => {
         this.commandNotice = "";
-        this.deps.input.requestLock();
+        if (this.deathScreen.visible || this.resultScreen.visible) this.closePause();
+        else this.deps.input.requestLock();
       },
+      resumeKey: () => (this.deathScreen.visible || this.resultScreen.visible ? "pause.backToScreen" : "pause.resume"),
       subtitle: () => this.pauseSubtitle(),
       actions: () => this.pauseActions(),
     });
     // Esc is the browser's key for leaving pointer lock and never reaches the page, so the pause menu opens on the
-    // unlock itself — unless the bag, the map or a death/result screen took the mouse.
+    // unlock itself — unless the bag or the map took the mouse. Once this player is dead the mouse is already free, so
+    // the death and spectate screens get the menu from the Esc key itself (`handleKey`) instead.
     deps.input.onLockChange((locked) => {
       if (locked) this.closePause();
-      else this.openPause();
+      else if (!this.dead && !this.view.ended) this.openPause();
     });
     if (deps.world) deps.hud.setMapSource(matchMapSource(view, this.frame));
     deps.presenter.setMatchHooks({
@@ -194,9 +198,9 @@ export class NetMatch {
     return this.view.hostSlot >= 0 && this.view.hostSlot === this.view.ownSlot;
   }
 
+  /** Opens over whatever is showing, death and result screens included (z-order puts it on top). */
   private openPause(): void {
-    if (this.exited || this.view.ended || this.deathScreen.visible || this.resultScreen.visible) return;
-    if (this.deps.hud.overlayOpen || this.pauseMenu.visible) return;
+    if (this.exited || this.deps.hud.overlayOpen || this.pauseMenu.visible) return;
     this.deps.hud.setModal(true);
     this.pauseMenu.open();
   }
@@ -214,11 +218,12 @@ export class NetMatch {
   }
 
   private pauseActions(): PauseMenuAction[] {
-    const options = pauseOptions({ kind: "net", isHost: this.isHost, warmup: this.view.state.phase === "warmup" });
+    const options = pauseOptions({ kind: "net", isHost: this.isHost, warmup: this.view.state.phase === "warmup", dead: this.dead, ended: this.view.ended });
     return options.map((option) =>
       toPauseAction(option, () => {
         if (option.id === "leaveAlone") this.leaveAlone();
         else if (option.id === "endForAll") this.deps.quit.endForAll();
+        else if (option.id === "seeResults") this.exit("ended");
       }),
     );
   }
@@ -271,8 +276,22 @@ export class NetMatch {
         },
       },
     ];
-    // Already eliminated, but the server still frees the slot and tells the others (roster, team counts).
-    if (this.deps.config.onExit) actions.push({ label: t("screens.leaveMatch"), run: () => this.leaveAlone() });
+    // A dead player must never have to guess that Esc opens the pause menu, so the quit buttons sit on the screen too.
+    for (const option of deathQuitOptions({ kind: "net", isHost: this.isHost, dead: true, ended: view.ended })) {
+      if (option.id === "leaveAlone") {
+        // Already eliminated, but the server still frees the slot and tells the others (roster, team counts).
+        if (this.deps.config.onExit) actions.push({ label: t(option.labelKey), run: () => this.leaveAlone() });
+      } else {
+        // Destructive: borrow the pause menu's "are you sure?" step instead of firing from a one-click button.
+        actions.push({
+          label: t(option.labelKey),
+          run: () => {
+            this.deps.hud.setModal(true);
+            this.pauseMenu.openConfirm(toPauseAction(option, () => this.deps.quit.endForAll()));
+          },
+        });
+      }
+    }
     this.deathScreen.show(
       {
         cause: kill ? deathCauseText(kill, (slot) => (slot === view.ownSlot ? t("common.you") : this.nameOf(slot))) : MATCH_STRINGS.screens.died,
@@ -339,10 +358,17 @@ export class NetMatch {
 
   private readonly handleKey = (event: KeyboardEvent): void => {
     const presenter = this.deps.presenter;
-    // Esc closes the pause menu and puts the mouse back in the game (the browser ate the Esc that opened it).
-    if (event.code === "Escape" && this.pauseMenu.visible) {
-      event.preventDefault();
-      if (this.pauseMenu.handleEscape()) return;
+    // Esc closes the pause menu and puts the mouse back in the game (the browser ate the Esc that opened it). With the
+    // mouse already free — dead, spectating, or the match over — this Esc is instead what opens it.
+    if (event.code === "Escape") {
+      if (this.pauseMenu.visible) {
+        event.preventDefault();
+        if (this.pauseMenu.handleEscape()) return;
+      } else if (!document.pointerLockElement) {
+        event.preventDefault();
+        this.openPause();
+        return;
+      }
     }
     if (!this.dead && !this.view.ended) return;
     if (event.code === "BracketLeft") presenter.cycleSpectate(-1);

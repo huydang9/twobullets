@@ -12,6 +12,8 @@ import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
 import type { Mutable } from "@twobullets/protocol/messages/snapshot";
 import type { PlayerInput } from "@twobullets/shared/input";
+import { encodeThrowArg, type ThrowStyle } from "@twobullets/protocol/messages/throwables";
+import type { ThrowableKind } from "@twobullets/shared/equipment/items";
 import type { Hud } from "../ui/Hud";
 import { t } from "../i18n";
 import { NetDebugHud } from "../ui/NetDebugHud";
@@ -25,6 +27,7 @@ import { NetCombat } from "./NetCombat";
 import { createNetWeaponState, netCombatLink, netHandsBusy } from "./netCombatRules";
 import { NetCombatPresenter } from "./NetCombatPresenter";
 import { NetMatch } from "./NetMatch";
+import { NetThrowables, type NetThrowableTarget } from "./NetThrowables";
 import { NET_MOVEMENT, NetMovement } from "./netMovement";
 import { NetPlayerBody } from "./NetPlayerBody";
 import { CosmeticHitPredictor, RemoteHitboxes } from "./RemoteHitboxes";
@@ -44,8 +47,11 @@ export interface NetAttachDeps {
   /** Runs without equipment in networked play (its tick is then exactly the shared weapon half). */
   readonly combat: CombatSystem;
   readonly presentation: WeaponPresentation;
-  /** The offline equipment view; the HUD reads it with the server's vitals and armor swapped in. */
-  readonly equipment: EquipmentView;
+  /**
+   * The local equipment: the HUD reads it with the server's vitals and armor swapped in, and in `serverThrowables`
+   * mode it is also where the server's grenades, clouds, fire areas and flashes are rendered (protocol v9).
+   */
+  readonly equipment: EquipmentView & NetThrowableTarget;
   readonly soldiers: { readonly assets: AssetLibrary; readonly environment: Environment } | null;
   /** The loaded map (minimap and map screen from match state), or null on the arena. */
   readonly world: MapRuntime | null;
@@ -75,6 +81,9 @@ export class NetGame {
   private predictor: CosmeticHitPredictor | null = null;
   private overlay: HitboxOverlay | null = null;
   private matchValue: NetMatch | null = null;
+  private throwablesValue: NetThrowables | null = null;
+  private throwTarget: NetThrowableTarget | null = null;
+  private throwLife: number = LifeCode.alive;
   private clientValue: NetClient | null = null;
   private itemsTick = -1;
   private connecting = false;
@@ -119,9 +128,24 @@ export class NetGame {
     return this.matchValue;
   }
 
+  /** The server's throwables as this client hears them (protocol v9), or null before `attach`. */
+  get throwables(): NetThrowables | null {
+    return this.throwablesValue;
+  }
+
+  /**
+   * A throwable left the local hands: send the intent (kind, style, the fuse left) and let the server spawn it. Wired
+   * from `EquipmentSystem`'s `onThrowRelease`, so nothing is simulated locally.
+   */
+  onThrowRelease(release: { readonly kind: ThrowableKind; readonly style: ThrowStyle; readonly fuse: number }): void {
+    this.presenter?.equipmentView.queueThrow(encodeThrowArg(release.kind, release.style, release.fuse));
+  }
+
   attach(deps: NetAttachDeps): void {
     const { scene, player, input, combat, presentation } = deps;
     this.player = player;
+    this.throwTarget = deps.equipment;
+    this.throwablesValue = new NetThrowables(deps.equipment);
     combat.attachEquipment(null);
     combat.weaponState = createNetWeaponState();
     this.movement.weaponSource = () => combat.weaponState;
@@ -252,6 +276,7 @@ export class NetGame {
     this.clientValue = null;
     this.itemsTick = -1;
     this.presenter?.equipmentView.loot.clear();
+    this.throwablesValue?.clear();
     this.clock.stop();
     this.roster.clear();
     this.combatEvents?.clear();
@@ -271,6 +296,7 @@ export class NetGame {
         events: this.combatEvents,
         movement: this.movement,
         loot: this.presenter?.equipmentView.loot ?? null,
+        throwables: this.throwablesValue,
         onCommandResult: (result) => this.matchValue?.onCommandResult(result),
         onStateChange: (state, c) => console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}` : ""}`),
       });
@@ -332,10 +358,18 @@ export class NetGame {
   lateUpdate(dt: number): void {
     this.avatars?.update(dt);
     const client = this.clientValue;
+    // The hands follow the server's life: knocked or dead puts a throwable away and refuses a new one.
+    const life = this.movement.life;
+    if (life !== this.throwLife) {
+      this.throwLife = life;
+      this.throwTarget?.setNetLife(life === LifeCode.downed ? "downed" : life === LifeCode.dead ? "dead" : "alive");
+    }
     if (client) this.combatEvents?.update(client.renderTick);
     if (client && client.ownerItems !== null && client.ownerItemsTick !== this.itemsTick) {
       this.itemsTick = client.ownerItemsTick;
       this.presenter?.equipmentView.setItems(client.ownerItems);
+      // The server owns the bag: the local hands may only throw what it says is carried.
+      this.throwTarget?.setThrowableCounts(client.ownerItems.throwables ?? []);
     }
     this.presenter?.update(dt);
     this.matchValue?.update(dt, client, this.combatEvents);

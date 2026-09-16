@@ -122,7 +122,7 @@ describe("networked consumables", () => {
     await h.dispose();
   }, 60_000);
 
-  it("starting kit at join and respawn: AR-4 and P-9 loaded with 60/24 spare rounds, a level 1 backpack, no grenades or heals", async () => {
+  it("starting kit at join and respawn: AR-4 and P-9 loaded with 60/24 spare rounds, one frag, one smoke, a level 1 backpack, no heals", async () => {
     const { h, player, count } = await setup();
     const expectKit = () => {
       expect(player.state.weapon.slots.map((slot) => (slot ? { id: slot.id, magazine: slot.magazine } : null))).toEqual([
@@ -135,6 +135,8 @@ describe("networked consumables", () => {
       expect(player.inventory.stacks).toEqual([
         { itemId: "ammo_556", quantity: 60 },
         { itemId: "ammo_9mm", quantity: 24 },
+        { itemId: "frag", quantity: 1 },
+        { itemId: "smoke", quantity: 1 },
       ]);
       expect(player.inventory.backpack).toBe(1);
     };

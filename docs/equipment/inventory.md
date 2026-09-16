@@ -227,13 +227,13 @@ Online matches use the same shared rules with the server as the only authority (
 | Generation | `apps/server-match/src/level/serverLevel.ts` (`createLoot`) | The practice call, `generateLoot(seed, pois, buildings, { flatten, terrain, layout })`, on the server's map data (arena: `createTestLoot`). Clients never generate loot online. |
 | Ground loot and actions | `apps/server-match/src/match/ServerLoot.ts` | Drops throwables, validates `pickup`/`drop`/`equipAttach` actions (reach 3.5 m from the eye, sight ray, not reviving, shared `pickUp`/`drop`/`swapWeapons`), death piles, per-client area-of-interest streaming. |
 | Inventory on the server | `Player.inventory`, `ServerMatch.step` | Weapons follow it every tick (`syncWeaponsFromInventory`/`commitWeaponsToInventory`, reserve from ammo items); `Player.armor` mirrors its helmet and vest for `applyDamage`. |
-| Starting kit | `createNetStartingInventory()` (`presets.ts`) | Practice kit without grenades: AR-4, P-9, 60 + 24 spare rounds, Lv1 backpack. Join and every respawn, humans and bots. |
+| Starting kit | `createNetStartingInventory()` (`presets.ts`) | The practice kit itself (v9): AR-4, P-9, 60 + 24 spare rounds, 1 frag, 1 smoke, Lv1 backpack. Join and every respawn, humans and bots. |
 | Server bots | `ServerBots` (`queryLoot`) | The shared bot brain's loot goals against server loot, through the same `pickup` action. |
 | Client mirror | `apps/client/src/net/NetLoot.ts` | Applies `LootUpdate` ops to a `GroundLoot`, remembers the player's own drops. |
 | Client view | `apps/client/src/net/NetEquipmentView.ts` | Inventory from the owner groups (weapons from the predicted weapon state), nearby items with a sight ray, F target and F, auto pickup, inventory-screen pickups/drops/swap as actions, `picked`/`dropped` events when the loot stream confirms. |
 | Rendering | `Game.ts` | `LootRenderer` runs online on the net view (`net.equipmentFor(equipment)`). |
 
-**Throwables are not online.** Frag, smoke, flash and molotov are left out of online loot, the starting kit and death piles because the match server doesn't simulate throwables (no flight, detonation, smoke or fire on the server). Offline practice keeps them. Networking them is the next B5 step (netcode.md §9.1–9.3).
+**Throwables are online (protocol v9).** Frag, smoke, flash and molotov are in the generated loot, the starting kit and death piles again, because the match server now simulates them: `ServerThrowables` owns one `EquipmentWorld` and runs the shared flight, blast, smoke, fire and flash rules; a client throws with the `throwItem` input action and hears the result through `ThrowableUpdate` (netcode.md §8.4). Carried counts ride the owner items group, so the hands can only throw what the server says is in the bag. Keeping them adds about 17 % more ground items (Map v1 seed 1234: 2,242 of which 143 grenades), so a join costs about 3.7 KB instead of 3.2 KB.
 
 **Not predicted.** Pickups, drops and swaps apply when the server's result arrives (about one RTT). The client only refuses early what the shared rule already refuses on its copy of the server inventory (full bag, nothing to drop).
 

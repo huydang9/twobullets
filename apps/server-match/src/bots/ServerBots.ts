@@ -127,6 +127,9 @@ export interface ServerBotsOptions {
   readonly brainFactory?: BotBrainFactory;
   /** Server ground loot within a radius, nearest first (ServerLoot.queryLoot); absent = none. */
   readonly queryLoot?: (center: Vec3, radius: number, out: LootItem[]) => number;
+  /** Live smoke clouds and grenades in flight (ServerThrowables), read once per tick; absent = none. */
+  readonly smokes?: () => readonly SmokeCloud[];
+  readonly throwables?: () => readonly ThrowableView[];
   /** A* node expansions per tick for every bot together. */
   readonly navExpansionsPerTick?: number;
 }
@@ -173,6 +176,8 @@ export class ServerBots {
   private teamsInPlay = 0;
   private actorsInPlay = 0;
   private botCount = 0;
+  private smokes: readonly SmokeCloud[] = NO_SMOKES;
+  private throwables: readonly ThrowableView[] = NO_THROWABLES;
   private readonly queryLoot = (center: Vec3, radius: number, out: LootItem[]): number => {
     if (this.o.queryLoot) return this.o.queryLoot(center, radius, out);
     out.length = 0;
@@ -284,6 +289,9 @@ export class ServerBots {
     this.phase = phase;
     this.swapNoises();
     if (this.botCount === 0) return;
+    // Read once per tick: every bot's view points at the same lists (smoke blocks sight, grenades make bots move).
+    this.smokes = this.o.smokes?.() ?? NO_SMOKES;
+    this.throwables = this.o.throwables?.() ?? NO_THROWABLES;
     const started = performance.now();
     this.refreshActors(players);
     const zone = this.o.zone();
@@ -312,6 +320,11 @@ export class ServerBots {
     this.stats.brainMs = ms;
     this.stats.brainTotalMs += ms;
     this.stats.ticks++;
+  }
+
+  /** A grenade went off (ServerThrowables): bots within the explosion radius hear it. */
+  explosionNoise(slot: number, position: Vec3): void {
+    this.addNoise("explosion", slot, position, NOISE_RADII.explosion, null);
   }
 
   /** After a player's step (humans too): shot, reload and landing noises, footsteps, recoil for bots. */
@@ -451,6 +464,8 @@ export class ServerBots {
     view.tick = tick;
     view.phase = this.phase;
     view.noises = this.noises;
+    view.smokes = this.smokes;
+    view.throwables = this.throwables;
     view.zone = zone;
     view.teamsInPlay = this.teamsInPlay;
     view.actorsInPlay = this.actorsInPlay;
@@ -476,6 +491,7 @@ export class ServerBots {
       seat.modifiers = deriveEquipmentModifiers(seat.equip);
     }
     self.modifiers = seat.modifiers;
+    self.throwState = seat.equip.throw;
     const mates = seat.teammates;
     const others = seat.others;
     mates.length = 0;

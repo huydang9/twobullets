@@ -155,11 +155,16 @@ export interface OwnerItemsBlock {
   readonly backpack?: number;
   /** v7: carried rounds per `AMMO_IDS` entry, 10 bits each (≤ 999). Absent reads 0. */
   readonly ammo?: readonly number[];
+  /** v9: carried count per `THROWABLE_KINDS` entry, 4 bits each (saturating at 15). Absent reads 0. */
+  readonly throwables?: readonly number[];
 }
 
 export const USE_TICKS_BITS = 10;
 export const CONSUMABLE_COUNT_BITS = 7;
 export const AMMO_COUNT_BITS = 10;
+/** v9: throwable kinds in the owner items group, and the bits per count. */
+export const THROWABLE_KIND_COUNT = 4;
+export const THROWABLE_COUNT_BITS = 4;
 
 /** Teammates in one vitals group (squads of 4). */
 export const MAX_TEAMMATES = 3;
@@ -241,10 +246,11 @@ export interface MutableOwnerWeaponBlock extends Omit<Mutable<OwnerWeaponBlock>,
   readonly slotReserve: number[];
 }
 
-export interface MutableOwnerItemsBlock extends Omit<Mutable<OwnerItemsBlock>, "counts" | "backpack" | "ammo"> {
+export interface MutableOwnerItemsBlock extends Omit<Mutable<OwnerItemsBlock>, "counts" | "backpack" | "ammo" | "throwables"> {
   readonly counts: number[];
   backpack: number;
   readonly ammo: number[];
+  readonly throwables: number[];
 }
 
 export interface MutableSnapshot {
@@ -319,7 +325,14 @@ export function createOwnerVitalsBlock(): Mutable<OwnerVitalsBlock> {
 }
 
 export function createOwnerItemsBlock(): MutableOwnerItemsBlock {
-  return { useItem: 0, useTicks: 0, counts: new Array<number>(CONSUMABLE_COUNT).fill(0), backpack: 0, ammo: new Array<number>(AMMO_COUNT).fill(0) };
+  return {
+    useItem: 0,
+    useTicks: 0,
+    counts: new Array<number>(CONSUMABLE_COUNT).fill(0),
+    backpack: 0,
+    ammo: new Array<number>(AMMO_COUNT).fill(0),
+    throwables: new Array<number>(THROWABLE_KIND_COUNT).fill(0),
+  };
 }
 
 export function createTeammateVitals(): Mutable<TeammateVitals> {
@@ -435,6 +448,7 @@ export function copyOwnerItems(src: OwnerItemsBlock, dst: MutableOwnerItemsBlock
   for (let i = 0; i < CONSUMABLE_COUNT; i++) dst.counts[i] = src.counts[i] ?? 0;
   dst.backpack = src.backpack ?? 0;
   for (let i = 0; i < AMMO_COUNT; i++) dst.ammo[i] = src.ammo?.[i] ?? 0;
+  for (let i = 0; i < THROWABLE_KIND_COUNT; i++) dst.throwables[i] = src.throwables?.[i] ?? 0;
 }
 
 /** Use fields equal (ticks only count while an item is in use). */
@@ -451,6 +465,12 @@ export function ownerItemsCountsEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): b
 export function ownerItemsGearEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
   if ((a.backpack ?? 0) !== (b.backpack ?? 0)) return false;
   for (let i = 0; i < AMMO_COUNT; i++) if ((a.ammo?.[i] ?? 0) !== (b.ammo?.[i] ?? 0)) return false;
+  return true;
+}
+
+/** v9 throwable part (carried grenades per kind) equal. */
+export function ownerItemsThrowablesEqual(a: OwnerItemsBlock, b: OwnerItemsBlock): boolean {
+  for (let i = 0; i < THROWABLE_KIND_COUNT; i++) if ((a.throwables?.[i] ?? 0) !== (b.throwables?.[i] ?? 0)) return false;
   return true;
 }
 
@@ -839,7 +859,8 @@ function writeOwnerVitals(w: BitWriter, o: OwnerVitalsBlock, base: OwnerVitalsBl
 }
 
 // Items group: [changed 1 with a baseline] use: item 3 (+ ticks 10 while in use); [changed 1 with a baseline] counts:
-// 7 bits per consumable; (v7) [changed 1 with a baseline] gear: backpack 2, 10 bits per ammo type.
+// 7 bits per consumable; (v7) [changed 1 with a baseline] gear: backpack 2, 10 bits per ammo type; (v9)
+// [changed 1 with a baseline] throwables: 4 bits per kind.
 function writeOwnerItems(w: BitWriter, o: OwnerItemsBlock, base: OwnerItemsBlock | null): void {
   const useSame = base !== null && ownerItemsUseEqual(o, base);
   if (base !== null) w.writeBool(!useSame);
@@ -856,6 +877,9 @@ function writeOwnerItems(w: BitWriter, o: OwnerItemsBlock, base: OwnerItemsBlock
     w.write(o.backpack ?? 0, 2);
     for (let i = 0; i < AMMO_COUNT; i++) w.write(o.ammo?.[i] ?? 0, AMMO_COUNT_BITS);
   }
+  const throwablesSame = base !== null && ownerItemsThrowablesEqual(o, base);
+  if (base !== null) w.writeBool(!throwablesSame);
+  if (!throwablesSame) for (let i = 0; i < THROWABLE_KIND_COUNT; i++) w.write(o.throwables?.[i] ?? 0, THROWABLE_COUNT_BITS);
 }
 
 function readOwnerItems(r: BitReader, o: MutableOwnerItemsBlock, base: OwnerItemsBlock | null): boolean {
@@ -878,6 +902,11 @@ function readOwnerItems(r: BitReader, o: MutableOwnerItemsBlock, base: OwnerItem
   } else {
     o.backpack = base.backpack ?? 0;
     for (let i = 0; i < AMMO_COUNT; i++) o.ammo[i] = base.ammo?.[i] ?? 0;
+  }
+  if (base === null || r.readBool()) {
+    for (let i = 0; i < THROWABLE_KIND_COUNT; i++) o.throwables[i] = r.read(THROWABLE_COUNT_BITS);
+  } else {
+    for (let i = 0; i < THROWABLE_KIND_COUNT; i++) o.throwables[i] = base.throwables?.[i] ?? 0;
   }
   return true;
 }

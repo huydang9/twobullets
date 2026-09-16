@@ -3,7 +3,10 @@ import {
   CONTENT_HASH,
   createBitReader,
   createLootUpdateBuffer,
+  createThrowableUpdateBuffer,
   decodeLootUpdateInto,
+  decodeThrowableUpdateInto,
+  ThrowableOpCode,
   lootCellOfQ,
   LootOpCode,
   createBitWriter,
@@ -28,6 +31,7 @@ import {
   type Disconnect,
   type KillFeed,
   type LootOp,
+  type ThrowableOp,
   type MatchCommandResult,
   type MatchEnd,
   type PhaseChange,
@@ -107,6 +111,17 @@ export class HeadlessClient {
   lootBytes = 0;
   lootMalformed = 0;
   private readonly lootBuffer = createLootUpdateBuffer();
+  /** Throwables and area effects as the server streamed them (protocol v9 ThrowableUpdate). */
+  readonly throwables = new Map<number, ThrowableOp>();
+  readonly smokes = new Map<number, ThrowableOp>();
+  readonly fires = new Map<number, ThrowableOp>();
+  /** Detonations and flashes in arrival order (copies of the decoded ops). */
+  readonly detonations: ThrowableOp[] = [];
+  readonly flashes: ThrowableOp[] = [];
+  throwableMessages = 0;
+  throwableBytes = 0;
+  throwableMalformed = 0;
+  private readonly throwableBuffer = createThrowableUpdateBuffer();
   /** View offsets (1/8 tick) sent with fire, newest last (tests; capped). */
   readonly viewOffsets: number[] = [];
   private newestRecvMs = 0;
@@ -316,6 +331,8 @@ export class HeadlessClient {
       this.closedByServer = true;
     } else if (bytes[0] === MsgId.LootUpdate) {
       this.applyLoot(bytes);
+    } else if (bytes[0] === MsgId.ThrowableUpdate) {
+      this.applyThrowables(bytes);
     } else if (bytes[0] === MsgId.Roster) {
       const roster = decodeRoster(r);
       if (roster !== null) this.roster = roster;
@@ -369,6 +386,56 @@ export class HeadlessClient {
       } else if (op.op === LootOpCode.clear) loot.clear();
       else if (op.op === LootOpCode.forgetCell) {
         for (const [id, item] of loot) if (lootCellOfQ(item.xCm, item.zCm) === op.cell) loot.delete(id);
+      }
+    }
+  }
+
+  private applyThrowables(bytes: Uint8Array): void {
+    this.throwableMessages++;
+    this.throwableBytes += bytes.length;
+    const buf = this.throwableBuffer;
+    if (!decodeThrowableUpdateInto(this.reader, buf)) {
+      this.throwableMalformed++;
+      return;
+    }
+    for (let i = 0; i < buf.count; i++) {
+      const op = buf.ops[i]!;
+      switch (op.op) {
+        case ThrowableOpCode.spawn:
+          this.throwables.set(op.id, { ...op });
+          break;
+        case ThrowableOpCode.move: {
+          const live = this.throwables.get(op.id);
+          if (live) Object.assign(live, { x: op.x, y: op.y, z: op.z, vx: op.vx, vy: op.vy, vz: op.vz });
+          break;
+        }
+        case ThrowableOpCode.remove:
+          this.throwables.delete(op.id);
+          break;
+        case ThrowableOpCode.detonate:
+          this.throwables.delete(op.id);
+          this.detonations.push({ ...op });
+          break;
+        case ThrowableOpCode.smokeStart:
+          this.smokes.set(op.id, { ...op });
+          break;
+        case ThrowableOpCode.smokeEnd:
+          this.smokes.delete(op.id);
+          break;
+        case ThrowableOpCode.fireStart:
+          this.fires.set(op.id, { ...op });
+          break;
+        case ThrowableOpCode.fireEnd:
+          this.fires.delete(op.id);
+          break;
+        case ThrowableOpCode.flash:
+          this.flashes.push({ ...op });
+          break;
+        case ThrowableOpCode.clear:
+          this.throwables.clear();
+          this.smokes.clear();
+          this.fires.clear();
+          break;
       }
     }
   }

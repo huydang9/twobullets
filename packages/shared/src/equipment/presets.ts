@@ -48,8 +48,7 @@ export const STARTING_KIT = {
 /**
  * What every player and bot starts a match with (offline practice, plain offline, respawns): the AR-4 and the P-9
  * with loaded magazines and two spare magazines each, one frag and one smoke, in a level 1 backpack (weight 65.6 of 200).
- * `throwables: false` leaves the grenades out and the backpack off (networked play: the server doesn't simulate
- * throwables yet, and its kit is separate).
+ * `throwables: false` leaves the grenades out and the backpack off (tests and callers that want a bare kit).
  */
 export function createStartingInventory(options: { readonly throwables?: boolean } = {}): InventoryState {
   const throwables = options.throwables ?? true;
@@ -70,11 +69,11 @@ export function createStartingInventory(options: { readonly throwables?: boolean
 }
 
 /**
- * Networked starting kit (protocol v7): the practice kit without throwables (the server doesn't simulate them), keeping
- * the level 1 backpack: AR-4 and P-9 with loaded magazines, 60 5.56 mm and 24 9 mm spare rounds.
+ * Networked starting kit (protocol v9): the same kit practice uses, now that the match server simulates throwables —
+ * AR-4 and P-9 with loaded magazines, 60 5.56 mm and 24 9 mm spare rounds, one frag and one smoke, level 1 backpack.
  */
 export function createNetStartingInventory(): InventoryState {
-  return createInventory({ ...createStartingInventory({ throwables: false }), backpack: STARTING_KIT.backpack });
+  return createStartingInventory();
 }
 
 /** What each arena test pile holds: the shotgun (no longer in the kit), its shells and one of each gear family. */

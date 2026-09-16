@@ -209,7 +209,9 @@ describe("Snapshot", () => {
             ? prev.items
             : rng() < 0.5
               ? { ...prev.items, useTicks: prev.items.useItem ? (prev.items.useTicks + 1) & 1023 : 0 }
-              : { ...prev.items, ammo: prev.items.ammo!.map((n, i) => (i === 0 ? Math.max(0, n - 1) : n)) };
+              : rng() < 0.5
+                ? { ...prev.items, ammo: prev.items.ammo!.map((n, i) => (i === 0 ? Math.max(0, n - 1) : n)) }
+                : { ...prev.items, throwables: prev.items.throwables!.map((n, i) => (i === 0 ? Math.max(0, n - 1) : n)) };
       const snap: Snapshot = { ...world.snapshot(0), items };
       w.reset();
       encodeSnapshot(w, snap, prev);
@@ -222,21 +224,29 @@ describe("Snapshot", () => {
     }
     const header = { serverTick: 900, baselineTick: null, lastProcessedInputTick: NO_TICK, clientTimeEcho: 0, serverHoldMs: 0, inputBufferDepthQ: 0, sections: 0 };
     const owner = world.snapshot(0).owner;
-    const base: Snapshot = { header: { ...header, serverTick: 899 }, owner, entities: [], items: { useItem: 3, useTicks: 200, counts: [5, 1, 1, 2, 1], backpack: 1, ammo: [60, 0, 24, 0] } };
+    const base: Snapshot = {
+      header: { ...header, serverTick: 899 },
+      owner,
+      entities: [],
+      items: { useItem: 3, useTicks: 200, counts: [5, 1, 1, 2, 1], backpack: 1, ammo: [60, 0, 24, 0], throwables: [1, 1, 0, 0] },
+    };
     const bits = (s: Snapshot, b: Snapshot | null) => {
       w.reset();
       encodeSnapshot(w, s, b);
       return w.bitLength;
     };
     const without = bits({ header, owner, entities: [] }, base);
-    expect(bits({ header, owner, entities: [], items: base.items }, base) - without).toBe(3);
-    expect(bits({ header, owner, entities: [], items: { ...base.items!, useTicks: 201 } }, base) - without).toBe(3 + 13);
+    // v9: four "changed" bits (use, counts, gear, throwables).
+    expect(bits({ header, owner, entities: [], items: base.items }, base) - without).toBe(4);
+    expect(bits({ header, owner, entities: [], items: { ...base.items!, useTicks: 201 } }, base) - without).toBe(4 + 13);
     // v7 gear part: backpack 2 + 4 ammo counts × 10.
-    expect(bits({ header, owner, entities: [], items: { ...base.items!, ammo: [30, 0, 24, 0] } }, base) - without).toBe(3 + 42);
-    expect(bits({ header, owner, entities: [], items: base.items }, null) - bits({ header, owner, entities: [] }, null)).toBe(3 + 10 + 35 + 42);
+    expect(bits({ header, owner, entities: [], items: { ...base.items!, ammo: [30, 0, 24, 0] } }, base) - without).toBe(4 + 42);
+    // v9 throwable part: 4 kinds × 4 bits.
+    expect(bits({ header, owner, entities: [], items: { ...base.items!, throwables: [0, 1, 0, 0] } }, base) - without).toBe(4 + 16);
+    expect(bits({ header, owner, entities: [], items: base.items }, null) - bits({ header, owner, entities: [] }, null)).toBe(3 + 10 + 35 + 42 + 16);
     // Consumable code 7 doesn't exist.
     w.reset();
-    encodeSnapshot(w, { header, owner, entities: [], items: { useItem: 7, useTicks: 1, counts: [0, 0, 0, 0, 0], backpack: 0, ammo: [0, 0, 0, 0] } }, null);
+    encodeSnapshot(w, { header, owner, entities: [], items: { useItem: 7, useTicks: 1, counts: [0, 0, 0, 0, 0], backpack: 0, ammo: [0, 0, 0, 0], throwables: [0, 0, 0, 0] } }, null);
     expect(decodeSnapshot(createBitReader(w.bytes()), 900, () => null)).toBeNull();
   });
 

@@ -15,12 +15,15 @@ export const Btn = { jump: 1, sprint: 2, crouch: 4, fire: 8, aim: 16, reload: 32
 export type BtnName = keyof typeof Btn;
 
 /** M5 input actions; they ride input redundancy until `lastProcessedInputTick` covers them (netcode.md §6.2). */
-export const PlayerActionType = { pickup: 1, drop: 2, use: 3, cancel: 4, equipAttach: 5 } as const;
+export const PlayerActionType = { pickup: 1, drop: 2, use: 3, cancel: 4, equipAttach: 5, throwItem: 6 } as const;
 export type PlayerActionType = (typeof PlayerActionType)[keyof typeof PlayerActionType];
 
 export interface PlayerAction {
   readonly type: PlayerActionType;
-  /** 16-bit argument: loot id, inventory slot, or slot + quantity packed by the action (pickup: lootId, use: itemCode(consumableId)). */
+  /**
+   * 16-bit argument: loot id, inventory slot, or slot + quantity packed by the action (pickup: lootId,
+   * use: itemCode(consumableId), throwItem: protocol `encodeThrowArg` — kind, style and the cooked fuse).
+   */
   readonly arg: number;
 }
 

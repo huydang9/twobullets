@@ -5,7 +5,7 @@ import { blastOrigin, computeExplosionHits, EXPLOSION, explosionFalloff, type En
 import { burningCellCount, createFirePatch, FIRE, FIRE_CELL_STRIDE, fireDamageTargets, isFireExpired, stepFirePatch, type FirePatch } from "./fire";
 import { FLASH, flashExposure } from "./flash";
 import { len2 } from "./math";
-import { createSmokeCloud, isSmokeExpired, SMOKE, SMOKE_PUFF_STRIDE, smokeBlocksSight, smokeDensity, smokePuffs, smokeRadius, smokeTransmittance, stepSmokeCloud, type SmokeCloud } from "./smoke";
+import { createSmokeCloud, isSmokeExpired, SMOKE, SMOKE_BASE_LIFT, SMOKE_PUFF_STRIDE, smokeBlocksSight, smokeDensity, smokePuffs, smokeRadius, smokeTransmittance, stepSmokeCloud, type SmokeCloud } from "./smoke";
 import { box, createTestRaycast, GROUND, type TestShape } from "./testWorld";
 
 const DT = 1 / 60;
@@ -266,5 +266,39 @@ describe("equipment world", () => {
     expect(burns.length).toBeGreaterThanOrEqual(4);
     expect(burns.every((b) => b.targetId === 1 && b.kind === "fire" && b.amount === FIRE.damagePerTick)).toBe(true);
     expect(world.fires).toHaveLength(1);
+  });
+});
+
+// Networked play (protocol v9) sends only the effect's id, its point and the server's seed; the client rebuilds the
+// shape with these same functions. That only works while they are a pure function of those inputs and the geometry.
+describe("area effects rebuild from (point, seed)", () => {
+  it("a smoke cloud is identical on two machines given the same point and seed", () => {
+    const point = { x: 3, y: 0, z: -2 };
+    const a = createSmokeCloud(11, point, 0xc0ffee, flat);
+    const b = createSmokeCloud(11, point, 0xc0ffee, flat);
+    expect(b).toEqual(a);
+    // The wire carries the detonation point, not the base: the lift is part of the rule.
+    expect(a.base.y).toBeCloseTo(point.y + SMOKE_BASE_LIFT, 9);
+    const puffsA = new Float32Array(SMOKE.puffCount * SMOKE_PUFF_STRIDE);
+    const puffsB = new Float32Array(SMOKE.puffCount * SMOKE_PUFF_STRIDE);
+    const agedA = stepSmokeCloud(a, 4);
+    const agedB = stepSmokeCloud(b, 4);
+    expect(smokePuffs(agedA, puffsA)).toBe(smokePuffs(agedB, puffsB));
+    expect([...puffsA]).toEqual([...puffsB]);
+    // A different seed is a different cloud (so the seed has to travel).
+    const other = createSmokeCloud(11, point, 0xc0ffef, flat);
+    expect(other).not.toEqual(a);
+  });
+
+  it("a fire patch is identical on two machines given the same impact, normal and seed", () => {
+    const impact = { x: -4, y: 0, z: 6 };
+    const normal = { x: 0, y: 1, z: 0 };
+    const a = createFirePatch(21, 3, impact, normal, 0xbeef, flat)!;
+    const b = createFirePatch(21, 3, impact, normal, 0xbeef, flat)!;
+    expect(a.cellCount).toBe(b.cellCount);
+    expect([...a.cells]).toEqual([...b.cells]);
+    expect(a.duration).toBe(b.duration);
+    const other = createFirePatch(21, 3, impact, normal, 0xbef0, flat)!;
+    expect([...other.cells]).not.toEqual([...a.cells]);
   });
 });

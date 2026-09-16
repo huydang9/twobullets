@@ -32,6 +32,8 @@ import {
   EntityPresence,
   MAX_WEAPON_SLOTS,
   AMMO_COUNT_BITS,
+  THROWABLE_COUNT_BITS,
+  THROWABLE_KIND_COUNT,
   CONSUMABLE_COUNT_BITS,
   USE_TICKS_BITS,
   TEAMMATE_HEALTH_BITS,
@@ -74,6 +76,7 @@ import { dequantizePitch, dequantizeYaw } from "@twobullets/shared/aim";
 import type { ArmorLoadout, DamageKind } from "@twobullets/shared/equipment/armor";
 import { countItem, type InventoryState } from "@twobullets/shared/equipment/inventory";
 import type { ItemUseState } from "@twobullets/shared/equipment/itemUse";
+import { THROWABLE_KINDS } from "@twobullets/shared/equipment/items";
 import { VITALS, type LifeState, type Vitals } from "@twobullets/shared/equipment/vitals";
 import type { MoveState, Stance, Vec3 } from "@twobullets/shared/movement/types";
 import type { HitZone, WeaponId, WeaponSlotState, WeaponState } from "@twobullets/shared/weapons/types";
@@ -267,6 +270,12 @@ export function writeOwnerItems(use: ItemUseState, inventory: InventoryState, ou
   for (let i = 0; i < AMMO_COUNT; i++) {
     const rounds = countItem(inventory, AMMO_IDS[i]!);
     out.ammo[i] = rounds > ammoMax ? ammoMax : rounds;
+  }
+  // v9: carried grenades per kind, so the client's throw hands and the HUD follow the server's inventory.
+  const throwableMax = (1 << THROWABLE_COUNT_BITS) - 1;
+  for (let i = 0; i < THROWABLE_KIND_COUNT; i++) {
+    const carried = countItem(inventory, THROWABLE_KINDS[i]!);
+    out.throwables[i] = carried > throwableMax ? throwableMax : carried;
   }
 }
 

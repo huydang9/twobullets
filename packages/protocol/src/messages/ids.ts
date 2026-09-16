@@ -30,6 +30,8 @@ export const MsgId = {
   MatchCommand: 0x50,
   /** v8: S→C answer to a MatchCommand (accepted, denied, unavailable). */
   MatchCommandResult: 0x51,
+  /** v9: throwables in the client's area of interest (grenades in flight, detonations, smoke, fire, flash). */
+  ThrowableUpdate: 0x52,
 } as const;
 export type MsgId = (typeof MsgId)[keyof typeof MsgId];
 

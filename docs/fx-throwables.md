@@ -1,5 +1,11 @@
 # Throwable effects (frag, smoke, molotov, flashbang)
 
+**Networked play (protocol v9) uses the same effects.** Online, the match server decides *when and where* — `EquipmentSystem`
+runs in `serverThrowables` mode: the hands, cook timer, aim arc and throw sounds stay local, but the grenade, the
+detonation, the smoke cloud, the fire area and the flash arrive as `ThrowableUpdate` ops (`apps/client/src/net/NetThrowables.ts`)
+and are fed into the same observables this document describes. Clouds and fire areas are rebuilt from the server's seed,
+so every client sees the same volume the server tested sight lines against. See `docs/backend/netcode.md` §8.4.
+
 Realistic detonation, smoke and fire visuals built from CC0 flipbooks. They replace the procedural atlas sprites that
 looked fake. Gameplay is untouched: the smoke volume and fire area come from the shared rules (`smokePuffs`,
 `FirePatch.cells`), and the public API of `EquipmentPresentation` is the same.

@@ -33,6 +33,9 @@ export const SMOKE = {
 /** Floats per puff in smokePuffs output: x, y, z, radius, density (0..1). */
 export const SMOKE_PUFF_STRIDE = 5;
 
+/** The cloud base sits this far above the detonation point, m (so a networked client rebuilds the same base). */
+export const SMOKE_BASE_LIFT = 0.05;
+
 export interface SmokeCloud {
   readonly id: number;
   /** Ground point the cloud grows from. */
@@ -48,7 +51,7 @@ export interface SmokeCloud {
 
 /** Starts a smoke cloud at a detonation point; probes walls once so puffs stay on the open side. */
 export function createSmokeCloud(id: number, position: Vec3, seed: number, raycast: RaycastFn): SmokeCloud {
-  const base = { x: position.x, y: position.y + 0.05, z: position.z };
+  const base = { x: position.x, y: position.y + SMOKE_BASE_LIFT, z: position.z };
   const random = createRng(seed);
   const angle = random() * Math.PI * 2;
   const speed = lerp(SMOKE.driftSpeed[0], SMOKE.driftSpeed[1], random());

@@ -163,6 +163,26 @@ export class ServerCombat implements ProjectileHitSink {
     if (damage > 0 && this.damageEnabled) this.damage(p, damage, "fall", null, -1, null, 0, 0, 0, true);
   }
 
+  /**
+   * Area damage from a throwable (protocol v9, ServerThrowables): the shared blast/fire rules already decided the
+   * amount, so this only runs the damage pipeline (armor, knock, kill credit to `attacker`, kill feed with cause
+   * `frag`/`molotov`). Friendly fire follows the match rules; self damage always lands, like offline.
+   */
+  areaDamage(victim: Player, amount: number, kind: "explosion" | "fire", attacker: number, position: Vec3): void {
+    if (victim.life === "dead" || !this.damageEnabled || !(amount > 0)) return;
+    const attackerPlayer = attacker >= 0 ? (this.host!.slots[attacker] ?? null) : null;
+    const sameTeam = attackerPlayer !== null && attackerPlayer.slot !== victim.slot && attackerPlayer.teamId === victim.teamId;
+    if (sameTeam && !this.rules.friendlyFire) return;
+    if (sameTeam) this.stats.friendlyFireHits++;
+    const feet = victim.feet;
+    const dx = position.x - feet.x;
+    const dz = position.z - feet.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    const toX = length > 1e-6 ? dx / length : 0;
+    const toZ = length > 1e-6 ? dz / length : 0;
+    this.damage(victim, amount, kind, null, attacker, null, length, toX, toZ, true);
+  }
+
   /** Zone damage (BR combat); the owner sees it through vitals, no DamageTaken per zone tick. */
   zoneDamage(p: Player, amount: number): void {
     if (p.life !== "dead") this.damage(p, amount, "zone", null, -1, null, 0, 0, 0, false);

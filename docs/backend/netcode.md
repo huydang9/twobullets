@@ -536,6 +536,7 @@ IDs are the first byte of every datagram and every stream frame. Datagram IDs 0x
 | 0x4F | `Disconnect` (reason code) | both | S | 3 B | once |
 | 0x50 | `MatchCommand` (v8: `leave`, `endForAll`; see §6.9) | C→S | S | 3 B | on the pause menu |
 | 0x51 | `MatchCommandResult` (v8: ok / denied / unavailable / unknown) | S→C | S | 4 B | one per command |
+| 0x52 | `ThrowableUpdate` (v9: grenades in flight and area effects in the client's area of interest, §8.4) | S→C | S | ≤ ~900 B per message (spawn 16 B) | throws, detonations, effects |
 
 ### 6.5 Layouts
 
@@ -810,7 +811,7 @@ stateDiagram-v2
 
 **Implemented in protocol v7 (plan.md B5).** The first design here sent nothing at join (clients ran `generateLoot` from the match seed) and `LootDelta` R events to everyone. B5 made the server the only generator and streams loot by area of interest instead, because clients shouldn't know the whole map's loot, a real map's client-side generation depends on the client's terrain build matching the server's, and 20 players don't need 3,000 items each.
 
-- **Generation (server only):** `MatchLevel.createLoot(matchSeed)` runs the shared `generateLoot(seed, pois, buildings, { flatten, terrain, layout })` on the server's map data, exactly practice's call (building piles, then roadside and POI-pad piles); the arena uses `createTestLoot`. `ServerLoot` drops throwables (the server doesn't simulate them) and keeps the generator's loot ids. Map v1, seed 1234: 2,242 items, 2,099 without throwables.
+- **Generation (server only):** `MatchLevel.createLoot(matchSeed)` runs the shared `generateLoot(seed, pois, buildings, { flatten, terrain, layout })` on the server's map data, exactly practice's call (building piles, then roadside and POI-pad piles); the arena uses `createTestLoot`. `ServerLoot` keeps the generator's loot ids and, since **v9**, its throwables too (the server simulates them: §8.4). Map v1, seed 1234: 2,242 items, of which 143 are grenades (about 17 % more items than the v7 filtered set; join cost rises from ~3.2 KB to ~3.7 KB mean).
 - **Area of interest:** a 64 × 64 grid of 32 m cells over ±1,024 m (`packages/protocol/src/messages/loot.ts`). A client holds every item of each cell within 5 cells (Chebyshev) of its own cell, so at least 160 m in every direction, and forgets a cell past 6 cells (hysteresis). Cells come from the 1 cm wire position on both sides, so they agree at cell edges.
   - Each tick, per connected client (`ServerLoot.replicate`): when the client's cell changed, cells past 6 are forgotten (`forgetCell`) and cells within 5 are queued, nearest first; queued cells stream up to **1,500 B per tick**, so a join or a fast move spreads over a few ticks.
   - Item changes (pickup, partial pickup, drop, swap, death pile) go only to clients that already know the cell; a queued cell is sent with its current contents when its turn comes.
@@ -830,6 +831,35 @@ stateDiagram-v2
 - **Measured** (`apps/server-match/test/serverLoot.test.ts`, 20 clients roaming Map v1's generated loot for 5 minutes at sprint speed with a pickup every 2 s): join **mean 2.3 KB, max 4.2 KB**; roaming **mean 0.26 kbps, max 0.59 kbps** per client. Worst case, 3,000 items within 150 m: 38.7 KB over 23 ticks. Protocol sizes: `packages/protocol/test/loot.test.ts` (a 350-item POI area ≈ 4 KB).
 - **Loot ids:** a `pickup` arg keeps 14 bits for the id (ids 0–16,383); past that, drops reuse free ids.
 - **Death piles:** the whole inventory, around the body, pile id `0xFF00 + slot`, settled with a ray down.
+
+### 8.4 Throwables over the network (protocol v9)
+
+The match server owns one `EquipmentWorld` (`ServerThrowables`, `apps/server-match/src/match/ServerThrowables.ts`) and runs the shared rules in it — `stepEquipmentWorld`: flight and bounces against the static world, fuses, frag blast with three-point line-of-sight exposure and armor, smoke clouds, molotov fire patches and per-player flash exposure. Nothing about a throwable is client-simulated for gameplay.
+
+- **Throwing.** The client's hands still run the shared `stepThrow` locally (cook timer, the aim arc, sounds, the viewmodel). On release it sends one **`throwItem` input action** (type 6) whose 16-bit arg is `kind 2 | style 2 | fuse left in 1/128 s, 10`. The server checks the player is alive with free hands (no item use, not reviving), carries the kind, and that the fuse is not longer than the kind's own, then rebuilds the hand position and the launch velocity from **its own** view of the thrower with the same `throwLaunch` + `resolveThrowOrigin`. Nothing about the flight comes from the client. The id is the shared `throwId(slot, counter)`.
+- **Bots** have no wire: `ServerThrowables.stepBot` runs the same `stepThrow` from the brain's input (`select = 5` to take one out, fire to pull the pin, reload to cook, the cycle/holster intents), exactly as the offline `MatchSim` drives it.
+- **Area of interest.** The loot grid (32 m cells; enter within 5, leave past 6). Each connected client keeps a set of the throwable, smoke and fire ids it holds; every tick `replicate` diffs it against what is in range and sends the difference, within **1,200 B per tick**.
+- **`ThrowableUpdate` (0x52, control stream):** type 8, then ops (op 4 + payload) until `end` (15):
+
+| Op | Payload | Bits |
+|---|---|---|
+| 0 spawn | id 16, kind 2, owner 5, x 17, y 16, z 17 (1 cm), vx/vy/vz 12 each (zigzag, 1/16 m/s), fuse 10 (1/128 s) | 122 (16 B) |
+| 1 move | id 16, position 50, velocity 36 | 106 (14 B) |
+| 2 remove | id 16 | 20 |
+| 3 detonate | id 16, kind 2, owner 5, position 50, normal 3 × 8 (zigzag, 1/127) | 101 (13 B) |
+| 4 smokeStart | id 16, position 50, seed 32 | 102 (13 B) |
+| 5 smokeEnd | id 16 | 20 |
+| 6 fireStart | id 16, owner 5, position 50, normal 24, seed 32 | 131 (17 B) |
+| 7 fireEnd | id 16 | 20 |
+| 8 flash | id 16, blind 8, deaf 8 (1/255 of the shared FLASH maxima) | 36 |
+| 9 clear | – | 4 |
+
+- **Shapes are not on the wire.** A smoke cloud's 10 puffs and a fire patch's ≤ 40 cells are rebuilt by the client from the id, the point and the server's seed with the same `createSmokeCloud` / `createFirePatch` (the seed is `hash32(matchSeed, throwableId)`, as `stepEquipmentWorld` computes it), so 100 sprites' worth of volume costs 13 bytes. `packages/shared/src/equipment/effects.test.ts` pins that they are a pure function of (point, seed, geometry).
+- **Flight is simulated on both sides.** The client flies the grenade with `stepThrowables` between the server's 10 Hz `move` corrections, so it moves every frame and bounces make noise; it never detonates on its own — a local fuse running out only takes the model away, and the explosion is always the server's `detonate` op. No double effects, no ghost grenades.
+- **The flash op goes only to the player it blinded**, so nobody learns from bandwidth that a teammate got flashed. The server also keeps the blind/deaf seconds in that player's vitals, which is what a server bot reads.
+- **Damage** goes through `ServerCombat.areaDamage`, i.e. the same pipeline as bullets: armor, knock while a teammate stands, kill credit to the thrower, `Kill`/`DamageTaken` reliable events and the kill feed with cause `frag` / `molotov`. Friendly fire follows the match rules; self damage always lands.
+- **Carried counts** ride the owner items group (v9: 4 bits per kind), so the client's hands can only throw what the server says is in the bag.
+- **Measured** (`apps/server-match/test/throwables.integration.test.ts`): one frag, spawn to detonation (4.5 s fuse), **182 B** to a nearby client. A smoke cloud costs 13 B for 35 s, a molotov area 17 B for its whole burn.
 
 ---
 

@@ -52,8 +52,8 @@ const DROP_ARG_MAX = 255;
 
 /**
  * The local equipment's inventory in networked play, shown until the server's first items group: the networked starting
- * kit (AR-4, P-9, their spare rounds, a level 1 backpack). No grenades or heals: the server doesn't simulate throwables,
- * and heals come from loot.
+ * kit (AR-4, P-9, their spare rounds, one frag, one smoke, a level 1 backpack). Heals come from loot; the grenade
+ * counts are replaced by the server's as soon as its first owner items group arrives (protocol v9).
  */
 export function createNetLocalInventory(): InventoryState {
   return createNetStartingInventory();
@@ -115,6 +115,8 @@ export class NetEquipmentView {
   private pendingAtMs = 0;
   private cancelAtMs = -Infinity;
   private action: PlayerAction | null = null;
+  /** A throw waiting for the next input tick (protocol v9); it jumps the loot queue. */
+  private throwAction: PlayerAction | null = null;
   /** Loot actions for the next ticks, one per tick after any use/cancel. */
   private readonly actions: PlayerAction[] = [];
   /** Loot id → when its pickup was sent. */
@@ -354,8 +356,21 @@ export class NetEquipmentView {
     if (t.interactPressed && this.target !== null) this.requestPickUp(this.target.lootId, undefined, false);
   }
 
-  /** The action for the tick being sent (once): a use or cancel first, then queued loot actions. */
+  /**
+   * A throwable left the hand (protocol v9): the server spawns it, flies it and owns the blast. `arg` is the
+   * protocol's `encodeThrowArg` (kind, style, the fuse left at release).
+   */
+  queueThrow(arg: number): void {
+    this.throwAction = { type: PlayerActionType.throwItem, arg };
+  }
+
+  /** The action for the tick being sent (once): a throw first, then a use or cancel, then queued loot actions. */
   takeAction(): PlayerAction | null {
+    const thrown = this.throwAction;
+    if (thrown !== null) {
+      this.throwAction = null;
+      return thrown;
+    }
     const action = this.action;
     if (action !== null) {
       this.action = null;

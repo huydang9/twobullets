@@ -13,6 +13,8 @@ import {
   createGroundLoot,
   createInventory,
   createPlayerEquipment,
+  createFirePatch,
+  createSmokeCloud,
   createStartingInventory,
   createTestLoot,
   cookProgress,
@@ -23,6 +25,8 @@ import {
   generateLoot,
   inventoryCapacity,
   inventoryWeight,
+  isFireExpired,
+  isSmokeExpired,
   itemUseProgress,
   len2,
   len3,
@@ -30,14 +34,20 @@ import {
   pickUp,
   predictThrowArc,
   queryGroundLoot,
+  removeThrowableAt,
   resolveThrowOrigin,
   setGroundQuantity,
   snapshotThrowables,
   spawnRelease,
+  spawnThrowable,
   stepEquipmentWorld,
+  stepFirePatch,
   stepPlayerEquipment,
+  stepSmokeCloud,
+  stepThrowables,
   stepRevive,
   swapWeapons,
+  THROWABLE_KINDS,
   throwableCounts,
   throwLaunch,
   wantsAutoPickup,
@@ -50,6 +60,7 @@ import {
   type EquipmentModifiers,
   type EquipmentWorld,
   type EquipmentWorldEvent,
+  type FirePatch,
   type FlashExposure,
   type GroundLoot,
   type InventoryState,
@@ -62,7 +73,9 @@ import {
   type PlayerEquipmentState,
   type PointOfInterest,
   type RayHit,
+  type SmokeCloud,
   type RaycastFn,
+  type ThrowableSimEvent,
   type ThrowEvent,
   type ThrowRelease,
   type ThrowableKind,
@@ -155,6 +168,15 @@ export interface EquipmentOptions {
   readonly teammates?: () => readonly ReviveTarget[];
   /** Starting inventory (default: the match starting kit). */
   readonly inventory?: InventoryState;
+  /**
+   * Networked play (protocol v9): the server owns the throwable world. The hands still run here (cook timer, arc,
+   * sounds, viewmodel), but a release is handed to `onThrowRelease` instead of being spawned, nothing detonates or
+   * damages locally, and grenades, clouds and fire areas arrive through the `net*` methods below. Local flight still
+   * runs between the server's corrections, so a grenade flies smoothly.
+   */
+  readonly serverThrowables?: boolean;
+  /** Networked play: a throwable left the hand; the caller sends it to the server. */
+  readonly onThrowRelease?: (release: ThrowRelease) => void;
 }
 
 const TICK_SECONDS = 1 / SIMULATION.tickRate;
@@ -224,6 +246,8 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
   private readonly playerDropped = new Set<number>();
   private readonly eye = new Vector3();
   private readonly worldEvents: EquipmentWorldEvent[] = [];
+  /** Networked play: flight events of the server's grenades (bounces only; the server owns detonations). */
+  private readonly netEvents: ThrowableSimEvent[] = [];
   private tickCount = 0;
   /** Entity reviving the local player (Game/DEV), or null. */
   private reviverId: number | null = null;
@@ -422,6 +446,170 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     this.onVitals.notifyObservers({ type: "respawned" });
   }
 
+  // ---- Networked throwables (protocol v9) --------------------------------------------------------------------------
+
+  /** True when the match server owns throwables (`options.serverThrowables`). */
+  get serverAuthority(): boolean {
+    return this.options.serverThrowables === true;
+  }
+
+  /**
+   * Grenade the server spawned. The client flies it with the same shared physics so it moves every frame; the server
+   * corrects it with `netMoveThrowable` and ends it with `netDetonate` or `netRemoveThrowable`.
+   */
+  netSpawnThrowable(id: number, owner: number, kind: ThrowableKind, position: Vec3, velocity: Vec3, fuse: number): void {
+    this.netRemoveThrowable(id);
+    spawnThrowable(this.world.throwables, { id, owner, kind, position, velocity, fuse });
+    this.throwables = snapshotThrowables(this.world.throwables);
+  }
+
+  /** Server correction for a grenade in flight (position and velocity; the fuse keeps running locally). */
+  netMoveThrowable(id: number, position: Vec3, velocity: Vec3): void {
+    const set = this.world.throwables;
+    for (let i = 0; i < set.count; i++) {
+      if (set.id[i] !== id) continue;
+      const i3 = i * 3;
+      set.position[i3] = position.x;
+      set.position[i3 + 1] = position.y;
+      set.position[i3 + 2] = position.z;
+      set.velocity[i3] = velocity.x;
+      set.velocity[i3 + 1] = velocity.y;
+      set.velocity[i3 + 2] = velocity.z;
+      set.motion[i] = 0;
+      return;
+    }
+  }
+
+  /** The grenade is gone without an explosion (out of the area of interest, match reset). */
+  netRemoveThrowable(id: number): void {
+    const set = this.world.throwables;
+    for (let i = 0; i < set.count; i++) {
+      if (set.id[i] !== id) continue;
+      removeThrowableAt(set, i);
+      this.throwables = snapshotThrowables(set);
+      return;
+    }
+  }
+
+  /** The server's detonation: the one source of blast, flash and molotov effects in networked play. */
+  netDetonate(id: number, owner: number, kind: ThrowableKind, position: Vec3, normal: Vec3): void {
+    this.netRemoveThrowable(id);
+    const inHand = this.inHandThrows.delete(id);
+    this.onDetonate.notifyObservers({ id, kind, ownerId: owner, position, normal, reason: "fuse", inHand });
+  }
+
+  /** The server's smoke cloud: rebuilt from its seed, so every client sees the same puffs the server tests sight against. */
+  netSmokeStart(id: number, position: Vec3, seed: number): void {
+    if (this.world.smokes.some((cloud) => cloud.id === id)) return;
+    this.raycaster.ignoreBody = this.player.physicsBody;
+    const cloud = createSmokeCloud(id, position, seed, this.raycaster.cast);
+    this.world.smokes = [...this.world.smokes, cloud];
+    this.onSmoke.notifyObservers({ type: "spawned", cloud });
+  }
+
+  netSmokeEnd(id: number): void {
+    if (!this.world.smokes.some((cloud) => cloud.id === id)) return;
+    this.world.smokes = this.world.smokes.filter((cloud) => cloud.id !== id);
+    this.onSmoke.notifyObservers({ type: "expired", id });
+  }
+
+  /** The server's molotov fire area, rebuilt from its seed (the damage stays the server's). */
+  netFireStart(id: number, owner: number, position: Vec3, normal: Vec3, seed: number): void {
+    if (this.world.fires.some((patch) => patch.id === id)) return;
+    this.raycaster.ignoreBody = this.player.physicsBody;
+    const patch = createFirePatch(id, owner, position, normal, seed, this.raycaster.cast);
+    if (!patch) return;
+    this.world.fires = [...this.world.fires, patch];
+    this.onFire.notifyObservers({ type: "spawned", patch });
+  }
+
+  netFireEnd(id: number): void {
+    if (!this.world.fires.some((patch) => patch.id === id)) return;
+    this.world.fires = this.world.fires.filter((patch) => patch.id !== id);
+    this.onFire.notifyObservers({ type: "expired", id });
+  }
+
+  /** The server decided this client was blinded (only the affected player gets the op). */
+  netFlash(exposure: FlashExposure): void {
+    const eye = this.player.getEyeToRef(this.eye);
+    this.onFlash.notifyObservers({ position: { x: eye.x, y: eye.y, z: eye.z }, exposure });
+  }
+
+  /**
+   * The server's life for the local player (networked play): a knocked or dead player's hands put the throwable away
+   * and refuse a new one, exactly as the shared rules do offline.
+   */
+  setNetLife(life: Vitals["life"]): void {
+    if (!this.serverAuthority || this.state.vitals.life === life) return;
+    this.state = { ...this.state, vitals: { ...this.state.vitals, life } };
+  }
+
+  /** Drops every grenade and area effect (join, reconnect, match reset). */
+  netClear(): void {
+    const set = this.world.throwables;
+    while (set.count > 0) removeThrowableAt(set, set.count - 1);
+    for (const cloud of this.world.smokes) this.onSmoke.notifyObservers({ type: "expired", id: cloud.id });
+    for (const patch of this.world.fires) this.onFire.notifyObservers({ type: "expired", id: patch.id });
+    this.world.smokes = [];
+    this.world.fires = [];
+    this.inHandThrows.clear();
+    this.throwables = snapshotThrowables(set);
+  }
+
+  /**
+   * Carried grenades per `THROWABLE_KINDS` from the server's owner items group, so the hands (and the HUD) can only
+   * throw what the server says is in the bag.
+   */
+  setThrowableCounts(counts: readonly number[]): void {
+    const inventory = this.state.inventory;
+    let changed = false;
+    const stacks = inventory.stacks.filter((stack) => {
+      const index = THROWABLE_KINDS.indexOf(stack.itemId as ThrowableKind);
+      if (index < 0) return true;
+      if ((counts[index] ?? 0) !== stack.quantity) changed = true;
+      return false;
+    });
+    for (let i = 0; i < THROWABLE_KINDS.length; i++) {
+      const quantity = counts[i] ?? 0;
+      if (quantity <= 0) continue;
+      if (!inventory.stacks.some((stack) => stack.itemId === THROWABLE_KINDS[i] && stack.quantity === quantity)) changed = true;
+      stacks.push({ itemId: THROWABLE_KINDS[i]!, quantity });
+    }
+    if (!changed) return;
+    this.setInventory(createInventory({ ...inventory, stacks }));
+  }
+
+  /** Networked world tick: grenades fly and bounce locally, clouds and fire areas age. No damage, no detonations. */
+  private stepNetWorld(dt: number, raycast: RaycastFn): void {
+    const events = this.netEvents;
+    events.length = 0;
+    stepThrowables(this.world.throwables, dt, raycast, events);
+    for (const event of events) {
+      if (event.type === "bounce") {
+        this.onThrowableBounce.notifyObservers({ id: event.id, kind: event.kind, position: event.position, normal: event.normal, impactSpeed: event.impactSpeed });
+      }
+      // A local fuse running out only takes the model away; the server's `detonate` op makes the explosion.
+    }
+    if (this.world.smokes.length > 0) {
+      const live: SmokeCloud[] = [];
+      for (const cloud of this.world.smokes) {
+        const stepped = stepSmokeCloud(cloud, dt);
+        if (isSmokeExpired(stepped)) this.onSmoke.notifyObservers({ type: "expired", id: stepped.id });
+        else live.push(stepped);
+      }
+      this.world.smokes = live;
+    }
+    if (this.world.fires.length > 0) {
+      const live: FirePatch[] = [];
+      for (const patch of this.world.fires) {
+        const stepped = stepFirePatch(patch, dt).patch;
+        if (isFireExpired(stepped)) this.onFire.notifyObservers({ type: "expired", id: stepped.id });
+        else live.push(stepped);
+      }
+      this.world.fires = live;
+    }
+  }
+
   // ---- CombatEquipmentLink -----------------------------------------------------------------------------------------
 
   commitWeapons(inventory: InventoryState, activeSlot: WeaponSlot | null): void {
@@ -468,17 +656,26 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     this.emitPlayerEvents(step.events, previousVitals);
 
     if (step.release) {
-      const id = spawnRelease(this.world, step.release, LOCAL_PLAYER_ID, LOCAL_PLAYER_ID, raycast);
-      if (id >= 0 && step.release.style === "inHand") this.inHandThrows.add(id);
+      if (this.serverAuthority) {
+        // Networked: the server spawns it (and owns the flight, the blast and the damage); this is only the intent.
+        this.options.onThrowRelease?.(step.release);
+      } else {
+        const id = spawnRelease(this.world, step.release, LOCAL_PLAYER_ID, LOCAL_PLAYER_ID, raycast);
+        if (id >= 0 && step.release.style === "inHand") this.inHandThrows.add(id);
+      }
     }
 
     this.stepInteraction(input, ctx, dt);
 
-    const targets = (this.targetsSource ?? this.options.targets)?.() ?? [];
-    const entities = this.worldEntities(ctx, targets);
-    this.worldEvents.length = 0;
-    stepEquipmentWorld(this.world, dt, raycast, entities, this.worldEvents);
-    for (const event of this.worldEvents) this.handleWorldEvent(event, ctx, targets);
+    if (this.serverAuthority) {
+      this.stepNetWorld(dt, raycast);
+    } else {
+      const targets = (this.targetsSource ?? this.options.targets)?.() ?? [];
+      const entities = this.worldEntities(ctx, targets);
+      this.worldEvents.length = 0;
+      stepEquipmentWorld(this.world, dt, raycast, entities, this.worldEvents);
+      for (const event of this.worldEvents) this.handleWorldEvent(event, ctx, targets);
+    }
     this.throwables = snapshotThrowables(this.world.throwables);
 
     if (this.state.use.itemId !== null) {

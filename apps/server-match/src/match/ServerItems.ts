@@ -39,7 +39,8 @@ export class ServerItems {
   step(p: Player, input: PlayerInput): void {
     const pressed = input.buttons & ~p.itemButtons;
     p.itemButtons = input.buttons;
-    if (p.life === "alive" && p.vitals.boost > 0) p.vitals = stepVitals(p.vitals, this.dt).vitals;
+    // Boost ticks, and (protocol v9) a flashbang's blind/deaf timers run down, so bots stop being blind.
+    if (p.life === "alive" && (p.vitals.boost > 0 || p.vitals.blindSeconds > 0 || p.vitals.deafSeconds > 0)) p.vitals = stepVitals(p.vitals, this.dt).vitals;
     const action = input.action;
     const start = action !== null && action.type === PlayerActionType.use ? consumableOfItemCode(action.arg) : null;
     if (start === null && p.use.itemId === null) return;

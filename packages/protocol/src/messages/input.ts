@@ -32,7 +32,7 @@ export interface InputPacket {
 // bits (there is no newer input to compare with). viewOffset8 is only carried while fire is held; it reads back 0.
 
 const FIRE = 8;
-const ACTION_TYPE_MAX = 5;
+const ACTION_TYPE_MAX = 6;
 
 /** Mutable decode target; assignable to `PlayerInput`. */
 export interface MutablePlayerInput {

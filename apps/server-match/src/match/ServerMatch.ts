@@ -53,6 +53,7 @@ import { freshPlayerState, Player } from "./Player";
 import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./ServerCombat";
 import { ServerItems } from "./ServerItems";
 import { ServerLoot } from "./ServerLoot";
+import { ServerThrowables } from "./ServerThrowables";
 import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
@@ -61,9 +62,12 @@ import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slo
 // runs (BrLifecycle): Warmup → LandingSelect → Glide → Combat → Ended/Cancelled, then the match closes itself.
 // Server bots (ServerBots) take the roster's `bot:<n>` seats when the world is ready and, with `rules.fillWithBots` in a BR
 // match, every slot still empty when warmup ends; their brains write into the same input buffers humans' packets do.
-// Loot and inventory (B5, ServerLoot): the level's generated loot minus throwables, replicated per client by area of
-// interest; everyone (bots too) spawns with the networked starting kit, and weapon slots, magazines and reserves follow
-// the inventory every tick. A death drops the inventory as a pile; BR glide start restores the generated loot.
+// Loot and inventory (B5, ServerLoot): the level's generated loot, replicated per client by area of interest; everyone
+// (bots too) spawns with the networked starting kit, and weapon slots, magazines and reserves follow the inventory every
+// tick. A death drops the inventory as a pile; BR glide start restores the generated loot.
+// Throwables (protocol v9, ServerThrowables): the `throwItem` action spawns a grenade into one shared EquipmentWorld
+// that flies, detonates and runs the shared blast/smoke/fire/flash rules here; each client hears about the grenades and
+// area effects in its own area of interest through `ThrowableUpdate`.
 // Roster: a joining session gets it right after Welcome; any other change (join, leave, bot fill, grace expiry, a host
 // hand-over) bumps a revision that is sent once at the end of the tick to every session behind it.
 // Quitting (protocol v8, `MatchCommand` on the control stream): `leave` takes one player out — after warmup that is a
@@ -141,6 +145,8 @@ export class ServerMatch implements Match, CombatHost {
   combat: ServerCombat | null = null;
   /** Ground loot and inventory actions; null until the sim world is ready. */
   loot: ServerLoot | null = null;
+  /** Grenades in flight and the area effects they leave; null until the sim world is ready. */
+  throwables: ServerThrowables | null = null;
   /** Null in the sandbox and until the world is ready. */
   lifecycle: BrLifecycle | null = null;
   /** Null when the match has no bot seats (and can't fill any), and until the world is ready. */
@@ -209,6 +215,14 @@ export class ServerMatch implements Match, CombatHost {
       const loot = new ServerLoot({ items: this.level.createLoot?.(options.config.matchSeed >>> 0) ?? [], raycastWorld: world.raycastWorld, players: () => this.active, seed: options.config.matchSeed >>> 0 });
       this.loot = loot;
       combat.onKilled = (victim) => loot.dropInventory(victim);
+      const throwables = new ServerThrowables({
+        seed: options.config.matchSeed >>> 0,
+        raycastWorld: world.raycastWorld,
+        players: () => this.active,
+        damage: (victim, amount, kind, attacker, position) => combat.areaDamage(victim, amount, kind, attacker, position),
+        noise: (slot, position) => this.bots?.explosionNoise(slot, position),
+      });
+      this.throwables = throwables;
       if (this.phaseValue !== "Booting") return;
       if (this.needsBots()) this.startBots(world, combat);
       if (options.lifecycle) {
@@ -390,14 +404,20 @@ export class ServerMatch implements Match, CombatHost {
       this.step(p, input, combat);
       this.items.step(p, input);
       this.loot?.act(p, input);
+      this.throwables?.act(p, input);
+      if (p.bot !== null) this.throwables?.stepBot(p, input);
       if (p.body.feet.y < killY) combat.outOfBounds(p);
     }
-    if (!frozen) combat.endTick(tick);
+    if (!frozen) {
+      this.throwables?.step(players);
+      combat.endTick(tick);
+    }
     lifecycle?.endTick(tick);
     this.next = tick + 1;
     if (this.closed) return;
     this.flushRoster();
     this.loot?.replicate(players);
+    this.throwables?.replicate(players);
     const now = this.clock.now();
     this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
@@ -494,7 +514,10 @@ export class ServerMatch implements Match, CombatHost {
       zone: this.level.zone,
       isValidZoneCenter: this.level.isValidZoneCenter,
       placeAtStart: (p) => this.respawn(p),
-      resetLoot: () => this.loot?.reset(),
+      resetLoot: () => {
+        this.loot?.reset();
+        this.throwables?.reset();
+      },
       fillBots: () => this.fillEmptySlotsWithBots(),
       lifecyclePhase: (phase) => this.setPhase(phase),
       result: (result) => this.options.onResult?.(result),
@@ -513,6 +536,7 @@ export class ServerMatch implements Match, CombatHost {
     p.reviveTarget = -1;
     p.buttons = 0;
     p.poseDiscontinuous = true;
+    this.throwables?.clearPlayer(p);
     this.combat!.history.clear(p.slot);
     this.bots?.reset(p);
   }
@@ -547,6 +571,8 @@ export class ServerMatch implements Match, CombatHost {
       zone: () => lifecycleZone() ?? idleZone,
       brainFactory: this.options.botBrainFactory,
       queryLoot: (center, radius, out) => this.loot?.queryLoot(center, radius, out) ?? 0,
+      smokes: () => this.throwables?.smokes ?? [],
+      throwables: () => this.throwables?.throwableViews ?? [],
     });
     this.bots = bots;
     combat.onDamage = (victim, attacker, amount, kind, dirX, dirZ) => bots.onDamage(victim, attacker, amount, kind, dirX, dirZ);
@@ -654,6 +680,7 @@ export class ServerMatch implements Match, CombatHost {
     player.net.reset(this.next - 1);
     player.viewDelay.reset();
     player.lootView.reset();
+    player.throwView.reset();
     player.name = typeof claims.nick === "string" && claims.nick.length > 0 ? claims.nick : claims.sub;
     this.bySession.set(session, player);
     session.onDatagram((bytes, recvMs) => this.onDatagram(player, session, bytes, recvMs));

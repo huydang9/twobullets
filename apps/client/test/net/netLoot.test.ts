@@ -104,6 +104,8 @@ describe("NetEquipmentView loot", () => {
     expect(net.view.inventory.stacks).toEqual([
       { itemId: "ammo_556", quantity: 60 },
       { itemId: "ammo_9mm", quantity: 24 },
+      { itemId: "frag", quantity: 1 },
+      { itemId: "smoke", quantity: 1 },
     ]);
     expect(net.view.inventory.backpack).toBe(1);
     items([30, 15, 24, 0], 2, [5, 0, 0, 0, 0]);
@@ -111,6 +113,8 @@ describe("NetEquipmentView loot", () => {
       ["ammo_556", 30],
       ["ammo_762", 15],
       ["ammo_9mm", 24],
+      ["frag", 1],
+      ["smoke", 1],
       ["bandage", 5],
     ]);
     expect(net.view.capacity.max).toBe(250);
