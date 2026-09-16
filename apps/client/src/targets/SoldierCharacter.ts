@@ -53,6 +53,11 @@ export class SoldierCharacter implements BloodBody {
   readonly hitboxes: SoldierHitboxes | null;
   /** The owner's wish to show the rifle (a gun in hand); it is still hidden while the hands are busy. */
   rifleVisible = true;
+  /**
+   * Poses every frame whatever the level of detail says (the soldier the death camera follows). The spectator camera is
+   * written before the bodies update, so distance alone would already keep it at full rate; this makes it a guarantee.
+   */
+  lodFullRate = false;
 
   private readonly animator: SoldierAnimator;
   private readonly rifle: Mesh | null = null;
@@ -131,6 +136,11 @@ export class SoldierCharacter implements BloodBody {
 
   get handsBusy(): boolean {
     return this.animator.handsBusy;
+  }
+
+  /** Seconds between pose evaluations the last `update` chose (0 = every frame); for tests and debugging. */
+  get poseInterval(): number {
+    return this.animator.poseInterval;
   }
 
   /** Knocked (up on all fours, animated) vs dead (flat, still) presentation. */
@@ -227,6 +237,7 @@ export class SoldierCharacter implements BloodBody {
    * Call after the owner placed the root and the camera.
    */
   private animationInterval(): number {
+    if (this.lodFullRate) return 0;
     const camera = this.scene.activeCameras?.[0] ?? this.scene.activeCamera;
     if (!camera) return 0;
     const lod = ANIMATION_LOD;

@@ -69,6 +69,8 @@ function wrapAngle(a: number): number {
  * reuse scratch values; nothing allocates per frame. No collision; hitboxes are the shared rig (`RemoteHitboxes`).
  */
 export class RemotePlayers implements FootstepEmitterSource {
+  /** Slot the death camera follows (−1: none); its soldier is posed every frame whatever its distance says. */
+  lodFullRateSlot = -1;
   private readonly scene: Scene;
   private readonly roster: RemoteRoster;
   private readonly avatars: (Avatar | null)[] = [];
@@ -220,6 +222,7 @@ export class RemotePlayers implements FootstepEmitterSource {
           avatar.lastPhase = phase;
         }
         soldier.rifleVisible = weaponId !== null && !dead;
+        soldier.lodFullRate = slot === this.lodFullRateSlot;
         soldier.update(dt);
       } else {
         root.scaling.y = dead ? 0.15 : downed ? 0.3 : crouched ? MOVEMENT.crouchHeight / MOVEMENT.standHeight : 1;

@@ -321,6 +321,16 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
 
   // --- Frame ------------------------------------------------------------------------------------------------------
 
+  /**
+   * Places the death camera, before the remote avatars update: they grade their animation level of detail against the
+   * active camera, which the player controller has just parked on the corpse. Graded from there the followed player is
+   * off-screen and far, so it would be posed at 5 Hz while filling the screen.
+   */
+  updateSpectateCamera(): void {
+    if (this.life === "dead") this.spectate();
+    this.deps.remotes.lodFullRateSlot = this.spectating;
+  }
+
   /** Per frame after the player and remote avatars updated. */
   update(dt: number): void {
     this.time += dt;
@@ -328,7 +338,6 @@ export class NetCombatPresenter implements CombatFeedback, PredictedHitSink {
     this.indicator.update(now, this.deps.player.getAim().yaw);
     this.banner.update(now);
     this.flushImpacts();
-    if (this.life === "dead") this.spectate();
     this.updateReviving(dt);
   }
 

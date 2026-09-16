@@ -356,6 +356,8 @@ export class NetGame {
   }
 
   lateUpdate(dt: number): void {
+    // The death camera first: the avatars grade their animation level of detail against the active camera.
+    this.presenter?.updateSpectateCamera();
     this.avatars?.update(dt);
     const client = this.clientValue;
     // The hands follow the server's life: knocked or dead puts a throwable away and refuses a new one.

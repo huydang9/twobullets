@@ -51,6 +51,8 @@ export class BotBody {
   private readonly current = new Vector3();
   private previousYaw = 0;
   private currentYaw = 0;
+  private previousPitch = 0;
+  private currentPitch = 0;
   private readonly eyeValue = { x: 0, y: 0, z: 0 };
   private readonly viewDirValue = { x: 0, y: 0, z: 1 };
   private shownDead = false;
@@ -131,6 +133,7 @@ export class BotBody {
     this.current.set(state.feet.x, state.feet.y, state.feet.z);
     this.previous.copyFrom(this.current);
     this.currentYaw = this.previousYaw = state.yaw;
+    this.currentPitch = this.previousPitch = state.pitch;
     this.hasTick = true;
     this.shownDead = false;
     // A reused body starts its new life standing (the animator would otherwise ignore the next death).
@@ -157,6 +160,8 @@ export class BotBody {
     if (!s) return;
     this.previous.copyFrom(this.current);
     this.previousYaw = this.currentYaw;
+    this.previousPitch = this.currentPitch;
+    this.currentPitch = Number.isFinite(s.pitch) ? s.pitch : this.previousPitch;
     this.current.set(s.feet.x, s.feet.y, s.feet.z);
     // Unwrap so the lerp takes the short way round.
     // Closed form (no loop): a non-finite or huge yaw can't spin forever. Keeps the render yaw near [−π, π).
@@ -167,6 +172,7 @@ export class BotBody {
     if (!this.hasTick) {
       this.previous.copyFrom(this.current);
       this.previousYaw = yaw;
+      this.previousPitch = this.currentPitch;
       this.hasTick = true;
     }
     // Loot pickup has no event: a pickup input on the tick the inventory changed.
@@ -280,6 +286,11 @@ export class BotBody {
 
   renderYaw(alpha: number): number {
     return this.previousYaw + (this.currentYaw - this.previousYaw) * alpha;
+  }
+
+  /** Interpolated aim pitch, so the follow camera doesn't step once per tick on a screen faster than the sim. */
+  renderPitch(alpha: number): number {
+    return this.previousPitch + (this.currentPitch - this.previousPitch) * alpha;
   }
 
   dispose(): void {

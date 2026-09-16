@@ -15,6 +15,10 @@ const PITCH_SCALE = 0.6;
  * Follow camera for spectating a bot (death screen "Spectate teammate", DEV `?spectate=1`): writes the player camera
  * after PlayerController's own camera update, from the followed body's interpolated eye and aim. [ and ] cycle through
  * bots still in play.
+ *
+ * Runs before `BotBodies.update`, which reads the active camera for the soldiers' animation level of detail: placed
+ * after them, every soldier would be graded against the dead player's corpse (off-screen, 5 Hz poses — the "spectating
+ * looks like frame drops" bug). The eye and yaw come from the tick pair, not from the placed root, so the order is free.
  */
 export class Spectator {
   private body: BotBody | null = null;
@@ -46,12 +50,20 @@ export class Spectator {
   follow(slot: number): boolean {
     const body = this.bodies.bySlot[slot];
     if (!body) return false;
-    this.body = body;
+    this.setBody(body);
     return true;
   }
 
   stop(): void {
-    this.body = null;
+    this.setBody(null);
+  }
+
+  /** The followed soldier always animates at full rate; the one we left goes back to its distance level of detail. */
+  private setBody(body: BotBody | null): void {
+    if (body === this.body) return;
+    if (this.body) this.body.soldier.lodFullRate = false;
+    this.body = body;
+    if (body) body.soldier.lodFullRate = true;
   }
 
   /** Next (+1) or previous (−1) bot in play, preferring `team` first when given. Returns the new slot or -1. */
@@ -65,14 +77,14 @@ export class Spectator {
         const candidate = list[index]!;
         const actor = this.view.state.actors[candidate.slot];
         if (!actor || actor.life === "dead" || (sameTeamOnly && actor.team !== team)) continue;
-        this.body = candidate;
+        this.setBody(candidate);
         return candidate.slot;
       }
     }
     return -1;
   }
 
-  /** After PlayerController.update; `alpha` is the tick interpolation factor. */
+  /** After PlayerController.update and before BotBodies.update; `alpha` is the tick interpolation factor. */
   update(alpha: number): void {
     const body = this.body;
     const actor = body?.actor;
@@ -82,7 +94,7 @@ export class Spectator {
     const followed = this.body!;
     const eye = followed.eyeToRef(alpha, this.eye);
     const yaw = followed.renderYaw(alpha);
-    const pitch = (followed.actor?.pitch ?? 0) * PITCH_SCALE;
+    const pitch = followed.renderPitch(alpha) * PITCH_SCALE;
     const cp = Math.cos(pitch);
     const fx = Math.sin(yaw) * cp;
     const fy = -Math.sin(pitch);

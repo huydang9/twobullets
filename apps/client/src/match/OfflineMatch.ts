@@ -226,11 +226,13 @@ export class OfflineMatch {
 
     const traced = trace.enabled;
     if (traced) trace.mark("frame");
+    // Before the bodies: they pick their animation level of detail from the active camera, which the player controller
+    // has just parked on the corpse. Placing the follow camera first keeps the spectated soldier posed every frame.
+    this.spectator?.update(alpha);
     if (!skip.has("bodies")) {
       if (traced) trace.time("frame bodies", () => this.bodies.update(dt, alpha));
       else this.bodies.update(dt, alpha);
     }
-    this.spectator?.update(alpha);
     const camera = this.deps.player.camera as TargetCamera;
     if (!skip.has("wall")) this.zoneWall.update(dt, sim.state.zone.current, camera.position.x, camera.position.z);
     this.debugOverlay?.update();

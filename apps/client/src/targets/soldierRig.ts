@@ -190,23 +190,31 @@ export function deadTintFactor(step: number): number {
  * Animation level of detail: how often a soldier's pose is sampled and written to its bones. Blend weights and clip
  * clocks still advance every frame, so a lower rate shows the same motion in coarser steps. Distances are what the
  * camera sees: world metres divided by the zoom magnification.
+ *
+ * Skipping a pose only saves the mixer's own blend: Babylon copies every linked bone out of its transform node and
+ * recomputes the skeleton each frame anyway (`Skeleton.prepare`). Headless, 20 soldiers cost 0.133 ms per frame with no
+ * level of detail at all, 0.109 with these thresholds and 0.093 with the first (much harsher) ones — about 0.02 ms of a
+ * 6 ms frame between them. So anything the player can see is posed every frame, or at a rate whose steps don't read,
+ * and only bodies outside the view take the coarse rates.
  */
 export const ANIMATION_LOD = {
   /** Every frame up to this distance, m. */
-  fullRateDistance: 40,
+  fullRateDistance: 80,
   /** Rate beyond `fullRateDistance`, Hz. */
-  midHz: 15,
-  farDistance: 100,
-  farHz: 8,
+  midHz: 30,
+  farDistance: 160,
+  farHz: 20,
+  /** Never below this on a soldier inside the view (a guard for the tuning above). */
+  minVisibleHz: 20,
   /**
    * Outside the view frustum, Hz; within `offscreenNearDistance` a little faster, as the body's shadow can still fall
    * into view.
    */
   offscreenHz: 5,
-  offscreenNearDistance: 20,
+  offscreenNearDistance: 30,
   offscreenNearHz: 15,
   /** Knocked and holding still: only the slow sway moves. */
-  crawlHoldHz: 15,
+  crawlHoldHz: 30,
   /** Sphere around the body tested against the frustum: center height above the feet and radius, m (a lying body fits). */
   cullCenterHeight: 0.9,
   cullRadius: 1.6,
@@ -217,7 +225,7 @@ export function animationLodInterval(distance: number, inView: boolean): number 
   const lod = ANIMATION_LOD;
   if (!inView) return 1 / (distance <= lod.offscreenNearDistance ? lod.offscreenNearHz : lod.offscreenHz);
   if (distance <= lod.fullRateDistance) return 0;
-  return 1 / (distance <= lod.farDistance ? lod.midHz : lod.farHz);
+  return 1 / Math.max(lod.minVisibleHz, distance <= lod.farDistance ? lod.midHz : lod.farHz);
 }
 
 /** jump_up opens with a 0.27 s squat we skip, since the jump has already left the ground. */
