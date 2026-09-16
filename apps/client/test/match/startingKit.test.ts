@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadMapV1 } from "../../../../packages/sim/test/match/mapV1World";
 import { StraightNav } from "../../../../packages/sim/test/match/straightNav";
 import { EquipmentSystem, type EquipmentInputSource, type EquipmentPlayer } from "../../src/equipment/EquipmentSystem";
+import { HoldToggles } from "../../src/input/holdToggle";
 import { createOfflineMatchConfig, createOfflineMatchSim } from "../../src/match/createOfflineMatchSim";
 import { readOfflineMatchOptions } from "../../src/match/options";
 import { createNetStartingInventory } from "@twobullets/shared/equipment/presets";
@@ -29,7 +30,8 @@ beforeAll(async () => {
 
 afterAll(() => world?.dispose());
 
-const input: EquipmentInputSource = { isLocked: true, isActionDown: () => false, wasActionPressed: () => false, wheelDelta: () => 0 };
+const inputSource = { isLocked: true, isActionDown: () => false, wasActionPressed: () => false, wheelDelta: () => 0 };
+const input: EquipmentInputSource = { ...inputSource, holds: new HoldToggles(inputSource) };
 
 describe("starting kit", () => {
   it("offline human: EquipmentSystem starts and respawns with the AR-4, P-9, a frag and a smoke", () => {

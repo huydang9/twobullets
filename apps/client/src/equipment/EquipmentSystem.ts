@@ -78,6 +78,7 @@ import { CollisionLayer, type Damageable } from "../combat/hitboxes";
 import type { TargetArmor } from "../combat/TargetArmor";
 import type { CombatEquipmentLink } from "../combat/types";
 import type { Action } from "../input/bindings";
+import type { HoldToggles } from "../input/holdToggle";
 import type { PlayerModifiers, PlayerTick } from "../player/PlayerController";
 import {
   LOCAL_PLAYER_ID,
@@ -119,6 +120,8 @@ export interface EquipmentInputSource {
   isActionDown(action: Action): boolean;
   wasActionPressed(action: Action): boolean;
   wheelDelta(): number;
+  /** Hold-vs-toggle state for aim and sprint (input/controlSettings.ts). */
+  readonly holds: HoldToggles;
 }
 
 /**
@@ -874,8 +877,9 @@ class EquipmentInputQueue {
 
   constructor(private readonly input: EquipmentInputSource) {}
 
+  /** Aim for this tick: the button in hold mode, the latch in toggle mode (input/controlSettings.ts). */
   get isAimHeld(): boolean {
-    return this.input.isLocked && this.input.isActionDown("aim");
+    return this.input.holds.isDown("aim");
   }
 
   queueUse(itemId: ConsumableItemId): void {
@@ -896,10 +900,10 @@ class EquipmentInputQueue {
     const result: QueuedEquipmentInput = {
       fire: was("fire") || held("fire"),
       firePressed: was("fire"),
-      aim: held("aim"),
+      aim: this.isAimHeld,
       reloadPressed: was("reload"),
       jumpPressed: was("jump"),
-      sprint: held("sprint") && held("forward") && move.grounded,
+      sprint: input.holds.isDown("sprint") && held("forward") && move.grounded,
       equipThrowablePressed: was("throwable"),
       cycleThrowablePressed: was("cycleThrowable"),
       holsterPressed: was("holster"),
@@ -927,6 +931,8 @@ class EquipmentInputQueue {
     }
     const actions: readonly Action[] = ["fire", "reload", "jump", "throwable", "cycleThrowable", "holster", "interact", ...WEAPON_SELECT_ACTIONS];
     for (const action of actions) if (input.wasActionPressed(action)) this.pressed.add(action);
+    // Taking a throwable out or putting the gun away ends a toggled aim right away (the weapon gate would anyway).
+    if (this.pressed.has("throwable") || this.pressed.has("cycleThrowable") || this.pressed.has("holster")) input.holds.cancel("aim");
     if (input.wheelDelta() !== 0) this.wheel = true;
     for (const [action, items] of USE_ACTIONS) {
       if (!input.wasActionPressed(action)) continue;

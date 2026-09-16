@@ -3,6 +3,7 @@ import { createSimWorld, type SimWorld } from "@twobullets/sim/index";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CameraShake } from "../../src/equipment/presentation/support";
+import { HoldToggles } from "../../src/input/holdToggle";
 import type { InputManager } from "../../src/input/InputManager";
 import { PlayerController } from "../../src/player/PlayerController";
 import { Spring } from "../../src/viewmodel/Spring";
@@ -35,12 +36,13 @@ function renderedRoll(player: PlayerController): number {
  */
 function run(world: SimWorld, settle: (dt: number) => number, settleSeconds: number): { worst: number; turned: number } {
   let look = { dx: 0, dy: 0 };
-  const input = {
+  const source = {
     isLocked: true,
     isActionDown: () => false,
     wasActionPressed: () => false,
     lookDelta: () => look,
-  } as unknown as InputManager;
+  };
+  const input = { ...source, holds: new HoldToggles(source as never) } as unknown as InputManager;
   const player = new PlayerController(world.scene, input, FLAT);
   const dt = 1 / FPS;
   let worst = 0;

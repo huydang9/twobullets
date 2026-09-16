@@ -2,6 +2,7 @@ import { MAX_MATCH_PLAYERS, MIN_MATCH_PLAYERS, TEAM_MODES, type TeamMode } from 
 import type { CatalogResponse, LobbyView, MatchResultResponse, TicketView } from "@twobullets/contracts/rest";
 import type { BotDifficulty } from "@twobullets/shared";
 import { getLanguage, LANGUAGES, onLanguageChange, setLanguage, t, type Language, type MessageKey } from "../i18n";
+import { getControlSettings, HOLD_TOGGLE_MODES, setControlSettings, TOGGLE_ACTIONS, type ControlSettings } from "../input/controlSettings";
 import { el } from "../ui/dom";
 import { MapPicker } from "../ui/mapPicker";
 import { loadStatsStripEnabled, saveStatsStripEnabled } from "../ui/StatsStrip";
@@ -333,6 +334,22 @@ export class MenuView {
         this.rerender();
       }),
     );
+    this.controls(content);
+  }
+
+  /** Hold vs toggle for aim, crouch and sprint. The same three rows sit in the pause menu (ui/match/PauseMenu.ts). */
+  private controls(content: HTMLElement): void {
+    el("h2", "tb-menu__heading", t("settings.controls"), content);
+    const settings = getControlSettings();
+    for (const action of TOGGLE_ACTIONS) {
+      this.row(content, `settings.${action}`, (cell) =>
+        this.segmented(cell, HOLD_TOGGLE_MODES.map((value) => ({ value, label: t(`settings.${action}.${value}`) })), settings[action], (mode) => {
+          setControlSettings({ [action]: mode } as Partial<ControlSettings>);
+          this.rerender();
+        }),
+      );
+    }
+    el("div", "tb-menu__hint", t("settings.controlsHint"), content);
   }
 
   private creditsPanel(content: HTMLElement): void {

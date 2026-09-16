@@ -23,7 +23,15 @@ function harness(held: number) {
     },
   };
   const interrupts = { count: 0 };
-  const link = netCombatLink(combat, { handsBusy: () => hands.busy, interactHeld: () => false, life: () => LifeCode.alive, handsInterrupted: () => interrupts.count++ });
+  const aimCancels = { count: 0 };
+  const owner = { life: LifeCode.alive as number };
+  const link = netCombatLink(combat, {
+    handsBusy: () => hands.busy,
+    interactHeld: () => false,
+    life: () => owner.life,
+    handsInterrupted: () => interrupts.count++,
+    cancelAim: () => aimCancels.count++,
+  });
   const ctx = createWeaponContext();
   const combatInput = createCombatInput();
   /** One live tick: the outgoing input and the shots the local prediction fired from it. */
@@ -35,7 +43,7 @@ function harness(held: number) {
     weaponState = result.state;
     return { buttons: out.buttons, shots: result.shots.length };
   };
-  return { hands, tick, interrupts, setHeld: (buttons: number) => (held = buttons) };
+  return { hands, tick, interrupts, aimCancels, owner, setHeld: (buttons: number) => (held = buttons) };
 }
 
 describe("networked hands gate", () => {
@@ -98,5 +106,29 @@ describe("networked hands gate", () => {
     h.setHeld(Btn.sprint);
     h.tick();
     expect(h.interrupts.count).toBe(2);
+  });
+
+  // A toggled aim (settings: hold vs toggle) must end wherever the link clears the aim bit, so the player never comes
+  // back from a throw, a heal or a knock still aiming. Hold mode ignores the call; the wire is the same either way.
+  it("ends a toggled aim while the hands are busy or the owner is knocked or dead, and leaves it alone otherwise", () => {
+    const h = harness(Btn.aim);
+    h.tick();
+    expect(h.aimCancels.count).toBe(0);
+
+    h.hands.busy = true;
+    expect(h.tick().buttons & Btn.aim).toBe(0);
+    expect(h.aimCancels.count).toBe(1);
+    h.hands.busy = false;
+
+    for (const life of [LifeCode.downed, LifeCode.dead]) {
+      h.owner.life = life;
+      const before = h.aimCancels.count;
+      expect(h.tick().buttons & Btn.aim).toBe(0);
+      expect(h.aimCancels.count).toBe(before + 1);
+    }
+    h.owner.life = LifeCode.alive;
+    const settled = h.aimCancels.count;
+    expect(h.tick().buttons & Btn.aim).toBe(Btn.aim);
+    expect(h.aimCancels.count).toBe(settled);
   });
 });

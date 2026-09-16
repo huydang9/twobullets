@@ -9,6 +9,7 @@ import { idleScript } from "../../../../packages/sim/test/match/testBrains";
 import type { CombatSystem } from "../../src/combat/CombatSystem";
 import { EquipmentSystem, type EquipmentInputSource, type EquipmentPlayer } from "../../src/equipment/EquipmentSystem";
 import type { Action } from "../../src/input/bindings";
+import { HoldToggles } from "../../src/input/holdToggle";
 import { HumanActor } from "../../src/match/HumanActor";
 import type { PlayerController, PlayerTick } from "../../src/player/PlayerController";
 
@@ -31,6 +32,7 @@ class FakeInput implements EquipmentInputSource {
   isLocked = true;
   readonly down = new Set<Action>();
   pressed = new Set<Action>();
+  readonly holds = new HoldToggles(this);
   isActionDown(action: Action): boolean {
     return this.down.has(action);
   }

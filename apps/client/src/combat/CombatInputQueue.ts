@@ -9,7 +9,7 @@ const IDLE: CombatInput = { fire: false, aim: false, reload: false, selectIndex:
 type Slots = readonly (WeaponSlotState | null)[];
 
 /** The parts of InputManager the queue reads (a stand-in drives headless checks). */
-export type CombatInputSource = Pick<InputManager, "isLocked" | "isActionDown" | "wasActionPressed" | "wheelDelta">;
+export type CombatInputSource = Pick<InputManager, "isLocked" | "isActionDown" | "wasActionPressed" | "wheelDelta" | "holds">;
 
 /**
  * Turns per-frame input into per-tick CombatInput. At high refresh rates most render frames run no tick, so
@@ -27,8 +27,14 @@ export class CombatInputQueue {
     return this.input.isLocked && this.input.isActionDown("fire");
   }
 
+  /** Aim for this tick: the button in hold mode, the latch in toggle mode. */
   get isAimHeld(): boolean {
-    return this.input.isLocked && this.input.isActionDown("aim");
+    return this.input.holds.isDown("aim");
+  }
+
+  /** Ends a toggled aim (weapons blocked: a throwable in hand, an item in use, knocked, dead). */
+  cancelAim(): void {
+    this.input.holds.cancel("aim");
   }
 
   /**
@@ -47,15 +53,27 @@ export class CombatInputQueue {
     if (input.wasActionPressed("fire")) this.fireQueued = true;
     if (input.wasActionPressed("reload")) this.reloadQueued = true;
 
+    let switched = false;
     SLOT_ACTIONS.forEach((action, index) => {
-      if (slots[index] && input.wasActionPressed(action)) this.selectQueued = index;
+      if (slots[index] && input.wasActionPressed(action)) {
+        this.selectQueued = index;
+        switched ||= index !== activeIndex;
+      }
     });
     const wheel = input.wheelDelta();
     if (wheel !== 0) {
       // +1 per notch scrolled down selects the next filled slot.
       const next = cycleWeaponSlot(slots, this.selectQueued ?? activeIndex, wheel);
-      if (next !== null) this.selectQueued = next;
+      if (next !== null) {
+        this.selectQueued = next;
+        switched ||= next !== activeIndex;
+      }
     }
+    // A toggled aim ends where holding the button would stop mattering: taking out another weapon, and starting a
+    // sprint (aiming blocks sprint, so without this the player could never run again without re-pressing aim).
+    // Reloading is left alone: it drops the ADS blend for the reload and picks it back up, exactly as holding does.
+    if (switched) input.holds.cancel("aim");
+    if (input.wasActionPressed("sprint") && input.isActionDown("forward")) input.holds.cancel("aim");
   }
 
   /** Call once per render frame after the frame's ticks, before input.endFrame(). */

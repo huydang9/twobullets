@@ -1,4 +1,5 @@
 import { onLanguageChange, t } from "../../i18n";
+import { getControlSettings, HOLD_TOGGLE_MODES, setControlSettings, TOGGLE_ACTIONS, type ControlSettings } from "../../input/controlSettings";
 import { el } from "../dom";
 import type { PauseOption } from "./pauseOptions";
 
@@ -158,7 +159,36 @@ export class PauseMenu {
       button.disabled = action.disabled === true;
       if (action.hint) el("div", "tb-pause__hint", action.hint, this.body);
     }
+    this.controls();
     el("div", "tb-pause__hint tb-pause__hint--key", t("pause.escHint"), this.body);
+  }
+
+  /**
+   * Hold vs toggle for aim, crouch and sprint, the same choice as the front-door settings panel (they share
+   * input/controlSettings.ts). Changing one applies to the running match at once, so this is where players find it
+   * mid-game after the first time right-click fights them.
+   */
+  private controls(): void {
+    const settings = getControlSettings();
+    el("div", "tb-pause__section", t("settings.controls"), this.body);
+    for (const action of TOGGLE_ACTIONS) {
+      const row = el("div", "tb-pause__setting", undefined, this.body);
+      el("span", "tb-pause__setting-label", t(`settings.${action}`), row);
+      const group = el("div", "tb-pause__setting-options", undefined, row);
+      group.setAttribute("role", "radiogroup");
+      for (const mode of HOLD_TOGGLE_MODES) {
+        const button = el("button", `tb-pause__chip${settings[action] === mode ? " tb-pause__chip--on" : ""}`, t(`settings.${action}.${mode}`), group);
+        button.type = "button";
+        button.setAttribute("role", "radio");
+        button.setAttribute("aria-checked", String(settings[action] === mode));
+        button.addEventListener("click", () => {
+          button.blur();
+          if (settings[action] === mode) return;
+          setControlSettings({ [action]: mode } as Partial<ControlSettings>);
+          this.render();
+        });
+      }
+    }
   }
 
   private button(parent: HTMLElement, label: string, modifier: string, run: () => void): HTMLButtonElement {

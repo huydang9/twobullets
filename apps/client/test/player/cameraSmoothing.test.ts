@@ -10,6 +10,7 @@ import { createMapSimWorld, type MapSimWorld } from "@twobullets/sim/map/mapColl
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadMapV1 } from "../../../../packages/sim/test/match/mapV1World";
+import { HoldToggles } from "../../src/input/holdToggle";
 import type { InputManager } from "../../src/input/InputManager";
 import { PlayerController } from "../../src/player/PlayerController";
 
@@ -42,12 +43,13 @@ interface Frame {
 
 function run(world: SimWorld, level: LevelData, fps: number, jitter: boolean): Frame[] {
   const held = new Set<string>();
-  const input = {
+  const source = {
     isLocked: true,
     isActionDown: (action: string) => held.has(action),
     wasActionPressed: () => false,
     lookDelta: () => ({ dx: 0, dy: 0 }),
-  } as unknown as InputManager;
+  };
+  const input = { ...source, holds: new HoldToggles(source as never) } as unknown as InputManager;
   const player = new PlayerController(world.scene, input, level);
 
   // Weapon tick + CombatSystem's render-side ADS chase and zoom (non-scoped rifle).

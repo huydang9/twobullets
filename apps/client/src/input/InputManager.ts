@@ -1,4 +1,5 @@
 import { GAME_KEYS, KEY_BINDINGS, type Action } from "./bindings";
+import { HoldToggles } from "./holdToggle";
 
 /** Mouse events this soon after acquiring lock are dropped; some browsers report a bogus jump on lock. */
 const LOCK_SETTLE_MS = 50;
@@ -19,6 +20,9 @@ export class InputManager {
   /** When true, clicking the canvas requests pointer lock. Also skipped while the Babylon Inspector is open. */
   lockOnCanvasClick = true;
 
+  /** Hold-vs-toggle state for aim, crouch and sprint; gameplay asks this instead of the raw button. */
+  readonly holds: HoldToggles;
+
   private readonly held = new Set<string>();
   private readonly pressed = new Set<string>();
   private readonly lockListeners: Array<(locked: boolean) => void> = [];
@@ -30,6 +34,7 @@ export class InputManager {
   private lastMouseMagnitude = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
+    this.holds = new HoldToggles(this);
     const options = { signal: this.events.signal };
     window.addEventListener("keydown", this.handleKeyDown, options);
     window.addEventListener("keyup", this.handleKeyUp, options);
@@ -87,6 +92,8 @@ export class InputManager {
 
   /** Call once at the end of every frame to reset per-frame state. */
   endFrame(): void {
+    // Before `pressed` is dropped: a toggle press on a frame no consumer read still counts.
+    this.holds.endFrame();
     this.pressed.clear();
     this.mouseDx = 0;
     this.mouseDy = 0;
@@ -136,7 +143,11 @@ export class InputManager {
     this.mouseDy = 0;
     this.lastMouseMagnitude = 0;
     if (locked) this.lockedAt = performance.now();
-    else this.held.clear();
+    else {
+      this.held.clear();
+      // The bag, the map, the pause menu, Esc and a finished match all release the pointer: never come back aiming.
+      this.holds.cancelAll();
+    }
     for (const listener of this.lockListeners) listener(locked);
   };
 

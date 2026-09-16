@@ -323,9 +323,11 @@ export class PlayerController {
     if (input.isLocked) {
       forward = axis(input.isActionDown("forward"), input.isActionDown("back"));
       right = axis(input.isActionDown("right"), input.isActionDown("left"));
+      // A toggled sprint ends when the player stops running forward, so letting go of W never leaves them stuck.
+      if (forward !== 1) input.holds.cancel("sprint");
       if (this.jumpQueued || input.isActionDown("jump")) buttons |= Btn.jump;
-      if (input.isActionDown("sprint")) buttons |= Btn.sprint;
-      if (input.isActionDown("crouch")) buttons |= Btn.crouch;
+      if (input.holds.isDown("sprint")) buttons |= Btn.sprint;
+      if (input.holds.isDown("crouch")) buttons |= Btn.crouch;
     }
     return {
       tick,

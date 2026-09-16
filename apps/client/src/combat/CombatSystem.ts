@@ -165,6 +165,14 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     return total > 0 ? Math.min(1, Math.max(0, 1 - phaseTimer / total)) : 1;
   }
 
+  /**
+   * Ends a toggled aim (aim-mode setting). Called wherever holding the button would stop aiming anyway: a throwable in
+   * hand, an item in use, knocked or dead. No-op in hold mode.
+   */
+  cancelAim(): void {
+    this.inputQueue.cancelAim();
+  }
+
   /** Consumes one tick's queued combat input for the player's tick input (PlayerCombatLink). */
   takeCombatInput(out: { buttons: number; select: number }): void {
     const state = this.weaponState;
@@ -221,7 +229,10 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
 
     const raw = combatInputInto(this.combatInput, playerInput);
     const gate = this.gate?.() ?? equipment?.modifiers;
-    const gated = gateCombatInput(raw, gate?.allowWeapons ?? true, this.fireLatched);
+    const allowWeapons = gate?.allowWeapons ?? true;
+    // Offline: the gate closes for a throwable in hand, an item in use, knocked and dead — a toggled aim ends with it.
+    if (!allowWeapons) this.inputQueue.cancelAim();
+    const gated = gateCombatInput(raw, allowWeapons, this.fireLatched);
     this.fireLatched = gated.fireLatched;
     const result = stepPlayerWeapon(state, gated.input, ctx, dt, false);
     this.weaponState = result.state;

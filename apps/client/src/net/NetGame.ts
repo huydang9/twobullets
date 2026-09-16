@@ -144,6 +144,7 @@ export class NetGame {
         handsInterrupted: () => presenter?.equipmentView.interrupt(),
         interactHeld: () => input.isLocked && input.isActionDown("interact"),
         life: () => movement.life,
+        cancelAim: () => combat.cancelAim(),
       }),
     );
     // Recoil, flash, tracer and sound only for shot ids never shown (R11): a correction that rewinds the shot counter

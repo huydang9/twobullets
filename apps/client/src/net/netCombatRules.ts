@@ -82,6 +82,11 @@ export interface NetCombatInputSources {
   life(): number;
   /** Fire or reload pressed while the hands are busy (cancels an item use; the wire never carries those presses). */
   handsInterrupted?(): void;
+  /**
+   * Ends a toggled aim (aim-mode setting) whenever the buttons are being cleared anyway — the hands are busy, or the
+   * owner is knocked or dead. No-op in hold mode; the wire is unchanged either way.
+   */
+  cancelAim?(): void;
 }
 
 /**
@@ -108,6 +113,7 @@ export function netCombatLink(
       out.buttons = hands.apply(raw, busy);
       if (sources.interactHeld()) out.buttons |= REVIVE_BUTTON;
       const life = sources.life();
+      if (busy || life !== LifeCode.alive) sources.cancelAim?.();
       out.buttons = netInputButtons(out.buttons, life);
       out.select = netInputSelect(out.select, life);
     },
