@@ -86,6 +86,8 @@ export class NetGame {
   private throwLife: number = LifeCode.alive;
   private clientValue: NetClient | null = null;
   private itemsTick = -1;
+  /** A newer owner items group whose grenade counts the local hands haven't taken yet. */
+  private throwCountsPending = false;
   private connecting = false;
   /** F pressed during a frame, consumed by the next predicted tick's loot interaction. */
   private interactPressed = false;
@@ -256,7 +258,7 @@ export class NetGame {
       lootRays.ignoreBody = player.physicsBody;
       items.tickLoot(lootTick);
       // Item use/cancel rides this tick's input (the ring's entry, so redundant resends carry it).
-      const action = items.takeAction();
+      const action = items.takeAction(tick.playerInput.tick);
       if (action !== null) (tick.playerInput as Mutable<PlayerInput>).action = action;
       this.clientValue?.onPredictedTick(tick.playerInput);
     });
@@ -368,11 +370,17 @@ export class NetGame {
       this.throwTarget?.setNetLife(life === LifeCode.downed ? "downed" : life === LifeCode.dead ? "dead" : "alive");
     }
     if (client) this.combatEvents?.update(client.renderTick);
-    if (client && client.ownerItems !== null && client.ownerItemsTick !== this.itemsTick) {
-      this.itemsTick = client.ownerItemsTick;
-      this.presenter?.equipmentView.setItems(client.ownerItems);
-      // The server owns the bag: the local hands may only throw what it says is carried.
-      this.throwTarget?.setThrowableCounts(client.ownerItems.throwables ?? []);
+    if (client && client.ownerItems !== null) {
+      if (client.ownerItemsTick !== this.itemsTick) {
+        this.itemsTick = client.ownerItemsTick;
+        this.presenter?.equipmentView.setItems(client.ownerItems);
+        this.throwCountsPending = true;
+      }
+      // The server owns the bag: the local hands may only throw what it says is carried, once it has seen our last throw.
+      if (this.throwCountsPending && (this.presenter?.equipmentView.throwCountsSettled(client.lastProcessedInputTick) ?? true)) {
+        this.throwCountsPending = false;
+        this.throwTarget?.setThrowableCounts(client.ownerItems.throwables ?? []);
+      }
     }
     this.presenter?.update(dt);
     this.matchValue?.update(dt, client, this.combatEvents);

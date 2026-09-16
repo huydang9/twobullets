@@ -330,6 +330,11 @@ export class NetClient {
    * set carries the view offset D = input tick − the render tick remote players were drawn at this frame (the input is
    * the input ring's own entry, so resends carry it too).
    */
+  /** Newest input tick the server reported processed (−1 = none yet). */
+  get lastProcessedInputTick(): number {
+    return this.lastProcessedInput;
+  }
+
   onPredictedTick(input: PlayerInput): void {
     if (this.stats.state !== "playing") return;
     if ((input.buttons & Btn.fire) !== 0) (input as Mutable<PlayerInput>).viewOffset8 = viewOffset8(input.tick, this.renderTickValue);

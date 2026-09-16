@@ -26,7 +26,9 @@ import { consumableBlock, VITALS, type Vitals } from "@twobullets/shared/equipme
 import { PlayerActionType, type PlayerAction } from "@twobullets/shared/input";
 import { encodeDropArg } from "@twobullets/shared/match/rules";
 import type { Vec3 } from "@twobullets/shared/movement/types";
+import type { ThrowRelease } from "@twobullets/shared/equipment/throw";
 import type { RaycastFn, WeaponState } from "@twobullets/shared/weapons/types";
+import type { EquipmentOptions } from "../equipment/EquipmentSystem";
 import type { EquipmentView, ItemEvent, ItemUseView, UseEvent, VitalsViewEvent } from "../equipment/types";
 import type { NetOwnerVitals } from "./NetCombat";
 import { NetLoot } from "./NetLoot";
@@ -35,6 +37,8 @@ import { NetLoot } from "./NetLoot";
 const REMOTE_REVIVER_ID = 1;
 /** A sent use the server hasn't shown yet keeps the hands for this long (lost or refused: they free up again), ms. */
 export const USE_PENDING_MS = 1000;
+/** A sent throw the server hasn't acknowledged holds the local grenade counts for at most this long, ms. */
+export const THROW_PENDING_MS = 1000;
 /** After a cancel, the server's (older) use state is ignored until it reports idle or this long passed, ms. */
 const CANCEL_HOLD_MS = 1000;
 /** The boost hotkey takes the first carried of these (EquipmentSystem's USE_ACTIONS). */
@@ -57,6 +61,14 @@ const DROP_ARG_MAX = 255;
  */
 export function createNetLocalInventory(): InventoryState {
   return createNetStartingInventory();
+}
+
+/**
+ * The local `EquipmentSystem`'s options in networked play: the starting kit, no local ground loot, and throwables owned
+ * by the server (a release only goes to `onThrowRelease`, which sends it; nothing spawns or detonates locally).
+ */
+export function netEquipmentOptions(onThrowRelease: (release: ThrowRelease) => void): EquipmentOptions {
+  return { loot: [], inventory: createNetLocalInventory(), serverThrowables: true, onThrowRelease };
 }
 
 /** What the loot interaction reads each tick (NetGame: the predicted player). */
@@ -117,6 +129,9 @@ export class NetEquipmentView {
   private action: PlayerAction | null = null;
   /** A throw waiting for the next input tick (protocol v9); it jumps the loot queue. */
   private throwAction: PlayerAction | null = null;
+  /** Input tick and time of the newest sent throw (−1: none). */
+  private throwSentTick = -1;
+  private throwSentAtMs = -Infinity;
   /** Loot actions for the next ticks, one per tick after any use/cancel. */
   private readonly actions: PlayerAction[] = [];
   /** Loot id → when its pickup was sent. */
@@ -364,11 +379,23 @@ export class NetEquipmentView {
     this.throwAction = { type: PlayerActionType.throwItem, arg };
   }
 
-  /** The action for the tick being sent (once): a throw first, then a use or cancel, then queued loot actions. */
-  takeAction(): PlayerAction | null {
+  /**
+   * The server's grenade counts may replace the local ones (NetGame → `EquipmentSystem.setThrowableCounts`): no throw
+   * waits to be sent, and the server has processed the input carrying the newest one (or it was sent long enough ago).
+   * Until then its counts predate the throw and would put the grenade that just left the hand back in the bag.
+   */
+  throwCountsSettled(lastProcessedInputTick: number): boolean {
+    if (this.throwAction !== null) return false;
+    return lastProcessedInputTick >= this.throwSentTick || this.now() - this.throwSentAtMs >= THROW_PENDING_MS;
+  }
+
+  /** The action for input tick `tick` (once): a throw first, then a use or cancel, then queued loot actions. */
+  takeAction(tick = -1): PlayerAction | null {
     const thrown = this.throwAction;
     if (thrown !== null) {
       this.throwAction = null;
+      this.throwSentTick = tick;
+      this.throwSentAtMs = this.now();
       return thrown;
     }
     const action = this.action;

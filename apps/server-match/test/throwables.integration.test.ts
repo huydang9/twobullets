@@ -251,6 +251,26 @@ describe("networked throwables (arena)", () => {
     await h.dispose();
   }, 60_000);
 
+  it("the starting kit's grenades: each throw lowers the owner items counts the client receives, down to none", async () => {
+    const { h, players } = await setup(1);
+    const [a] = players as [Controlled];
+    const frag = THROWABLE_KINDS.indexOf("frag");
+    const smoke = THROWABLE_KINDS.indexOf("smoke");
+    expect(a.items()!.throwables![frag]).toBe(1);
+    expect(a.items()!.throwables![smoke]).toBe(1);
+    dropAt(h, a, "frag", { x: 20, y: 0, z: 20 });
+    expect(a.items()!.throwables![frag]).toBe(0);
+    expect(a.items()!.throwables![smoke]).toBe(1);
+    dropAt(h, a, "smoke", { x: -20, y: 0, z: 20 });
+    expect(a.items()!.throwables![smoke]).toBe(0);
+    expect(countItem(a.player.inventory, "frag") + countItem(a.player.inventory, "smoke")).toBe(0);
+    // Nothing left: refused, and the counts stay at zero.
+    dropAt(h, a, "frag", { x: 20, y: 0, z: -20 });
+    expect(h.match.throwables!.lastReject).toBe("notCarried");
+    expect(a.items()!.throwables).toEqual([0, 0, 0, 0]);
+    await h.dispose();
+  }, 60_000);
+
   it("a throw with nothing in the bag is refused, and so are a knocked thrower and a bogus fuse", async () => {
     const { h, players } = await setup(2, { teamMode: "duo", maxPlayers: 10 });
     const [a] = players as [Controlled, Controlled];
