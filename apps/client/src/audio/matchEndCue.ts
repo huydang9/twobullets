@@ -32,7 +32,7 @@ export class MatchEndCue {
 
   constructor(
     private readonly sink: () => MatchEndMusicSink | null = matchEndMusicSink,
-    private readonly defer: (run: () => void) => void = queueMicrotask,
+    private readonly defer: (run: () => void) => void = (run) => queueMicrotask(run),
   ) {}
 
   get hasPlayed(): boolean {

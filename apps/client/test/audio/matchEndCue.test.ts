@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUDIO_MANIFEST } from "../../src/audio/audioManifest";
 import { MatchEndCue, type MatchEndMusicSink } from "../../src/audio/matchEndCue";
 
@@ -18,6 +18,8 @@ function setup() {
 }
 
 describe("MatchEndCue", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   const death = {};
   const result = {};
 
@@ -62,6 +64,20 @@ describe("MatchEndCue", () => {
     cue.show(result);
     flush();
     expect(calls).toEqual(["play", "stop"]);
+  });
+
+  it("default-constructed cue calls queueMicrotask with a global receiver (browsers throw Illegal invocation)", async () => {
+    const native = globalThis.queueMicrotask;
+    vi.stubGlobal("queueMicrotask", function (this: unknown, run: () => void) {
+      if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
+      native(run);
+    });
+    const cue = new MatchEndCue();
+    expect(() => {
+      cue.show(result);
+      cue.hide(result);
+    }).not.toThrow();
+    await Promise.resolve();
   });
 
   it("a new match silences the previous clip", () => {
