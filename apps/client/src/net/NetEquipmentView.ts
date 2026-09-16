@@ -482,7 +482,7 @@ export class NetEquipmentView {
       helmet: this.armor.helmet,
       vest: this.armor.vest,
       backpack: this.backpack >= 0 ? (this.backpack as InventoryState["backpack"]) : base.backpack,
-      selectedThrowable: null,
+      selectedThrowable: base.selectedThrowable,
     };
     return this.inventory;
   }

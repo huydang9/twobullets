@@ -1,6 +1,6 @@
 import { Observable } from "@babylonjs/core";
 import { consumableCode } from "@twobullets/protocol/codes";
-import { countItem } from "@twobullets/shared/equipment/inventory";
+import { countItem, createInventory, cycleThrowable } from "@twobullets/shared/equipment/inventory";
 import { itemCode } from "@twobullets/shared/equipment/items";
 import { createOfflineInventory } from "@twobullets/shared/equipment/presets";
 import { createVitals } from "@twobullets/shared/equipment/vitals";
@@ -95,5 +95,21 @@ describe("NetEquipmentView consumables", () => {
     items(0, 0);
     net.requestUse("energy_drink");
     expect(net.takeAction()).toEqual({ type: PlayerActionType.use, arg: itemCode("painkiller") });
+  });
+});
+
+describe("NetEquipmentView throwables", () => {
+  it("the selected throwable follows the local equipment's selection (HUD slot 5, inventory chips)", () => {
+    const base = { onUse: new Observable<UseEvent>(), inventory: createInventory({ stacks: [{ itemId: "frag", quantity: 2 }, { itemId: "smoke", quantity: 1 }] }), vitals: createVitals() };
+    const net = new NetEquipmentView(base as unknown as EquipmentView, () => 1000);
+    expect(base.inventory.selectedThrowable).toBe("frag");
+    expect(net.view.inventory.selectedThrowable).toBe("frag");
+    // The server's items group rebuilds the stacks; the selection is kept.
+    net.setItems({ useItem: 0, useTicks: 0, counts: [1, 0, 0, 0, 0] });
+    expect(net.view.inventory.selectedThrowable).toBe("frag");
+    // G on the local equipment.
+    base.inventory = cycleThrowable(base.inventory);
+    expect(net.view.inventory.selectedThrowable).toBe("smoke");
+    expect(countItem(net.view.inventory, "smoke")).toBe(1);
   });
 });
