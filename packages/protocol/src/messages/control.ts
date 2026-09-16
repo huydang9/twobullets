@@ -76,6 +76,36 @@ export interface Disconnect {
   readonly detail: number;
 }
 
+/**
+ * 0x50, C→S (3 B), protocol v8: the player quits the match. `leave` takes this player out alone (the match runs on);
+ * `endForAll` ends the whole match and is accepted only from the match host (the lobby host's account). The server
+ * always answers with a `MatchCommandResult`.
+ */
+export const MatchCommandCode = { leave: 0, endForAll: 1 } as const;
+export type MatchCommandCode = (typeof MatchCommandCode)[keyof typeof MatchCommandCode];
+
+export interface MatchCommand {
+  readonly command: number;
+  /** Reserved for per-command arguments; 0 today. */
+  readonly detail: number;
+}
+
+/**
+ * `ok`: the server acted on it. `denied`: not allowed (a non-host asking to end for all). `unavailable`: the match
+ * can't do it now (already ending, or a sandbox match with no lifecycle). `unknown`: command code this build doesn't
+ * know.
+ */
+export const MatchCommandStatus = { ok: 0, denied: 1, unavailable: 2, unknown: 3 } as const;
+export type MatchCommandStatus = (typeof MatchCommandStatus)[keyof typeof MatchCommandStatus];
+
+/** 0x51, S→C (4 B), one per `MatchCommand`. */
+export interface MatchCommandResult {
+  readonly command: number;
+  readonly status: number;
+  /** Reserved (0). */
+  readonly detail: number;
+}
+
 /** `Resync` scope bits. */
 export const ResyncScope = { state: 1, loot: 2, inventory: 4 } as const;
 
@@ -232,6 +262,36 @@ export function decodeResyncResponse(r: BitReader): ResyncResponse | null {
   const serverTick = r.read(32);
   if (!finished(r) || scope === 0 || scope > 7) return null;
   return { scope, serverTick };
+}
+
+// MatchCommand (3 B): type 8, command 8, detail 8.
+export function encodeMatchCommand(w: BitWriter, m: MatchCommand): void {
+  w.write(MsgId.MatchCommand, 8);
+  w.write(m.command, 8);
+  w.write(m.detail, 8);
+}
+export function decodeMatchCommand(r: BitReader): MatchCommand | null {
+  if (r.read(8) !== MsgId.MatchCommand) return null;
+  const command = r.read(8);
+  const detail = r.read(8);
+  if (!finished(r)) return null;
+  return { command, detail };
+}
+
+// MatchCommandResult (4 B): type 8, command 8, status 8, detail 8.
+export function encodeMatchCommandResult(w: BitWriter, m: MatchCommandResult): void {
+  w.write(MsgId.MatchCommandResult, 8);
+  w.write(m.command, 8);
+  w.write(m.status, 8);
+  w.write(m.detail, 8);
+}
+export function decodeMatchCommandResult(r: BitReader): MatchCommandResult | null {
+  if (r.read(8) !== MsgId.MatchCommandResult) return null;
+  const command = r.read(8);
+  const status = r.read(8);
+  const detail = r.read(8);
+  if (!finished(r) || status > MatchCommandStatus.unknown) return null;
+  return { command, status, detail };
 }
 
 /**

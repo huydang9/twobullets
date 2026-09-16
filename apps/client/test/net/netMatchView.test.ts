@@ -34,11 +34,11 @@ function welcome(overrides: Partial<Welcome> = {}): Welcome {
 
 const roster: Roster = {
   players: [
-    { slot: 0, team: 0, name: "Huy", isBot: false, botIndex: -1, connected: true },
-    { slot: 1, team: 0, name: "", isBot: true, botIndex: 0, connected: true },
-    { slot: 2, team: 1, name: "Lan 99", isBot: false, botIndex: -1, connected: true },
-    { slot: 3, team: 1, name: "", isBot: true, botIndex: 1, connected: true },
-    { slot: 4, team: 2, name: "", isBot: true, botIndex: 2, connected: true },
+    { slot: 0, team: 0, name: "Huy", isBot: false, botIndex: -1, connected: true, host: true },
+    { slot: 1, team: 0, name: "", isBot: true, botIndex: 0, connected: true, host: false },
+    { slot: 2, team: 1, name: "Lan 99", isBot: false, botIndex: -1, connected: true, host: false },
+    { slot: 3, team: 1, name: "", isBot: true, botIndex: 1, connected: true, host: false },
+    { slot: 4, team: 2, name: "", isBot: true, botIndex: 2, connected: true, host: false },
   ],
 };
 
@@ -87,6 +87,8 @@ describe("NetMatchView", () => {
     expect(view.state.teams.map((t) => t.slots)).toEqual([[0, 1], [2, 3], [4]]);
     expect(view.teamOf(3)).toBe(1);
     expect(view.nameOf(5)).toBe("");
+    // v8: the roster says who may end the match for everyone (−1 when nobody can).
+    expect(view.hostSlot).toBe(0);
     // No PhaseChange yet (sandbox flow): no waiting banner, counters from the roster.
     view.update(10, new Poses(), own());
     expect(view.waitingForPlayers).toBe(false);

@@ -9,7 +9,7 @@ import type { LobbySocket } from "../platform/LobbySocket";
 import type { KeyValueStorage } from "../platform/SessionStore";
 import type { NetMatchExit } from "../game/launch";
 import type { MatchLaunch, PracticeSettings } from "./launch";
-import { INITIAL_MENU_STATE, menuReducer, type MainPanel, type MenuEvent, type MenuState, type Screen } from "./menuState";
+import { INITIAL_MENU_STATE, menuReducer, type LastMatch, type MainPanel, type MenuEvent, type MenuState, type Screen } from "./menuState";
 
 // Effects around the pure menu state machine: server-api calls, the push socket (with REST polling while it is down),
 // fetching the join token and handing over to the game, and loading results.
@@ -33,6 +33,8 @@ export interface MenuControllerDeps {
 }
 
 export const LAST_MATCH_KEY = "tb.menu.lastMatch";
+/** A match the player quit from the pause menu; it survives the reload so the menu doesn't offer it back. */
+export const LEFT_MATCH_KEY = "tb.menu.leftMatch";
 /** How long the connecting screen retries `POST /matches/{id}/join` while the match is still starting. */
 export const JOIN_RETRY_MS = 30_000;
 const RESULT_ATTEMPTS = 15;
@@ -208,6 +210,10 @@ export class MenuController {
    */
   gameExited(exit: NetMatchExit): void {
     if (exit.reason === "left") {
+      // The server took them out of the match; the menu must not offer it back after the reload.
+      removeItem(this.deps.session, LAST_MATCH_KEY);
+      setItem(this.deps.session, LEFT_MATCH_KEY, exit.matchId);
+      this.dispatch({ type: "matchLeft", matchId: exit.matchId });
       this.deps.reloadToMenu();
       return;
     }
@@ -226,6 +232,46 @@ export class MenuController {
     void this.resync(false);
   }
 
+  /**
+   * "Play again" from the results screen: the same mode, size, map and bots. A lobby match goes back to its lobby (it
+   * reopens when the match ends, so the party stays together); if that lobby is gone a new one is created with the same
+   * settings, and a quick-play match queues again. Shown over the game (`fromGame`), the page reloads into the menu
+   * afterwards — the game can't be torn down in place — and the resync lands on the lobby or the queue.
+   */
+  async playAgain(): Promise<void> {
+    const state = this.stateValue;
+    const screen = state.screen;
+    const last = state.lastMatch;
+    if (screen.kind !== "results" || last === null) return;
+    const fromGame = screen.fromGame;
+    removeItem(this.deps.session, LAST_MATCH_KEY);
+    this.dispatch({ type: "busy" });
+    try {
+      const next = await this.restart(last);
+      if (fromGame) {
+        this.deps.reloadToMenu();
+        return;
+      }
+      this.dispatch(next);
+    } catch (error) {
+      this.dispatch({ type: "failed", code: errorCodeOf(error) });
+    }
+  }
+
+  private async restart(last: LastMatch): Promise<MenuEvent> {
+    const api = this.deps.api;
+    const { settings } = last;
+    if (last.source === "queue") {
+      return { type: "queued", ticket: await api.createTicket({ mode: settings.mode, maxPlayers: settings.maxPlayers, mapId: settings.mapId }) };
+    }
+    if (last.lobbyCode !== null) {
+      // Still open (the lobby reopens when its match finishes): rejoin it and keep the party.
+      const lobby = await api.joinLobby(last.lobbyCode).catch(() => null);
+      if (lobby !== null && lobby.status !== "closed") return { type: "lobbyEntered", lobby };
+    }
+    return { type: "lobbyEntered", lobby: await api.createLobby({ ...settings, visibility: "private" }) };
+  }
+
   // ─── internals ────────────────────────────────────────────────────────────────────────────────────────────────────
 
   private afterTransition(previous: Screen, next: Screen): void {
@@ -240,6 +286,8 @@ export class MenuController {
   private async resync(initial: boolean): Promise<void> {
     const { api, socket } = this.deps;
     try {
+      const left = getItem(this.deps.session, LEFT_MATCH_KEY);
+      if (initial && left) this.dispatch({ type: "matchLeft", matchId: left });
       const account: AccountView = api.account ?? (await api.me());
       const active = await api.activeMatch();
       const lobby = active.lobbyCode ? await api.getLobby(active.lobbyCode).catch(() => null) : null;
@@ -318,6 +366,7 @@ export class MenuController {
     const account = this.stateValue.account;
     if (!this.stillConnecting(matchId) || !account) return;
     setItem(this.deps.session, LAST_MATCH_KEY, matchId);
+    removeItem(this.deps.session, LEFT_MATCH_KEY);
     this.dispatch({ type: "gameLaunched", matchId });
     try {
       await this.deps.launchMatch({ join, mapId, account, tokens: createApiJoinTokenProvider(api, join, this.now), onExit: (exit) => this.gameExited(exit) });

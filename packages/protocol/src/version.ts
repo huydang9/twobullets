@@ -16,8 +16,11 @@
  * v7: networked ground loot (plan.md B5): `LootUpdate` (0x4E) on the control stream streams the items in the client's
  * area of interest; the owner items group gains a gear part (backpack level, ammo counts); `pickup` (loot id + weapon
  * slot), `drop` (shared `encodeDropArg`) and `equipAttach` (inventory ops: swap primaries) input actions are honoured.
+ * v8: quitting a match: `MatchCommand` (0x50, C→S `leave` / `endForAll`) and `MatchCommandResult` (0x51, S→C
+ * ok/denied/unavailable/unknown); `Roster` players carry a `host` bit (who may end the match for everyone); `MatchEnd`
+ * gains reason `hostEnded` (5).
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export const CONTENT_HASH = 0x4bc5f495;
 
 export interface CompatKey {

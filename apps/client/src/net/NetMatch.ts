@@ -1,13 +1,17 @@
 import type { Scene } from "@babylonjs/core";
+import type { MatchCommandResult } from "@twobullets/protocol/messages/control";
 import { MatchEndReason } from "@twobullets/protocol/messages/match";
 import { SIMULATION } from "@twobullets/shared/constants";
 import type { WeaponPresentation } from "../fx/WeaponPresentation";
 import type { NetGameConfig, NetMatchExit } from "../game/launch";
 import { onLanguageChange, t } from "../i18n";
+import type { InputManager } from "../input/InputManager";
 import type { PlayerController } from "../player/PlayerController";
 import type { Hud } from "../ui/Hud";
 import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
+import { PauseMenu, toPauseAction, type PauseMenuAction } from "../ui/match/PauseMenu";
+import { commandRefusalKey, pauseOptions } from "../ui/match/pauseOptions";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
 import { deathCauseText, MATCH_STRINGS } from "../ui/match/strings";
 import type { MapRuntime } from "../world/mapRuntime";
@@ -37,6 +41,14 @@ export interface NetMatchDeps {
   readonly presenter: NetCombatPresenter;
   readonly config: NetGameConfig;
   readonly mapId: string;
+  readonly input: InputManager;
+  /** Quit actions on the wire (protocol v8); NetGame owns the connection. */
+  readonly quit: {
+    /** `MatchCommand{leave}`: take this player out, the match runs on. */
+    leaveAlone(): void;
+    /** `MatchCommand{endForAll}`: host only; the server answers and ends the match for everyone. */
+    endForAll(): void;
+  };
   /** The player left for the front door: NetGame disconnects, then calls `config.onExit`. */
   readonly exit: (exit: NetMatchExit) => void;
 }
@@ -57,12 +69,16 @@ export class NetMatch {
   private readonly labels: TeammateLabels;
   private readonly deathScreen: DeathScreen;
   private readonly resultScreen: ResultScreen;
+  private readonly pauseMenu: PauseMenu;
   private readonly own: MutableOwn = { x: 0, y: 0, z: 0, yaw: 0, life: "alive", health: 100, downedHealth: 0, reviveSeconds: 0 };
   private readonly unsubscribeLanguage: () => void;
   private deathAt = -1;
   private dead = false;
   private resultAt = -1;
   private exited = false;
+  /** Why the server refused the last quit command (shown once on the pause menu). */
+  private commandNotice = "";
+  private hostSlotShown = -2;
 
   constructor(deps: NetMatchDeps) {
     this.deps = deps;
@@ -73,6 +89,21 @@ export class NetMatch {
     this.zoneWall = new ZoneWall(deps.scene);
     this.deathScreen = new DeathScreen(deps.layer);
     this.resultScreen = new ResultScreen(deps.layer);
+    this.pauseMenu = new PauseMenu(deps.layer, {
+      // The menu closes when the lock actually arrives (`onLockChange`), not here.
+      onResume: () => {
+        this.commandNotice = "";
+        this.deps.input.requestLock();
+      },
+      subtitle: () => this.pauseSubtitle(),
+      actions: () => this.pauseActions(),
+    });
+    // Esc is the browser's key for leaving pointer lock and never reaches the page, so the pause menu opens on the
+    // unlock itself — unless the bag, the map or a death/result screen took the mouse.
+    deps.input.onLockChange((locked) => {
+      if (locked) this.closePause();
+      else this.openPause();
+    });
     if (deps.world) deps.hud.setMapSource(matchMapSource(view, this.frame));
     deps.presenter.setMatchHooks({
       nameOf: (slot) => view.nameOf(slot),
@@ -118,6 +149,11 @@ export class NetMatch {
       this.deathAt = -1;
       if (this.deathScreen.visible) this.closeScreens();
     }
+    // The host bit can change mid-match (the host left), so the open menu follows it.
+    if (this.pauseMenu.visible && this.view.hostSlot !== this.hostSlotShown) {
+      this.hostSlotShown = this.view.hostSlot;
+      this.pauseMenu.refresh();
+    }
     if (view.ended && this.resultAt < 0) this.showResult(now);
     else if (this.deathAt >= 0 && now >= this.deathAt) {
       this.deathAt = -1;
@@ -148,6 +184,57 @@ export class NetMatch {
     this.hudView.dispose();
     this.labels.dispose();
     this.zoneWall.dispose();
+    this.pauseMenu.dispose();
+  }
+
+  // ---- Pause menu -----------------------------------------------------------------------------------------------------
+
+  /** True while this player may end the match for everyone (the roster's host bit, protocol v8). */
+  get isHost(): boolean {
+    return this.view.hostSlot >= 0 && this.view.hostSlot === this.view.ownSlot;
+  }
+
+  private openPause(): void {
+    if (this.exited || this.view.ended || this.deathScreen.visible || this.resultScreen.visible) return;
+    if (this.deps.hud.overlayOpen || this.pauseMenu.visible) return;
+    this.deps.hud.setModal(true);
+    this.pauseMenu.open();
+  }
+
+  private closePause(): void {
+    if (!this.pauseMenu.visible) return;
+    this.pauseMenu.close();
+    this.commandNotice = "";
+    this.deps.hud.setModal(this.dead || this.view.ended);
+  }
+
+  private pauseSubtitle(): string {
+    if (this.commandNotice) return this.commandNotice;
+    return this.isHost ? t("pause.hostBadge") : "";
+  }
+
+  private pauseActions(): PauseMenuAction[] {
+    const options = pauseOptions({ kind: "net", isHost: this.isHost, warmup: this.view.state.phase === "warmup" });
+    return options.map((option) =>
+      toPauseAction(option, () => {
+        if (option.id === "leaveAlone") this.leaveAlone();
+        else if (option.id === "endForAll") this.deps.quit.endForAll();
+      }),
+    );
+  }
+
+  private leaveAlone(): void {
+    this.deps.quit.leaveAlone();
+    this.exit("left");
+  }
+
+  /** The server answered a quit command (protocol v8): a refusal reopens the pause menu with the reason. */
+  onCommandResult(result: MatchCommandResult): void {
+    const key = commandRefusalKey(result);
+    if (key === null) return;
+    this.commandNotice = t(key);
+    this.deps.hud.setModal(true);
+    this.pauseMenu.open();
   }
 
   private readonly isTeammate = (slot: number): boolean => this.view.teamOf(slot) === this.view.ownTeam;
@@ -167,6 +254,7 @@ export class NetMatch {
     const view = this.view;
     const { presenter } = this.deps;
     const state = view.state;
+    this.pauseMenu.close();
     const me = state.actors[view.ownSlot];
     const team = state.teams[view.ownTeam];
     const kill = view.lastOwnKill;
@@ -183,7 +271,8 @@ export class NetMatch {
         },
       },
     ];
-    if (this.deps.config.onExit) actions.push({ label: t("screens.leaveMatch"), run: () => this.exit("left") });
+    // Already eliminated, but the server still frees the slot and tells the others (roster, team counts).
+    if (this.deps.config.onExit) actions.push({ label: t("screens.leaveMatch"), run: () => this.leaveAlone() });
     this.deathScreen.show(
       {
         cause: kill ? deathCauseText(kill, (slot) => (slot === view.ownSlot ? t("common.you") : this.nameOf(slot))) : MATCH_STRINGS.screens.died,
@@ -202,6 +291,7 @@ export class NetMatch {
     const end = view.matchEnd!;
     this.resultAt = now;
     this.deathAt = -1;
+    this.pauseMenu.close();
     this.deathScreen.hide();
     this.releasePointer();
     this.deps.hud.setModal(true);
@@ -249,6 +339,11 @@ export class NetMatch {
 
   private readonly handleKey = (event: KeyboardEvent): void => {
     const presenter = this.deps.presenter;
+    // Esc closes the pause menu and puts the mouse back in the game (the browser ate the Esc that opened it).
+    if (event.code === "Escape" && this.pauseMenu.visible) {
+      event.preventDefault();
+      if (this.pauseMenu.handleEscape()) return;
+    }
     if (!this.dead && !this.view.ended) return;
     if (event.code === "BracketLeft") presenter.cycleSpectate(-1);
     else if (event.code === "BracketRight") presenter.cycleSpectate(1);
@@ -265,6 +360,7 @@ const END_REASON_KEY = {
   [MatchEndReason.timeCap]: "result.reason.timeCap",
   [MatchEndReason.cancelled]: "result.reason.cancelled",
   [MatchEndReason.aborted]: "result.reason.aborted",
+  [MatchEndReason.hostEnded]: "result.reason.hostEnded",
 } as const satisfies Record<number, Parameters<typeof t>[0]>;
 
 function survivedSeconds(combatStartTick: number, endTick: number): number {

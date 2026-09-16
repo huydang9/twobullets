@@ -10,13 +10,17 @@ import {
   createMutablePlayerInput,
   decodeDisconnect,
   decodeKillFeed,
+  decodeMatchCommandResult,
   decodeMatchEnd,
   decodePhaseChange,
+  decodeRoster,
   decodeZonePhase,
   LifeCode,
   decodeWelcome,
   encodeHello,
   encodeInputPacket,
+  encodeMatchCommand,
+  MatchCommandCode,
   MAX_INPUTS_PER_PACKET,
   MAX_JOIN_TOKEN_BYTES,
   MsgId,
@@ -24,8 +28,10 @@ import {
   type Disconnect,
   type KillFeed,
   type LootOp,
+  type MatchCommandResult,
   type MatchEnd,
   type PhaseChange,
+  type Roster,
   type ZonePhaseMessage,
   type ReliableEvent,
   type MutablePlayerInput,
@@ -87,6 +93,10 @@ export class HeadlessClient {
   readonly phases: PhaseChange[] = [];
   readonly zonePhases: ZonePhaseMessage[] = [];
   matchEnd: MatchEnd | null = null;
+  /** Newest Roster (protocol v5, `host` bit v8). */
+  roster: Roster | null = null;
+  /** Answers to `MatchCommand`s this client sent (protocol v8), oldest first. */
+  readonly commandResults: MatchCommandResult[] = [];
   reliableDelivered = 0;
   killFeeds = 0;
   shotsSeen = 0;
@@ -306,7 +316,38 @@ export class HeadlessClient {
       this.closedByServer = true;
     } else if (bytes[0] === MsgId.LootUpdate) {
       this.applyLoot(bytes);
+    } else if (bytes[0] === MsgId.Roster) {
+      const roster = decodeRoster(r);
+      if (roster !== null) this.roster = roster;
+    } else if (bytes[0] === MsgId.MatchCommandResult) {
+      const result = decodeMatchCommandResult(r);
+      if (result !== null) this.commandResults.push(result);
     }
+  }
+
+  /** Quits the match alone (protocol v8): the server forfeits this player after warmup and closes the session. */
+  leaveMatch(): void {
+    this.sendMatchCommand(MatchCommandCode.leave);
+  }
+
+  /** Asks the server to end the match for everyone; only the match host is obeyed. */
+  endMatchForAll(): void {
+    this.sendMatchCommand(MatchCommandCode.endForAll);
+  }
+
+  /** Any command code (tests: unknown codes get `MatchCommandStatus.unknown` back). */
+  sendMatchCommand(command: number): void {
+    const w = this.writer;
+    w.reset();
+    encodeMatchCommand(w, { command, detail: 0 });
+    this.session.sendStream(w.bytes());
+    this.bytesOut += w.byteLength;
+  }
+
+  /** The roster's host bit for this client's own slot. */
+  get isHost(): boolean {
+    const slot = this.playerSlot;
+    return this.roster?.players.some((p) => p.slot === slot && p.host) ?? false;
   }
 
   private applyLoot(bytes: Uint8Array): void {

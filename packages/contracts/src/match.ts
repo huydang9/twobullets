@@ -102,6 +102,12 @@ export interface MatchConfig {
   readonly rules: MatchRules;
   /** Server bots (`bot:<n>` seats and `rules.fillWithBots` fills). Absent = DEFAULT_BOT_DIFFICULTY. */
   readonly botDifficulty?: BotDifficulty;
+  /**
+   * The account that may end the match for everyone (the lobby host). Absent — quick-queue matches, dev matches — means
+   * nobody can: the match ends on its own rules. If this account leaves the match, the match server passes the right to
+   * the connected human in the lowest slot (announced in the `Roster`'s `host` bit).
+   */
+  readonly hostAccountId?: string;
 }
 
 /** Join JWT claims (ADR 0106, D17). Verified offline against cached JWKS; the header carries `kid`. */

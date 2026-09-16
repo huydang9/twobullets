@@ -1,5 +1,5 @@
 import { createBitReader } from "../bits";
-import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../messages/control";
+import { decodeDisconnect, decodeHello, decodeKillFeed, decodeMatchCommand, decodeMatchCommandResult, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../messages/control";
 import { MsgId, peekMsgId } from "../messages/ids";
 import { decodeMatchEnd, decodePhaseChange, decodeZonePhase } from "../messages/match";
 import { decodeInputPacket } from "../messages/input";
@@ -97,6 +97,12 @@ export function describeMessage(bytes: Uint8Array, options: DescribeOptions = {}
     }
     case MsgId.Resync:
       message = bytes.length === 2 ? decodeResyncRequest(r) : decodeResyncResponse(r);
+      break;
+    case MsgId.MatchCommand:
+      message = decodeMatchCommand(r);
+      break;
+    case MsgId.MatchCommandResult:
+      message = decodeMatchCommandResult(r);
       break;
     default:
       error = "no decoder for this id";

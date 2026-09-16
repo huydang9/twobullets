@@ -192,6 +192,11 @@ export class NetGame {
       presenter,
       config: this.config,
       mapId: deps.mapId,
+      input,
+      quit: {
+        leaveAlone: () => this.clientValue?.requestLeaveMatch(),
+        endForAll: () => this.clientValue?.requestEndForAll(),
+      },
       exit: (exit) => this.exitMatch(exit),
     });
     this.predictor = new CosmeticHitPredictor(this.hitboxes, presenter);
@@ -265,6 +270,7 @@ export class NetGame {
         events: this.combatEvents,
         movement: this.movement,
         loot: this.presenter?.equipmentView.loot ?? null,
+        onCommandResult: (result) => this.matchValue?.onCommandResult(result),
         onStateChange: (state, c) => console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}` : ""}`),
       });
       transport.onClose((code) => client.handleTransportClosed(code));

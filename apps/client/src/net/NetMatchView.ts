@@ -163,6 +163,8 @@ export class NetMatchView implements MatchView {
   lastOwnKill: Extract<MatchEvent, { type: "kill" }> | null = null;
   /** Roster seen at least once. */
   hasRoster = false;
+  /** Slot of the player who may end the match for everyone (protocol v8 roster host bit), or −1 when nobody can. */
+  hostSlot = -1;
   /** A PhaseChange seen at least once (the M4 sandbox flow never sends one). */
   hasPhase = false;
   /** Teammate the local player is reviving by the server's progress, or −1. */
@@ -392,9 +394,11 @@ export class NetMatchView implements MatchView {
     this.lastRoster = roster;
     this.hasRoster = true;
     const present = new Uint8Array(MAX_PLAYER_SLOTS);
+    this.hostSlot = -1;
     for (const player of roster.players) {
       if (player.slot < 0 || player.slot >= MAX_PLAYER_SLOTS) continue;
       present[player.slot] = 1;
+      if (player.host) this.hostSlot = player.slot;
       const actor = this.pooled(player.slot);
       actor.team = player.team;
       actor.kind = player.isBot ? "bot" : "human";

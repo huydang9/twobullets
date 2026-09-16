@@ -44,8 +44,8 @@ export interface ZonePhaseMessage {
   readonly dps: number;
 }
 
-/** MatchEnd reason codes (u8). */
-export const MatchEndReason = { lastTeam: 0, allDead: 1, timeCap: 2, cancelled: 3, aborted: 4 } as const;
+/** MatchEnd reason codes (u8). `hostEnded` (v8): the match host ended it for everyone. */
+export const MatchEndReason = { lastTeam: 0, allDead: 1, timeCap: 2, cancelled: 3, aborted: 4, hostEnded: 5 } as const;
 export type MatchEndReason = (typeof MatchEndReason)[keyof typeof MatchEndReason];
 
 export interface MatchEndPlayer {
@@ -195,7 +195,7 @@ export function decodeMatchEnd(r: BitReader): MatchEnd | null {
   const winning = r.read(TEAM_BITS);
   const count = r.read(5);
   r.read(6);
-  if (r.overflowed || reason > MatchEndReason.aborted || count > MAX_PLAYER_SLOTS) return null;
+  if (r.overflowed || reason > MatchEndReason.hostEnded || count > MAX_PLAYER_SLOTS) return null;
   const players: MatchEndPlayer[] = [];
   for (let i = 0; i < count; i++) {
     const slot = r.read(SLOT_BITS);

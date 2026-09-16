@@ -10,13 +10,17 @@ import {
   createInputPacketBuffer,
   createMutablePlayerInput,
   decodeInputPacketInto,
+  decodeMatchCommand,
   decodePing,
   decodeResyncRequest,
   DisconnectReason,
+  encodeMatchCommandResult,
   encodePing,
   encodeResyncResponse,
   encodeRoster,
   encodeWelcome,
+  MatchCommandCode,
+  MatchCommandStatus,
   MsgId,
   PhaseCode,
   RESUME_TOKEN_BYTES,
@@ -60,8 +64,12 @@ import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slo
 // Loot and inventory (B5, ServerLoot): the level's generated loot minus throwables, replicated per client by area of
 // interest; everyone (bots too) spawns with the networked starting kit, and weapon slots, magazines and reserves follow
 // the inventory every tick. A death drops the inventory as a pile; BR glide start restores the generated loot.
-// Roster: a joining session gets it right after Welcome; any other change (join, leave, bot fill, grace expiry) bumps a
-// revision that is sent once at the end of the tick to every session behind it.
+// Roster: a joining session gets it right after Welcome; any other change (join, leave, bot fill, grace expiry, a host
+// hand-over) bumps a revision that is sent once at the end of the tick to every session behind it.
+// Quitting (protocol v8, `MatchCommand` on the control stream): `leave` takes one player out — after warmup that is a
+// forfeit (eliminated, inventory dropped, placement kept), in warmup the slot is freed; `endForAll` ends the match for
+// everyone and is accepted only from `config.hostAccountId` (which moves to the lowest connected human when the host
+// leaves). Every command is answered with a `MatchCommandResult`.
 
 export interface ServerMatchOptions {
   readonly config: MatchConfig;
@@ -140,6 +148,11 @@ export class ServerMatch implements Match, CombatHost {
   /** Bot nav built for this match (grid build ms, or a cached/fake nav); null without bots. */
   navInfo: Omit<MatchNav, "nav"> | null = null;
   readonly level: MatchLevel;
+  /**
+   * The account allowed to end the match for everyone (`config.hostAccountId`, the lobby host). Null = nobody can
+   * (quick queue, dev matches). Moves to the connected human in the lowest slot when the host leaves for good.
+   */
+  private hostAccount: string | null;
   private phaseValue: MatchPhase = "Booting";
   private closed = false;
   private world: SimWorld | null = null;
@@ -173,6 +186,7 @@ export class ServerMatch implements Match, CombatHost {
     this.options = options;
     this.config = options.config;
     this.id = options.config.matchId;
+    this.hostAccount = options.config.hostAccountId ?? null;
     this.clock = options.clock;
     this.next = options.startTick;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 10_000;
@@ -270,6 +284,77 @@ export class ServerMatch implements Match, CombatHost {
   detach(session: Session): void {
     const player = this.bySession.get(session);
     if (player !== undefined) this.unbind(player);
+  }
+
+  /** The account that may end the match for everyone, or null when nobody can. */
+  get hostAccountId(): string | null {
+    return this.hostAccount;
+  }
+
+  /**
+   * The player quit on purpose (protocol v8 `MatchCommand{leave}`), so there is nothing to reconnect to:
+   * - after warmup, they are eliminated exactly like a grace-expired disconnect (`forfeit`), which drops their
+   *   inventory as a death pile, records their placement and can wipe their team;
+   * - in warmup (and the M4 sandbox) the slot is freed at once so somebody else can take it.
+   * Either way the session is closed with `clientLeave`, and a leaving host passes the right to end the match on.
+   */
+  leaveMatch(player: Player): void {
+    if (this.closed || this.slots[player.slot] !== player) return;
+    const keep = this.lifecycle !== null && this.lifecycle.keepsDisconnected;
+    if (keep) this.combat?.forfeit(player);
+    const session = player.session;
+    if (session !== null) {
+      this.unbind(player);
+      disconnectSession(session, DisconnectReason.clientLeave);
+    }
+    if (!keep) this.removePlayer(player);
+    this.passHost(player.accountId);
+  }
+
+  /** Whether `MatchCommand{endForAll}` from this player would be honoured (`MatchCommandStatus`). */
+  endForAllStatus(player: Player): number {
+    if (this.hostAccount === null || player.accountId !== this.hostAccount) return MatchCommandStatus.denied;
+    if (this.closed || this.lifecycle?.ended === true) return MatchCommandStatus.unavailable;
+    return MatchCommandStatus.ok;
+  }
+
+  /**
+   * The host ends the match for everyone. BR matches go through the lifecycle (MatchEnd with reason `hostEnded`,
+   * placements, a result for the host agent, the end linger, then close); a sandbox match just closes. Returns the
+   * `MatchCommandStatus` that was (or would have been) sent back.
+   */
+  endForAll(player: Player): number {
+    const status = this.endForAllStatus(player);
+    if (status !== MatchCommandStatus.ok) return status;
+    const lifecycle = this.lifecycle;
+    if (lifecycle === null) {
+      this.end(DisconnectReason.matchEnded);
+      return MatchCommandStatus.ok;
+    }
+    return lifecycle.endByHost() ? MatchCommandStatus.ok : MatchCommandStatus.unavailable;
+  }
+
+  /** Frees a slot: body gone, combat state cleared, roster bumped. */
+  private removePlayer(player: Player): void {
+    if (this.slots[player.slot] !== player) return;
+    this.slots[player.slot] = null;
+    this.byAccount.delete(player.accountId);
+    this.combat?.removed(player.slot);
+    player.body.dispose();
+    this.rebuildActive();
+    this.rosterRevision++;
+  }
+
+  /** `accountId` is out for good: if they were the host, the connected human in the lowest slot inherits the right. */
+  private passHost(accountId: string): void {
+    if (this.hostAccount === null || this.hostAccount !== accountId) return;
+    let next: Player | null = null;
+    for (const p of this.active) {
+      if (p.accountId === accountId || p.session === null || isBotAccountId(p.accountId)) continue;
+      if (next === null || p.slot < next.slot) next = p;
+    }
+    this.hostAccount = next?.accountId ?? null;
+    this.rosterRevision++;
   }
 
   tick(tick: number): void {
@@ -642,6 +727,7 @@ export class ServerMatch implements Match, CombatHost {
         isBot,
         botIndex: isBot ? botIndexOf(p.accountId) : -1,
         connected: isBot || p.session !== null,
+        host: !isBot && p.accountId === this.hostAccount,
       });
     }
     const w = this.rosterWriter;
@@ -717,11 +803,34 @@ export class ServerMatch implements Match, CombatHost {
       w.reset();
       encodeResyncResponse(w, { scope: request.scope, serverTick: this.next });
       session.sendStream(w.bytes());
+    } else if (id === MsgId.MatchCommand) {
+      const r = this.reader;
+      r.reset(bytes);
+      const command = decodeMatchCommand(r);
+      if (command === null) return;
+      // The answer goes out before the command is carried out: leaving and ending both close this session.
+      if (command.command === MatchCommandCode.leave) {
+        this.replyCommand(session, command.command, MatchCommandStatus.ok);
+        this.leaveMatch(player);
+      } else if (command.command === MatchCommandCode.endForAll) {
+        const status = this.endForAllStatus(player);
+        this.replyCommand(session, command.command, status);
+        if (status === MatchCommandStatus.ok) this.endForAll(player);
+      } else {
+        this.replyCommand(session, command.command, MatchCommandStatus.unknown);
+      }
     } else if (id === MsgId.Disconnect) {
       this.unbind(player);
       session.close(DisconnectReason.clientLeave);
     }
     // Hello is handled by the SessionManager before attach; other control messages arrive in later milestones.
+  }
+
+  private replyCommand(session: Session, command: number, status: number): void {
+    const w = this.controlWriter;
+    w.reset();
+    encodeMatchCommandResult(w, { command, status, detail: 0 });
+    session.sendStream(w.bytes());
   }
 
   private kick(player: Player, reason: DisconnectReason): void {
@@ -734,6 +843,7 @@ export class ServerMatch implements Match, CombatHost {
 
   private sweep(now: number): void {
     let removed = false;
+    const gone: string[] = [];
     const keep = this.lifecycle !== null && this.lifecycle.keepsDisconnected;
     for (const p of this.active) {
       if (p.session !== null) {
@@ -746,12 +856,14 @@ export class ServerMatch implements Match, CombatHost {
         this.byAccount.delete(p.accountId);
         this.combat?.removed(p.slot);
         p.body.dispose();
+        gone.push(p.accountId);
         removed = true;
       }
     }
     if (removed) {
       this.rebuildActive();
       this.rosterRevision++;
+      for (const accountId of gone) this.passHost(accountId);
     }
     this.lifecycle?.sweep(now);
   }

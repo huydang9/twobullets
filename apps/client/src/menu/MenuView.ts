@@ -499,7 +499,15 @@ export class MenuView {
       }
     }
     const actions = el("div", "tb-menu__actions", undefined, panel);
-    this.button(actions, "results.back", "tb-menu__primary", () => this.controller.closeResults());
+    const last = state.lastMatch;
+    if (last) {
+      const again = last.source === "lobby" && last.lobbyCode !== null ? "results.playAgainLobby" : "results.playAgain";
+      this.button(actions, again, "tb-menu__primary", () => void this.controller.playAgain(), state.busy);
+      this.button(actions, "results.back", "tb-menu__secondary", () => this.controller.closeResults(), state.busy);
+      el("div", "tb-menu__hint", t("results.playAgainHint"), panel);
+    } else {
+      this.button(actions, "results.back", "tb-menu__primary", () => this.controller.closeResults(), state.busy);
+    }
   }
 
   // ─── widgets ──────────────────────────────────────────────────────────────────────────────────────────────────────

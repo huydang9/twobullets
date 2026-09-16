@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBitReader, createBitWriter } from "../src/bits";
-import { decodeDisconnect, decodeHello, decodeKillFeed, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../src/messages/control";
+import { decodeDisconnect, decodeHello, decodeKillFeed, decodeMatchCommand, decodeMatchCommandResult, decodeResyncRequest, decodeResyncResponse, decodeWelcome } from "../src/messages/control";
 import { MsgId } from "../src/messages/ids";
 import { createInputPacketBuffer, decodeInputPacketInto, encodeInputPacket } from "../src/messages/input";
 import { decodePing } from "../src/messages/ping";
@@ -15,7 +15,20 @@ import { createTestRng, randInt } from "./rng";
 // netcode.md §11.4 gate: random bytes never throw uncaught. The BitReader bounds every read, so decoders see zeros
 // past the end and report `overflowed` instead of indexing out of range.
 
-const IDS = [MsgId.Input, MsgId.Ping, MsgId.Snapshot, MsgId.Hello, MsgId.Welcome, MsgId.Resync, MsgId.Disconnect, MsgId.KillFeed, MsgId.Roster, MsgId.LootUpdate];
+const IDS = [
+  MsgId.Input,
+  MsgId.Ping,
+  MsgId.Snapshot,
+  MsgId.Hello,
+  MsgId.Welcome,
+  MsgId.Resync,
+  MsgId.Disconnect,
+  MsgId.KillFeed,
+  MsgId.Roster,
+  MsgId.LootUpdate,
+  MsgId.MatchCommand,
+  MsgId.MatchCommandResult,
+];
 
 function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   const r = createBitReader(bytes);
@@ -30,7 +43,7 @@ function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
     expect(snap.entities.length).toBeLessThanOrEqual(MAX_ENTITY_SLOTS);
     expect(snap.teammates.length).toBeLessThanOrEqual(MAX_TEAMMATES);
   }
-  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed, decodeRoster]) {
+  for (const decode of [decodeHello, decodeWelcome, decodeDisconnect, decodeResyncRequest, decodeResyncResponse, decodePing, decodeKillFeed, decodeRoster, decodeMatchCommand, decodeMatchCommandResult]) {
     r.reset(bytes);
     decode(r);
   }

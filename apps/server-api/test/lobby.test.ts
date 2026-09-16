@@ -90,6 +90,63 @@ describe("custom lobbies", () => {
     expect((await api.call("POST", `/v1/matches/${matchId}/join`, { token: host.accessToken })).status).toBe(409);
   });
 
+  it("the lobby host is the match host, and an ended match frees the allocation so the same lobby starts another one", async () => {
+    api = await startTestApi();
+    const settings = { mode: "duo", maxPlayers: 4, mapId: "v1", fillWithBots: true };
+    const { auth: host, code } = await lobbyWith("Host", settings);
+    const friend = await api.guest("Friend");
+    await api.call("POST", `/v1/lobbies/${code}/join`, { token: friend.accessToken, body: { teamId: 1 } });
+    await api.call("POST", `/v1/lobbies/${code}/start`, { token: host.accessToken });
+    const first = api.allocator.allocated[0]!;
+
+    // Only the lobby host may end the match for everyone: the match process checks `hostAccountId`.
+    expect(first.hostAccountId).toBe(host.account.id);
+    expect(api.allocator.capacity().used).toBe(1);
+
+    // The host ended it: the process reports a result and exits, which frees the slot and reopens the lobby.
+    const matchId = first.matchId;
+    api.allocator.phase(matchId, "Combat");
+    api.allocator.result({
+      matchId,
+      protocolVersion: PROTOCOL_VERSION,
+      contentHash: CONTENT_HASH,
+      outcome: "completed",
+      startedAt: api.clock.now,
+      endedAt: api.clock.now + 60_000,
+      winningTeamId: 0,
+      players: [
+        { accountId: host.account.id, teamId: 0, bot: false, placement: 1, kills: 1, knocks: 0, revives: 0, damageDealt: 100, survivedMs: 60_000 },
+        { accountId: friend.account.id, teamId: 1, bot: false, placement: 2, kills: 0, knocks: 0, revives: 0, damageDealt: 20, survivedMs: 60_000 },
+      ],
+    } satisfies MatchResult);
+    api.allocator.exit(matchId, 0);
+    expect(api.allocator.capacity().used).toBe(0);
+    expect((await api.call("GET", "/v1/me/active-match", { token: friend.accessToken })).body).toMatchObject({ match: null, lobbyCode: code });
+    expect((await api.call("GET", `/v1/lobbies/${code}`, { token: host.accessToken })).body.lobby).toMatchObject({ status: "open", matchId: null, members: expect.any(Array) });
+
+    // "Play again": the same lobby, same party, a new match.
+    const again = await api.call("POST", `/v1/lobbies/${code}/start`, { token: host.accessToken });
+    expect(again.status).toBe(200);
+    expect(again.body.lobby.matchId).not.toBe(matchId);
+    const second = api.allocator.allocated[1]!;
+    expect(second.hostAccountId).toBe(host.account.id);
+    expect({ ...second.rules }).toEqual({ ...first.rules });
+    expect(second.teams.flatMap((t) => t.accountIds).filter((id) => !id.startsWith("bot:")).sort()).toEqual([host.account.id, friend.account.id].sort());
+
+    // While that second match runs, nobody can start a third one from the same lobby.
+    expect((await api.call("POST", `/v1/lobbies/${code}/start`, { token: host.accessToken })).status).toBe(409);
+  });
+
+  it("a quick-queue match has no host, so nobody can end it for everyone", async () => {
+    api = await startTestApi({ queue: { startAfterSec: 0, minHumans: 1, tickMs: 1000 } });
+    const player = await api.guest("Solo");
+    const ticket = await api.call("POST", "/v1/queue/tickets", { token: player.accessToken, body: { mode: "solo", maxPlayers: 4 } });
+    expect(ticket.status).toBe(201);
+    api.clock.now += 1000;
+    expect(await api.app.queue.tick()).toBe(1);
+    expect(api.allocator.allocated[0]!.hostAccountId).toBeUndefined();
+  });
+
   it("rejects bad settings, unavailable maps, full teams and a full lobby", async () => {
     api = await startTestApi();
     const host = await api.guest("Host");

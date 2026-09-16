@@ -18,6 +18,8 @@ export interface RosterPlayer {
   readonly botIndex: number;
   /** Humans: a session is attached. Bots: always true. */
   readonly connected: boolean;
+  /** v8: this account may end the match for everyone (the lobby host, or whoever inherited it). Never a bot. */
+  readonly host: boolean;
 }
 
 /** 0x4D, S→C (2 B + 3 B per player + name bytes; ≤ 542 B). Players sorted by slot. */
@@ -37,8 +39,8 @@ export function rosterNameBytes(name: string, max = ROSTER_NAME_MAX_BYTES): Uint
   return bytes.subarray(0, end);
 }
 
-// Roster: type 8, count 5, reserved 3; per player: slot 5, team 5, bot 1, connected 1, reserved 4, then u8 = bot index
-// (bots) or name length (humans), then the name bytes.
+// Roster: type 8, count 5, reserved 3; per player: slot 5, team 5, bot 1, connected 1, host 1 (v8), reserved 3, then
+// u8 = bot index (bots) or name length (humans), then the name bytes.
 export function encodeRoster(w: BitWriter, m: Roster): void {
   const count = Math.min(MAX_PLAYER_SLOTS, m.players.length);
   w.write(MsgId.Roster, 8);
@@ -50,7 +52,8 @@ export function encodeRoster(w: BitWriter, m: Roster): void {
     w.write(p.team, TEAM_BITS);
     w.write(p.isBot ? 1 : 0, 1);
     w.write(p.connected ? 1 : 0, 1);
-    w.write(0, 4);
+    w.write(p.host && !p.isBot ? 1 : 0, 1);
+    w.write(0, 3);
     if (p.isBot) {
       w.write(Math.min(255, Math.max(0, Math.floor(p.botIndex))), 8);
     } else {
@@ -73,12 +76,14 @@ export function decodeRoster(r: BitReader): Roster | null {
     const team = r.read(TEAM_BITS);
     const isBot = r.read(1) === 1;
     const connected = r.read(1) === 1;
-    r.read(4);
+    const host = r.read(1) === 1;
+    r.read(3);
     const byte = r.read(8);
     if (r.overflowed || slot >= MAX_PLAYER_SLOTS || (seen & (1 << slot)) !== 0) return null;
     seen |= 1 << slot;
     if (isBot) {
-      players.push({ slot, team, name: "", isBot, botIndex: byte, connected });
+      if (host) return null;
+      players.push({ slot, team, name: "", isBot, botIndex: byte, connected, host: false });
       continue;
     }
     if (byte > ROSTER_NAME_MAX_BYTES) return null;
@@ -90,7 +95,7 @@ export function decodeRoster(r: BitReader): Roster | null {
     } catch {
       return null;
     }
-    players.push({ slot, team, name, isBot, botIndex: -1, connected });
+    players.push({ slot, team, name, isBot, botIndex: -1, connected, host });
   }
   if (r.overflowed || r.bitsLeft !== 0) return null;
   return { players };

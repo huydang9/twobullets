@@ -14,6 +14,7 @@ Start with [`STATUS.md`](STATUS.md) for the roadmap and what's in progress, then
 | | [backend/runtime-performance.md](backend/runtime-performance.md) | Node vs Rust, Havok tick benchmarks, process model, scheduler, CI gates |
 | | [backend/platform.md](backend/platform.md) | Matchmaking, hosting, join tokens, data stores, observability, cost |
 | | [backend/adr/README.md](backend/adr/README.md) | ADR index (00xx principal, 01xx platform, 02xx netcode, 03xx runtime) |
+| Release | [release/quit-match.md](release/quit-match.md) | Pause menu, leaving alone vs ending for everyone, host rules, "play again", how to try it in two tabs |
 | Bots | [bots/design.md](bots/design.md) | Offline bot match: MatchSim, navigation grid, perception, brain, aim model and difficulty table, zone and match rules, client wiring, HUD, URL flags, tests |
 | Assets | [assets-plan.md](assets-plan.md) | Vetted free asset sources and license rules |
 | | [assets-pipeline.md](assets-pipeline.md) | Weapons and character GLB pipeline, clip tables, loader API |

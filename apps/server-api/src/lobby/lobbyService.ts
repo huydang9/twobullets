@@ -259,7 +259,8 @@ export class LobbyService {
     lobby.status = "starting";
     this.broadcast(lobby);
     try {
-      const record = await this.o.matches.start("lobby", lobby.settings, humans, lobby.code);
+      // The lobby host is also the match host: the only account the match server lets end the match for everyone.
+      const record = await this.o.matches.start("lobby", lobby.settings, humans, lobby.code, lobby.hostId);
       if (record.status === "running") {
         lobby.status = "inMatch";
         lobby.matchId = record.id;

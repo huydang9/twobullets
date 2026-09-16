@@ -1896,6 +1896,103 @@
   cursor: default;
 }
 
+/* Pause / escape menu: same panel language as the death and result screens, above the play overlay. */
+.tb-pause {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 320px;
+  max-width: min(440px, 86vw);
+  padding: 22px 40px 20px;
+  pointer-events: auto;
+  background: linear-gradient(90deg, transparent, rgba(8, 10, 12, 0.82) 12%, rgba(8, 10, 12, 0.82) 88%, transparent);
+  transform: translateX(-50%);
+}
+
+.tb-pause__title {
+  padding-left: 0.3em;
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.tb-pause__subtitle {
+  max-width: 34em;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--tb-text-dim);
+}
+
+.tb-pause__subtitle--warn {
+  color: var(--tb-amber);
+}
+
+.tb-pause__body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.tb-pause__row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.tb-pause__button {
+  padding: 9px 22px;
+  font: 500 13px var(--tb-font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tb-stroke);
+  cursor: pointer;
+}
+
+.tb-pause__button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-pause__button--primary {
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-pause__button--danger {
+  color: var(--tb-amber);
+  border-color: color-mix(in srgb, var(--tb-amber) 55%, transparent);
+}
+
+.tb-pause__button:disabled {
+  color: var(--tb-text-faint);
+  cursor: default;
+}
+
+.tb-pause__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--tb-text-faint);
+}
+
+.tb-pause__hint--key {
+  margin-top: 4px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 /* Difficulty picker on the play overlay. */
 .tb-matchsetup {
   display: flex;

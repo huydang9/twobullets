@@ -43,8 +43,8 @@ describe("Roster", () => {
     expect(a0.rosters).toEqual([
       {
         players: [
-          { slot: 0, team: 0, name: "Huy Đặng", isBot: false, botIndex: -1, connected: true },
-          { slot: 1, team: 0, name: "", isBot: true, botIndex: 3, connected: true },
+          { slot: 0, team: 0, name: "Huy Đặng", isBot: false, botIndex: -1, connected: true, host: false },
+          { slot: 1, team: 0, name: "", isBot: true, botIndex: 3, connected: true, host: false },
         ],
       },
     ]);

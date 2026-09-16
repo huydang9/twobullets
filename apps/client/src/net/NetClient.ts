@@ -9,13 +9,17 @@ import { LifeCode, MAX_PLAYER_SLOTS } from "@twobullets/protocol/codes";
 import {
   decodeDisconnect,
   decodeKillFeed,
+  decodeMatchCommandResult,
   decodeResyncResponse,
   decodeWelcome,
   DisconnectReason,
   encodeDisconnect,
   encodeHello,
+  encodeMatchCommand,
   encodeResyncRequest,
+  MatchCommandCode,
   ResyncScope,
+  type MatchCommandResult,
   type Welcome,
 } from "@twobullets/protocol/messages/control";
 import { MsgId } from "@twobullets/protocol/messages/ids";
@@ -132,6 +136,8 @@ export interface NetClientOptions {
   readonly onRoster?: (roster: Roster, client: NetClient) => void;
   /** Ground loot mirror (protocol v7 `LootUpdate` on the control stream). */
   readonly loot?: NetLoot | null;
+  /** Answer to a `MatchCommand` (protocol v8: leave / end for everyone); `client.matchCommandResult` is already set. */
+  readonly onCommandResult?: (result: MatchCommandResult, client: NetClient) => void;
 }
 
 /**
@@ -157,6 +163,8 @@ export class NetClient {
   matchEnd: MatchEnd | null = null;
   /** Newest Roster (who holds each slot; bots carry `botIndex` for a localized name), null until the first. */
   matchRoster: Roster | null = null;
+  /** Newest answer to a `MatchCommand` (protocol v8), null until one arrives. */
+  matchCommandResult: MatchCommandResult | null = null;
   /** Newest teammate vitals group (protocol v6: teammates only) by slot. */
   readonly teammateVitals: NetTeammateVitals = createNetTeammateVitals();
   private teammateVitalsTick = -1;
@@ -178,6 +186,7 @@ export class NetClient {
   private readonly onMatchMessage: ((client: NetClient) => void) | null;
   private readonly onRoster: ((roster: Roster, client: NetClient) => void) | null;
   private readonly loot: NetLoot | null;
+  private readonly onCommandResult: ((result: MatchCommandResult, client: NetClient) => void) | null;
   private deliverTick = 0;
   private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
   private ownerLife: number = LifeCode.alive;
@@ -222,6 +231,7 @@ export class NetClient {
     this.onMatchMessage = options.onMatchMessage ?? null;
     this.onRoster = options.onRoster ?? null;
     this.loot = options.loot ?? null;
+    this.onCommandResult = options.onCommandResult ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
     this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
     this.stats = {
@@ -356,6 +366,27 @@ export class NetClient {
     this.updateStats(now);
   }
 
+  /**
+   * Asks the server to take this player out of the match for good (protocol v8). After warmup that is a forfeit: the
+   * character is eliminated and its loot drops, exactly as if the tab had closed and the reconnect grace had run out.
+   * The server answers with a `MatchCommandResult` and closes the session; call `disconnect()` after it.
+   */
+  requestLeaveMatch(): void {
+    this.sendMatchCommand(MatchCommandCode.leave);
+  }
+
+  /** Host only: asks the server to end the match for everyone. A non-host gets `MatchCommandStatus.denied` back. */
+  requestEndForAll(): void {
+    this.sendMatchCommand(MatchCommandCode.endForAll);
+  }
+
+  private sendMatchCommand(command: number): void {
+    if (this.stats.state === "disconnected") return;
+    this.writer.reset();
+    encodeMatchCommand(this.writer, { command, detail: 0 });
+    this.sendStream();
+  }
+
   /** Leaves the match: Disconnect{clientLeave}, then close. */
   disconnect(): void {
     if (this.stats.state === "disconnected") return;
@@ -447,6 +478,13 @@ export class NetClient {
       case MsgId.LootUpdate:
         this.loot?.apply(reader, bytes.length);
         break;
+      case MsgId.MatchCommandResult: {
+        const result = decodeMatchCommandResult(reader);
+        if (result === null) return;
+        this.matchCommandResult = result;
+        this.onCommandResult?.(result, this);
+        break;
+      }
       case MsgId.MatchEnd: {
         const end = decodeMatchEnd(reader);
         if (end === null) return;

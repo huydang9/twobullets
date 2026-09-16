@@ -531,9 +531,11 @@ IDs are the first byte of every datagram and every stream frame. Datagram IDs 0x
 | 0x4A | `MatchEnd` | S→C | S | ~200 B | once |
 | 0x4B | `Resync` (request/response: full state, baseline reset) | both | S | 2 B / full | rare |
 | 0x4C | `Resume` (session resume token) | C→S | S | 36 B | reconnect |
-| 0x4D | `Roster` (v5: names, teams, bots, connection) | S→C | S | 2 B + 3 B/player + names | on change |
+| 0x4D | `Roster` (v5: names, teams, bots, connection; v8: host bit) | S→C | S | 2 B + 3 B/player + names | on change |
 | 0x4E | `LootUpdate` (v7: ground loot in the client's area of interest, §8.3) | S→C | S | ≤ ~1.1 KB per message (spawn 10–13 B) | join, moving, loot changes |
 | 0x4F | `Disconnect` (reason code) | both | S | 3 B | once |
+| 0x50 | `MatchCommand` (v8: `leave`, `endForAll`; see §6.9) | C→S | S | 3 B | on the pause menu |
+| 0x51 | `MatchCommandResult` (v8: ok / denied / unavailable / unknown) | S→C | S | 4 B | one per command |
 
 ### 6.5 Layouts
 
@@ -665,6 +667,19 @@ LOS cost: 90 viewer-enemy pairs × ≤ 10 rays at 20 Hz = up to 300 Havok rays/t
 - `PROTOCOL_VERSION` (u16) is bumped on any wire change. `contentHash` (u32) is a hash of gameplay tuning (`MOVEMENT`, `WEAPONS`, `BALLISTICS`, throwable/item defs), generated at build time into `packages/protocol/src/version.ts`.
 - **Exact match only, per match.** Prediction requires identical tuning, so N/N-1 compatibility would mean shipping two simulations. A server build supports exactly one `(PROTOCOL_VERSION, contentHash)`; the allocator pins it (Platform's canary flow already assumes this). A mismatch at `Hello` → `Disconnect{reason: versionMismatch}` → the client reloads.
 - Message IDs never get reused. New optional sections use the snapshot "sections present" bits.
+
+### 6.9 Quitting a match (v8)
+
+Two things a player can ask for from the pause menu, both on the control stream, both answered:
+
+| `MatchCommand.command` | Who | Server does |
+|---|---|---|
+| `leave` (0) | anyone | After warmup: forfeits the player (eliminated, loot dropped, placement kept), exactly like a grace-expired disconnect. In warmup: frees the slot. Then `Disconnect{clientLeave}` and close. The match runs on. |
+| `endForAll` (1) | the match host only | Ranks the teams still in play like a time cap, broadcasts `MatchEnd{reason: hostEnded}`, reports the result, waits out the end linger, then closes the match so the process exits and its port is freed. |
+
+- **Who is the host.** `MatchConfig.hostAccountId` (the lobby host). Quick-queue matches have none, so nobody can end them. If the host leaves for good, the right moves to the connected human in the lowest slot; the `Roster`'s `host` bit tells every client who holds it, so the button follows.
+- **Answers.** `MatchCommandResult{command, status}` with `ok` (0), `denied` (1, not the host), `unavailable` (2, the match is already ending or has no lifecycle) or `unknown` (3, a command code this build doesn't know). The answer is sent before the command is carried out, because both close the session.
+- **Races.** Two players quitting in the same turn are independent forfeits (a team wipe then ends the match on the normal rule). A host who asks after the match started ending gets `unavailable`, and only one result is ever produced. A reconnect into a closed match is refused with `Disconnect{matchEnded}`; one into a match in its end linger re-attaches and gets `MatchEnd` again.
 
 ---
 

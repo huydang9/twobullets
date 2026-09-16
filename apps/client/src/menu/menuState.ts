@@ -1,4 +1,4 @@
-import type { AccountView, ActiveMatchResponse, CatalogResponse, LobbyView, MatchResultResponse, MatchSummaryView, TicketView } from "@twobullets/contracts/rest";
+import type { AccountView, ActiveMatchResponse, CatalogResponse, LobbyView, MatchResultResponse, MatchSettings, MatchSummaryView, TicketView } from "@twobullets/contracts/rest";
 import type { ApiToClientWs } from "@twobullets/contracts/ws";
 import type { ClientErrorCode } from "../platform/ApiRequestError";
 import type { LobbySocketStatus } from "../platform/LobbySocket";
@@ -27,12 +27,24 @@ export type Screen =
 
 export type ScreenKind = Screen["kind"];
 
+/** What the last match was started from, so "play again" can repeat it (same settings, same lobby when it still exists). */
+export interface LastMatch {
+  readonly source: "lobby" | "queue";
+  readonly settings: MatchSettings;
+  /** The lobby that started it (it reopens when the match ends), or null for quick play. */
+  readonly lobbyCode: string | null;
+}
+
 export interface MenuState {
   readonly screen: Screen;
   readonly account: AccountView | null;
   readonly catalog: CatalogResponse | null;
   /** The running match this account can rejoin ("Vào lại trận"). */
   readonly rejoin: MatchSummaryView | null;
+  /** Settings of the match being played or just finished, for "play again" on the results screen. */
+  readonly lastMatch: LastMatch | null;
+  /** A match this player quit on purpose: never offered for rejoin, however long it keeps running. */
+  readonly leftMatchId: string | null;
   /** Last error to show on the current screen. */
   readonly notice: ClientErrorCode | null;
   /** A request in flight: buttons are disabled. */
@@ -63,6 +75,8 @@ export type MenuEvent =
   | { readonly type: "connectFailed"; readonly code: ClientErrorCode }
   | { readonly type: "gameLaunched"; readonly matchId: string }
   | { readonly type: "matchEnded"; readonly matchId: string }
+  /** The player quit this match on purpose: drop any rejoin offer for it. */
+  | { readonly type: "matchLeft"; readonly matchId: string }
   /** The game closed its in-game result screen for this match. */
   | { readonly type: "gameExited"; readonly matchId: string }
   | { readonly type: "resultLoaded"; readonly result: MatchResultResponse }
@@ -74,6 +88,8 @@ export const INITIAL_MENU_STATE: MenuState = {
   account: null,
   catalog: null,
   rejoin: null,
+  lastMatch: null,
+  leftMatchId: null,
   notice: null,
   busy: false,
   upgradeRequired: false,
@@ -88,6 +104,13 @@ function isLive(match: MatchSummaryView | null): match is MatchSummaryView {
 
 function connecting(match: { readonly matchId: string; readonly settings: { readonly mapId: string } }, reconnect: boolean): Screen {
   return { kind: "connecting", matchId: match.matchId, mapId: match.settings.mapId, reconnect };
+}
+
+/** Remembers what to repeat on "play again"; keeps a known lobby code when the newer source doesn't have one. */
+function remember(state: MenuState, source: "lobby" | "queue", settings: MatchSettings, lobbyCode: string | null): MenuState {
+  const last = state.lastMatch;
+  if (last !== null && last.source === source && last.lobbyCode === lobbyCode && last.settings === settings) return state;
+  return { ...state, lastMatch: { source, settings, lobbyCode } };
 }
 
 /** The match this screen is joining or playing, if any. */
@@ -105,14 +128,18 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
     case "sessionLost":
       return { ...state, screen: screen.kind === "inGame" ? screen : { kind: "login" }, account: null, rejoin: null, busy: false, notice: "unauthorized" };
     case "resumed": {
-      const base = { ...state, account: event.account, busy: false, notice: null };
+      let base: MenuState = { ...state, account: event.account, busy: false, notice: null };
       const { active } = event;
+      if (active.match) base = remember(base, active.match.source, active.match.settings, active.lobbyCode);
+      else if (event.lobby) base = remember(base, "lobby", event.lobby.settings, event.lobby.code);
       if (event.lobby && event.lobby.status !== "closed" && !isLive(active.match)) return { ...base, rejoin: null, screen: { kind: "lobby", lobby: event.lobby } };
       if (active.ticket && active.ticket.status === "queued") return { ...base, rejoin: null, screen: { kind: "queue", ticket: active.ticket } };
       if (isLive(active.match)) {
         // Mid-game results screen or game already running for this match: keep it.
         if (screenMatchId(screen) === active.match.matchId) return { ...base, rejoin: null };
-        return { ...base, rejoin: active.match, screen: screen.kind === "main" ? screen : MAIN };
+        // A match the player quit on purpose keeps running for the others, but is never offered back.
+        const rejoin = active.match.matchId === state.leftMatchId ? null : active.match;
+        return { ...base, rejoin, screen: screen.kind === "main" ? screen : MAIN };
       }
       if (screen.kind === "inGame" || screen.kind === "results" || screen.kind === "connecting") return { ...base, rejoin: null };
       return { ...base, rejoin: null, screen: screen.kind === "main" ? screen : MAIN };
@@ -128,7 +155,7 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
     case "account":
       return { ...state, account: event.account, busy: false };
     case "lobbyEntered":
-      return { ...state, busy: false, notice: null, screen: { kind: "lobby", lobby: event.lobby } };
+      return { ...remember(state, "lobby", event.lobby.settings, event.lobby.code), busy: false, notice: null, screen: { kind: "lobby", lobby: event.lobby } };
     case "lobbyLeft":
       return screen.kind === "lobby" ? { ...state, busy: false, screen: MAIN } : { ...state, busy: false };
     case "queued":
@@ -137,14 +164,19 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
       return screen.kind === "queue" ? { ...state, busy: false, screen: { kind: "main", panel: "quickPlay" } } : { ...state, busy: false };
     case "socket":
       return { ...state, socket: event.status };
-    case "rejoin":
-      return state.rejoin && (screen.kind === "main" || screen.kind === "lobby") ? { ...state, busy: false, notice: null, screen: connecting(state.rejoin, true) } : state;
+    case "rejoin": {
+      if (!state.rejoin || (screen.kind !== "main" && screen.kind !== "lobby")) return state;
+      const base = remember(state, state.rejoin.source, state.rejoin.settings, screen.kind === "lobby" ? screen.lobby.code : (state.lastMatch?.lobbyCode ?? null));
+      return { ...base, busy: false, notice: null, screen: connecting(state.rejoin, true) };
+    }
     case "connectFailed":
       return screen.kind === "connecting" ? { ...state, busy: false, notice: event.code, screen: MAIN } : state;
     case "gameLaunched":
       return screen.kind === "connecting" && screen.matchId === event.matchId ? { ...state, busy: false, rejoin: null, screen: { kind: "inGame", matchId: event.matchId } } : state;
     case "matchEnded":
       return matchEnded(state, event.matchId);
+    case "matchLeft":
+      return { ...state, leftMatchId: event.matchId, rejoin: state.rejoin?.matchId === event.matchId ? null : state.rejoin };
     case "gameExited":
       if (screen.kind === "inGame" && screen.matchId === event.matchId) {
         return { ...state, busy: false, rejoin: null, screen: { kind: "results", matchId: event.matchId, result: null, fromGame: true, awaitingGame: false } };
@@ -182,17 +214,20 @@ function onPush(state: MenuState, message: ApiToClientWs): MenuState {
     case "lobby.updated": {
       if (screen.kind !== "lobby" || screen.lobby.code !== message.lobby.code) return state;
       const lobby = message.lobby;
+      const base = remember(state, "lobby", lobby.settings, lobby.code);
       if (lobby.status === "inMatch" && lobby.matchId !== null) {
-        return { ...state, busy: false, screen: { kind: "connecting", matchId: lobby.matchId, mapId: lobby.settings.mapId, reconnect: false } };
+        return { ...base, busy: false, screen: { kind: "connecting", matchId: lobby.matchId, mapId: lobby.settings.mapId, reconnect: false } };
       }
-      return { ...state, busy: lobby.status === "starting" ? state.busy : false, screen: { kind: "lobby", lobby } };
+      return { ...base, busy: lobby.status === "starting" ? base.busy : false, screen: { kind: "lobby", lobby } };
     }
     case "lobby.left":
       return screen.kind === "lobby" && screen.lobby.code === message.code ? { ...state, busy: false, screen: MAIN } : state;
     case "ticket.updated": {
       if (screen.kind !== "queue" || screen.ticket.id !== message.ticket.id) return state;
       const ticket = message.ticket;
-      if (ticket.status === "matched" && ticket.matchId !== null) return { ...state, screen: { kind: "connecting", matchId: ticket.matchId, mapId: ticket.settings.mapId, reconnect: false } };
+      if (ticket.status === "matched" && ticket.matchId !== null) {
+        return { ...remember(state, "queue", ticket.settings, null), screen: { kind: "connecting", matchId: ticket.matchId, mapId: ticket.settings.mapId, reconnect: false } };
+      }
       if (ticket.status === "cancelled") return { ...state, screen: { kind: "main", panel: "quickPlay" } };
       if (ticket.status === "failed") return { ...state, notice: ticket.failure ?? "internal", screen: { kind: "main", panel: "quickPlay" } };
       // Allocation failed: the ticket stays queued and the error is shown.
@@ -201,13 +236,16 @@ function onPush(state: MenuState, message: ApiToClientWs): MenuState {
     case "match.assigned": {
       const match = message.match;
       if (screenMatchId(screen) === match.matchId) return state;
-      if (screen.kind === "lobby" || screen.kind === "queue" || screen.kind === "main") return { ...state, busy: false, rejoin: null, screen: connecting(match, false) };
+      if (screen.kind === "lobby" || screen.kind === "queue" || screen.kind === "main") {
+        const code = match.source === "lobby" ? (screen.kind === "lobby" ? screen.lobby.code : (state.lastMatch?.lobbyCode ?? null)) : null;
+        return { ...remember(state, match.source, match.settings, code), busy: false, rejoin: null, screen: connecting(match, false) };
+      }
       return state;
     }
     case "match.updated": {
       const match = message.match;
       if (match.status === "ended" || match.status === "aborted") return matchEnded(state, match.matchId);
-      if (screen.kind === "main" && isLive(match) && screenMatchId(screen) === null) return { ...state, rejoin: match };
+      if (screen.kind === "main" && isLive(match) && screenMatchId(screen) === null && match.matchId !== state.leftMatchId) return { ...state, rejoin: match };
       return state;
     }
     case "match.failed":

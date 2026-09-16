@@ -121,10 +121,16 @@ export class MatchService implements AllocatorListener {
    * Allocates a match for seated humans. Rejects with HttpError(noCapacity | internal) when allocation fails; the
    * accounts are free again by then.
    */
-  async start(source: "lobby" | "queue", settings: MatchSettings, humans: readonly HumanPlayer[], lobbyCode: string | null = null): Promise<MatchRecord> {
+  async start(
+    source: "lobby" | "queue",
+    settings: MatchSettings,
+    humans: readonly HumanPlayer[],
+    lobbyCode: string | null = null,
+    hostAccountId?: string,
+  ): Promise<MatchRecord> {
     for (const h of humans) if (this.activeMatchOf(h.accountId) !== null) throw new HttpError("alreadyInMatch", `${h.accountId} is already in a match`);
     const matchId = newMatchId();
-    const config = buildMatchConfig({ matchId, hostId: this.o.hostId, region: this.o.region, matchSeed: randomInt(0, 2 ** 32 - 1), settings, humans });
+    const config = buildMatchConfig({ matchId, hostId: this.o.hostId, region: this.o.region, matchSeed: randomInt(0, 2 ** 32 - 1), settings, humans, hostAccountId });
     const record: MatchRecord = {
       id: matchId,
       source,

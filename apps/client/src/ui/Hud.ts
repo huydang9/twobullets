@@ -67,6 +67,7 @@ export class Hud {
   private scene: Scene | undefined;
   private locked = false;
   private modal = false;
+  private readonly overlays: (() => boolean)[] = [];
   private inspectorOpen = false;
   private forceVisible = false;
   private lastUpdate = -1;
@@ -105,11 +106,26 @@ export class Hud {
     this.overlay.setMatchSetup(setup);
   }
 
-  /** A match screen (death, result) with its own buttons is open: the click-to-play overlay stays hidden meanwhile. */
+  /** A match screen (death, result, pause) with its own buttons is open: the click-to-play overlay stays hidden meanwhile. */
   setModal(open: boolean): void {
     this.modal = open;
     if (open) this.mapHud?.screen.setOpen(false, false);
     this.refreshVisibility();
+  }
+
+  /**
+   * Registers a screen that takes the mouse for itself (the bag, the map). Match code asks `overlayOpen` before turning
+   * a lost pointer lock into a pause menu, so Tab and M don't pause the game.
+   */
+  addOverlaySource(isOpen: () => boolean): void {
+    this.overlays.push(isOpen);
+  }
+
+  /** True while a modal match screen, the full-screen map or a registered overlay is up. */
+  get overlayOpen(): boolean {
+    if (this.modal || this.mapHud?.screen.isOpen === true) return true;
+    for (const isOpen of this.overlays) if (isOpen()) return true;
+    return false;
   }
 
   /**

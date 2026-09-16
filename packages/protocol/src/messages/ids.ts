@@ -26,6 +26,10 @@ export const MsgId = {
   /** v7: ground loot in the client's area of interest (spawn, remove, quantity, forget cell, clear). */
   LootUpdate: 0x4e,
   Disconnect: 0x4f,
+  /** v8: C→S quit action (leave alone, end for everyone). */
+  MatchCommand: 0x50,
+  /** v8: S→C answer to a MatchCommand (accepted, denied, unavailable). */
+  MatchCommandResult: 0x51,
 } as const;
 export type MsgId = (typeof MsgId)[keyof typeof MsgId];
 

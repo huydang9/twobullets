@@ -105,6 +105,8 @@ export interface BuildMatchConfigInput {
   readonly matchSeed: number;
   readonly settings: MatchSettings;
   readonly humans: readonly SeatedPlayer[];
+  /** Lobby host: the only account the match server lets end the match for everyone. Omitted for quick-queue matches. */
+  readonly hostAccountId?: string | undefined;
 }
 
 /**
@@ -146,6 +148,8 @@ export function buildMatchConfig(input: BuildMatchConfigInput): MatchConfig {
     teams: assignments,
     rules: { friendlyFire: true, reviveSeconds: 5, bodyBlocking: true, fillWithBots: settings.fillWithBots },
     ...(settings.botDifficulty !== undefined ? { botDifficulty: settings.botDifficulty } : {}),
+    // Only a seated human can be the host; a stale id would leave the match with nobody able to end it.
+    ...(input.hostAccountId !== undefined && input.humans.some((h) => h.accountId === input.hostAccountId) ? { hostAccountId: input.hostAccountId } : {}),
   };
 }
 

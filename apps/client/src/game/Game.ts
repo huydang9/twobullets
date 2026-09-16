@@ -143,6 +143,8 @@ export class Game {
     // Tab: releases pointer lock while open and asks for it again on close (the play overlay's click is the fallback).
     // Networked: counts and item use come from the server through the net equipment view (created in `net.attach`).
     const inventory = new InventoryScreen(hudRoot, net ? net.equipmentFor(equipment) : equipment, input, { icons: { scene, assets, models: presentationLootModels(presentation.itemMeshes) } });
+    // Tab and M release the mouse themselves; the pause menu must not open behind them.
+    hud.addOverlaySource(() => inventory.isOpen);
     // DEV: `?teammate=1` simulates a standing teammate, so 0 HP knocks (revive with `__twobullets.life.revive()`).
     const life = new PlayerLife(player, equipment, equipment, { teammate: import.meta.env.DEV && params.get("teammate") === "1", respawn: !botsMatch });
 

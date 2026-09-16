@@ -135,6 +135,24 @@ describe("menu state: reconnect and results", () => {
     expect(state.rejoin).toBeNull();
   });
 
+  it("remembers what the last match was started from, so the results screen can offer 'play again'", () => {
+    // From a lobby: the code comes along, so play again goes back to the same (reopened) lobby.
+    let state = run(loggedIn(), { type: "lobbyEntered", lobby: lobby() }, { type: "push", message: { t: "lobby.updated", lobby: lobby({ status: "inMatch", matchId: "m_1" }) } });
+    expect(state.lastMatch).toEqual({ source: "lobby", settings: lobby().settings, lobbyCode: "ABCDEF" });
+    state = run(state, { type: "gameLaunched", matchId: "m_1" }, { type: "matchEnded", matchId: "m_1" });
+    expect(state.screen.kind).toBe("results");
+    expect(state.lastMatch?.lobbyCode).toBe("ABCDEF");
+
+    // From the queue: no lobby, so play again queues with the same settings.
+    const queued = run(loggedIn(), { type: "queued", ticket: ticket() }, { type: "push", message: { t: "ticket.updated", ticket: ticket({ status: "matched", matchId: "m_2" }) } });
+    expect(queued.lastMatch).toEqual({ source: "queue", settings: ticket().settings, lobbyCode: null });
+
+    // A reload mid-match picks it up again from the API.
+    const resumed = run(INITIAL_MENU_STATE, { type: "resumed", account: ACCOUNT, active: active({ match: match(), lobbyCode: "ABCDEF" }), lobby: null });
+    expect(resumed.lastMatch).toEqual({ source: "lobby", settings: match().settings, lobbyCode: "ABCDEF" });
+    expect(INITIAL_MENU_STATE.lastMatch).toBeNull();
+  });
+
   it("resume keeps the open panel and the in-game screen", () => {
     const settingsPanel = run(loggedIn(), { type: "panel", panel: "settings" });
     expect(run(settingsPanel, { type: "resumed", account: ACCOUNT, active: active(), lobby: null }).screen).toEqual({ kind: "main", panel: "settings" });

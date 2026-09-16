@@ -24,7 +24,8 @@ import { CharacterBody, DEATH_PILE_ID_BASE, WorldRaycaster, type MatchSim, type 
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { EquipmentSystem } from "../equipment/EquipmentSystem";
-import { onLanguageChange } from "../i18n";
+import { onLanguageChange, t } from "../i18n";
+import { menuSearch } from "../menu/launch";
 import type { WeaponPresentation } from "../fx/WeaponPresentation";
 import type { InputManager } from "../input/InputManager";
 import type { PlayerController, PlayerTick } from "../player/PlayerController";
@@ -34,6 +35,8 @@ import type { Hud } from "../ui/Hud";
 import { matchMapSource } from "../ui/map";
 import { MatchHud, type MatchHudFrame } from "../ui/match/MatchHud";
 import { DeathScreen, ResultScreen, type ScreenAction } from "../ui/match/MatchScreens";
+import { PauseMenu, toPauseAction } from "../ui/match/PauseMenu";
+import { pauseOptions } from "../ui/match/pauseOptions";
 import { deathCauseText, MATCH_STRINGS } from "../ui/match/strings";
 import type { Environment } from "../world/environment";
 import type { MapRuntime } from "../world/mapRuntime";
@@ -101,6 +104,7 @@ export class OfflineMatch {
   private debugOverlay: BotDebugOverlay | null = null;
   private readonly deathScreen: DeathScreen;
   private readonly resultScreen: ResultScreen;
+  private readonly pauseMenu: PauseMenu;
   private lastHumanKill: Extract<MatchEvent, { type: "kill" }> | null = null;
   private pendingDeath = false;
   private pendingResult = false;
@@ -147,6 +151,20 @@ export class OfflineMatch {
     this.layer = hud.mountMatchLayer();
     this.deathScreen = new DeathScreen(this.layer);
     this.resultScreen = new ResultScreen(this.layer);
+    // Practice has no other players, so "end for everyone" is meaningless and is not offered.
+    this.pauseMenu = new PauseMenu(this.layer, {
+      // The menu closes when the lock actually arrives (`onLockChange`), not here: a browser can refuse a lock asked
+      // for right after the Esc that released it, and closing first would leave no menu and no mouse.
+      onResume: () => input.requestLock(),
+      subtitle: () => t("pause.practice"),
+      actions: () =>
+        pauseOptions({ kind: "practice" }).map((option) =>
+          toPauseAction(option, () => {
+            if (option.id === "playAgain") reloadNewMatch(this.difficulty, this);
+            else if (option.id === "quitToMenu") this.quitToMenu();
+          }),
+        ),
+    });
     this.frame = { focusSlot: this.humanSlot ?? 1, localSlot: this.humanSlot, viewerX: 0, viewerZ: 0, headingDegrees: 0 };
     this.showSetup();
     // The setup picker's labels are plain strings: rebuild it in the new language until the match starts.
@@ -158,8 +176,15 @@ export class OfflineMatch {
     player.setMoveGates(() => (this.humanFrozen() ? FROZEN_GATES : equipment.modifiers));
     deps.combat.gate = () => (this.humanFrozen() ? NO_WEAPONS : equipment.modifiers);
 
+    // Esc never reaches the page while the mouse is captured, so losing the lock mid-match is what opens the pause menu
+    // (unless the bag, the map or a death/result screen took the mouse for themselves).
     input.onLockChange((locked) => {
-      if (locked && !this.sim) this.start();
+      if (locked) {
+        if (!this.sim) this.start();
+        else this.closePause();
+      } else {
+        this.openPause();
+      }
     });
     window.addEventListener("keydown", this.handleKey);
   }
@@ -232,6 +257,7 @@ export class OfflineMatch {
     this.presentationBridge?.dispose();
     this.debugOverlay?.dispose();
     this.hudView?.dispose();
+    this.pauseMenu.dispose();
     this.zoneWall.dispose();
     this.sim?.dispose();
     this.bodies.dispose();
@@ -427,7 +453,9 @@ export class OfflineMatch {
         run: () => this.spectate(teammate?.slot ?? null),
       },
       { label: MATCH_STRINGS.screens.newMatch, run: () => reloadNewMatch(this.difficulty, this) },
+      { label: t("screens.backToMenu"), run: () => this.quitToMenu() },
     ];
+    this.pauseMenu.close();
     this.deathScreen.show(
       {
         cause: kill ? deathCauseText(kill, this.hudView?.nameOf ?? ((slot: number) => String(slot))) : MATCH_STRINGS.screens.died,
@@ -448,6 +476,7 @@ export class OfflineMatch {
     const focusTeam = this.humanSlot !== null ? 0 : (state.actors[this.frame.focusSlot]?.team ?? 0);
     const team = state.teams[focusTeam];
     const me = this.humanSlot !== null ? state.actors[this.humanSlot] : null;
+    this.pauseMenu.close();
     this.deathScreen.hide();
     this.releasePointer();
     this.deps.hud.setModal(true);
@@ -462,7 +491,8 @@ export class OfflineMatch {
         reason: state.endReason ? MATCH_STRINGS.screens.endReason(state.endReason) : "",
       },
       [
-        { label: MATCH_STRINGS.screens.newMatch, primary: true, run: () => reloadNewMatch(this.difficulty, this) },
+        { label: t("screens.playAgain"), primary: true, run: () => reloadNewMatch(this.difficulty, this) },
+        { label: t("screens.backToMenu"), run: () => this.quitToMenu() },
         { label: MATCH_STRINGS.screens.close, run: () => this.closeScreens() },
       ],
     );
@@ -481,11 +511,35 @@ export class OfflineMatch {
     this.deps.hud.setModal(this.spectator?.active === true);
   }
 
+  // ---- Pause menu (Esc) ------------------------------------------------------------------------------------------------
+
+  private openPause(): void {
+    if (!this.sim || this.pauseMenu.visible) return;
+    if (this.deathScreen.visible || this.resultScreen.visible || this.deps.hud.overlayOpen) return;
+    this.deps.hud.setModal(true);
+    this.pauseMenu.open();
+  }
+
+  private closePause(): void {
+    if (!this.pauseMenu.visible) return;
+    this.pauseMenu.close();
+    this.deps.hud.setModal(this.spectator?.active === true);
+  }
+
+  /** Back to the front door, keeping the chosen language. */
+  private quitToMenu(): void {
+    window.location.assign(`${window.location.pathname}${menuSearch(window.location.search)}`);
+  }
+
   private releasePointer(): void {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
   private readonly handleKey = (event: KeyboardEvent): void => {
+    if (event.code === "Escape" && this.pauseMenu.visible) {
+      event.preventDefault();
+      if (this.pauseMenu.handleEscape()) return;
+    }
     if (event.code === "F7" && this.debugOverlay) {
       event.preventDefault();
       this.debugOverlay.toggle();

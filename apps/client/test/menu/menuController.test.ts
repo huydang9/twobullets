@@ -1,12 +1,12 @@
 import type { ApiToClientWs } from "@twobullets/contracts/ws";
 import { describe, expect, it, vi } from "vitest";
 import type { MatchLaunch } from "../../src/menu/launch";
-import { LAST_MATCH_KEY, MenuController } from "../../src/menu/MenuController";
+import { LAST_MATCH_KEY, LEFT_MATCH_KEY, MenuController } from "../../src/menu/MenuController";
 import { ApiClient } from "../../src/platform/ApiClient";
 import { LobbySocket } from "../../src/platform/LobbySocket";
 import { SessionStore } from "../../src/platform/SessionStore";
 import { ACCOUNT, auth, FakeServer, FakeSocket, flush, MemoryStorage } from "../platform/fakes";
-import { active, catalog, lobby, match, result } from "./fixtures";
+import { active, catalog, lobby, match, result, settings, ticket } from "./fixtures";
 
 const HOUR = 3600_000;
 
@@ -108,7 +108,7 @@ describe("MenuController", () => {
   });
 
   it("game hand-off: the in-game result screen closes into the front-door results; leaving early reloads to the menu", async () => {
-    const { server, controller, launches, reloadToMenu } = setup({ loggedIn: true });
+    const { server, controller, launches, reloadToMenu, session } = setup({ loggedIn: true });
     server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_3" }) }) }));
     server.on("POST /v1/matches/m_3/join", () => ({ body: { wsUrl: "ws://localhost:7402/m/m_3", joinToken: "J3", expiresAt: Date.now() + 120_000, matchId: "m_3", teamId: 0, reconnect: true } }));
     server.on("GET /v1/matches/m_3/result", () => ({ body: result("m_3") }));
@@ -125,7 +125,17 @@ describe("MenuController", () => {
     expect(reloadToMenu).not.toHaveBeenCalled();
     launches[0]!.onExit!({ matchId: "m_3", reason: "left" });
     expect(reloadToMenu).toHaveBeenCalledTimes(1);
+    // Quitting on purpose: the match keeps running for the others, but is never offered back after the reload.
+    expect(session.getItem(LEFT_MATCH_KEY)).toBe("m_3");
+    expect(controller.state.leftMatchId).toBe("m_3");
     controller.dispose();
+
+    const back = setup({ loggedIn: true });
+    back.server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_3" }) }) }));
+    (back.session as MemoryStorage).setItem(LEFT_MATCH_KEY, "m_3");
+    await back.controller.boot();
+    expect(back.controller.state.rejoin).toBeNull();
+    back.controller.dispose();
   });
 
   it("offers rejoin on load when the API reports an active match, and rejoins with a fresh token", async () => {
@@ -137,6 +147,73 @@ describe("MenuController", () => {
     controller.rejoin();
     await vi.waitFor(() => expect(controller.state.screen).toEqual({ kind: "inGame", matchId: "m_7" }));
     expect(launches[0]!.join.reconnect).toBe(true);
+    controller.dispose();
+  });
+
+  it("play again from the results: back into the same lobby, or a new one when it is gone", async () => {
+    const { server, controller, push } = setup({ loggedIn: true });
+    server.on("POST /v1/lobbies", (call) => ({ status: 201, body: { lobby: lobby({ code: "NEWLBY", settings: call.body as never }) } }));
+    server.on("GET /v1/matches/m_1/result", () => ({ body: result() }));
+    let lobbyGone = false;
+    server.on("POST /v1/lobbies/ABCDEF/join", () => (lobbyGone ? { status: 404, body: { error: "notFound", message: "gone" } } : { body: { lobby: lobby() } }));
+
+    await controller.boot();
+    controller.dispatch({ type: "lobbyEntered", lobby: lobby() });
+    await push({ t: "lobby.updated", lobby: lobby({ status: "inMatch", matchId: "m_1" }) });
+    controller.dispatch({ type: "gameLaunched", matchId: "m_1" });
+    await push({ t: "match.updated", match: match({ status: "ended" }) });
+    expect(controller.state.screen.kind).toBe("results");
+    expect(controller.state.lastMatch).toMatchObject({ source: "lobby", lobbyCode: "ABCDEF" });
+
+    // The lobby reopened when the match finished: rejoin it and keep the party.
+    await controller.playAgain();
+    expect(controller.state.screen).toMatchObject({ kind: "lobby", lobby: { code: "ABCDEF" } });
+    expect(server.calls.some((c) => c.path === "/v1/lobbies/ABCDEF/join")).toBe(true);
+
+    // Same flow with the lobby gone: a fresh one with the same settings.
+    lobbyGone = true;
+    controller.dispatch({ type: "lobbyLeft" });
+    controller.dispatch({ type: "matchEnded", matchId: "m_1" });
+    expect(controller.state.screen.kind).toBe("results");
+    await controller.playAgain();
+    expect(controller.state.screen).toMatchObject({ kind: "lobby", lobby: { code: "NEWLBY" } });
+    expect(server.calls.find((c) => c.path === "/v1/lobbies")?.body).toMatchObject({ ...settings, visibility: "private" });
+    controller.dispose();
+  });
+
+  it("play again after quick play queues again with the same settings", async () => {
+    const { server, controller, push } = setup({ loggedIn: true });
+    server.on("POST /v1/queue/tickets", (call) => ({ status: 201, body: { ticket: ticket({ id: "t_2", settings: { ...settings, ...(call.body as object) } as never }) } }));
+    server.on("GET /v1/matches/m_2/result", () => ({ body: result("m_2") }));
+    await controller.boot();
+    controller.dispatch({ type: "queued", ticket: ticket() });
+    await push({ t: "ticket.updated", ticket: ticket({ status: "matched", matchId: "m_2" }) });
+    controller.dispatch({ type: "gameLaunched", matchId: "m_2" });
+    controller.dispatch({ type: "matchEnded", matchId: "m_2" });
+    expect(controller.state.screen.kind).toBe("results");
+
+    await controller.playAgain();
+    expect(controller.state.screen).toMatchObject({ kind: "queue", ticket: { id: "t_2" } });
+    expect(server.calls.find((c) => c.path === "/v1/queue/tickets")?.body).toEqual({ mode: settings.mode, maxPlayers: settings.maxPlayers, mapId: settings.mapId });
+    controller.dispose();
+  });
+
+  it("play again from the in-game results screen reloads into the menu after starting the next lobby", async () => {
+    const { server, controller, launches, reloadToMenu } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_5" }), lobbyCode: "ABCDEF" }) }));
+    server.on("POST /v1/matches/m_5/join", () => ({ body: { wsUrl: "ws://localhost:7405/m/m_5", joinToken: "J5", expiresAt: Date.now() + 120_000, matchId: "m_5", teamId: 0, reconnect: true } }));
+    server.on("GET /v1/matches/m_5/result", () => ({ body: result("m_5") }));
+    server.on("POST /v1/lobbies/ABCDEF/join", () => ({ body: { lobby: lobby() } }));
+    await controller.boot();
+    controller.rejoin();
+    await vi.waitFor(() => expect(controller.state.screen).toEqual({ kind: "inGame", matchId: "m_5" }));
+    launches[0]!.onExit!({ matchId: "m_5", reason: "ended" });
+    await vi.waitFor(() => expect(controller.state.screen.kind).toBe("results"));
+
+    await controller.playAgain();
+    // The game can't be torn down in place: the page reloads and the resync lands in the lobby.
+    expect(reloadToMenu).toHaveBeenCalledTimes(1);
+    expect(server.calls.some((c) => c.path === "/v1/lobbies/ABCDEF/join")).toBe(true);
     controller.dispose();
   });
 

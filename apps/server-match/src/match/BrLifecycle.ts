@@ -83,7 +83,14 @@ export interface LifecycleHost {
 }
 
 const PHASE_CODE: Record<GameplayPhaseName, number> = { Warmup: PhaseCode.Warmup, LandingSelect: PhaseCode.LandingSelect, Glide: PhaseCode.Glide, Combat: PhaseCode.Combat, End: PhaseCode.End };
-const END_REASON: Record<string, MatchEndReason> = { lastTeam: MatchEndReason.lastTeam, allDead: MatchEndReason.allDead, timeCap: MatchEndReason.timeCap, cancelled: MatchEndReason.cancelled, aborted: MatchEndReason.aborted };
+const END_REASON: Record<string, MatchEndReason> = {
+  lastTeam: MatchEndReason.lastTeam,
+  allDead: MatchEndReason.allDead,
+  timeCap: MatchEndReason.timeCap,
+  cancelled: MatchEndReason.cancelled,
+  aborted: MatchEndReason.aborted,
+  hostEnded: MatchEndReason.hostEnded,
+};
 
 export class BrLifecycle {
   phase: GameplayPhaseName = "Warmup";
@@ -91,7 +98,7 @@ export class BrLifecycle {
   /** 0 = open-ended. */
   phaseEndTick = 0;
   combatStartTick = -1;
-  endReason: BrEndResult["reason"] | "cancelled" | "aborted" | null = null;
+  endReason: BrEndResult["reason"] | "cancelled" | "aborted" | "hostEnded" | null = null;
   winnerTeam: number | null = null;
   readonly zonePhases: ZonePhase[] = [];
   readonly zoneState: MutableZoneState;
@@ -223,6 +230,23 @@ export class BrLifecycle {
     if (nowMs - this.lastHumanSeenMs >= this.o.noHumansTimeoutMs) this.abort();
   }
 
+  /**
+   * The match host ended it for everyone (protocol v8 `MatchCommand{endForAll}`). Teams still in play are ranked like a
+   * time cap so every player gets a placement, then the normal `End` phase runs: MatchEnd to everyone, the result to the
+   * host agent, the end linger, then close. Returns false when the match is already ending.
+   */
+  endByHost(): boolean {
+    if (this.phase === "End") return false;
+    const tick = this.tickNow;
+    if (this.combatStartTick >= 0) {
+      refreshTeamCounts(this.teams, this.host.slots);
+      this.events.length = 0;
+      resolveTimeCap(this.teams, this.host.slots, tick, this.events);
+    }
+    this.end("hostEnded", this.winnerOf(), tick);
+    return true;
+  }
+
   /** Drain, SIGTERM or no humans: ends at once with `cancelled` (warmup) or `aborted`, and closes. */
   abort(): void {
     if (this.phase !== "End") this.end(this.phase === "Warmup" ? "cancelled" : "aborted", null, this.tickNow);
@@ -338,12 +362,17 @@ export class BrLifecycle {
     this.host.close();
   }
 
+  /** Nothing was played: an empty warmup, or the host ended it before combat started. */
+  private get cancelled(): boolean {
+    return this.endReason === "cancelled" || (this.endReason === "hostEnded" && this.combatStartTick < 0);
+  }
+
   private setPhase(phase: GameplayPhaseName, tick: number, endTick: number): void {
     this.phase = phase;
     this.phaseStartTick = tick;
     this.phaseEndTick = endTick;
     this.broadcastPhase();
-    const lifecycle: MatchPhase = phase === "End" ? (this.endReason === "cancelled" ? "Cancelled" : "Ended") : phase;
+    const lifecycle: MatchPhase = phase === "End" ? (this.cancelled ? "Cancelled" : "Ended") : phase;
     this.host.lifecyclePhase(lifecycle);
   }
 
@@ -433,7 +462,7 @@ export class BrLifecycle {
     }
     for (const p of this.host.players) if (!listed.has(p.accountId)) push(p.accountId, p.teamId, p);
     const endedAt = this.nowEpochMs();
-    const outcome = this.endReason === "cancelled" ? "cancelled" : this.endReason === "aborted" ? "aborted" : "completed";
+    const outcome = this.cancelled ? "cancelled" : this.endReason === "aborted" ? "aborted" : "completed";
     return {
       matchId: config.matchId,
       protocolVersion: config.protocolVersion,

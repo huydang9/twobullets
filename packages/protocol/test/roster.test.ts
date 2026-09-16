@@ -6,8 +6,8 @@ import { describeMessage } from "../src/debug/describe";
 import { PROTOCOL_VERSION } from "../src/version";
 import { createTestRng, randInt } from "./rng";
 
-const human = (slot: number, team: number, name: string, connected = true): RosterPlayer => ({ slot, team, name, isBot: false, botIndex: -1, connected });
-const bot = (slot: number, team: number, botIndex: number): RosterPlayer => ({ slot, team, name: "", isBot: true, botIndex, connected: true });
+const human = (slot: number, team: number, name: string, connected = true, host = false): RosterPlayer => ({ slot, team, name, isBot: false, botIndex: -1, connected, host });
+const bot = (slot: number, team: number, botIndex: number): RosterPlayer => ({ slot, team, name: "", isBot: true, botIndex, connected: true, host: false });
 
 function roundTrip(m: Roster): { bytes: Uint8Array; decoded: Roster | null } {
   const w = createBitWriter(600);
@@ -54,6 +54,18 @@ describe("Roster (v5)", () => {
     const { decoded } = roundTrip({ players: [human(5, 2, long)] });
     expect(decoded!.players[0]!.name).toBe("ĐặngĐặngĐặngĐ");
     expect(roundTrip({ players: [bot(0, 0, 999)] }).decoded!.players[0]!.botIndex).toBe(255);
+  });
+
+  it("carries the v8 host bit, one per roster, never on a bot", () => {
+    const m: Roster = { players: [human(0, 0, "Huy", true, true), human(1, 0, "Lan"), bot(2, 1, 0)] };
+    const { bytes, decoded } = roundTrip(m);
+    expect(decoded!.players.map((p) => p.host)).toEqual([true, false, false]);
+    // Same size as v7: the bit came out of the per-player reserved nibble.
+    expect(bytes.length).toBe(2 + 3 * 3 + new TextEncoder().encode("HuyLan").length);
+    // A bot with the host bit set is malformed.
+    const forged = roundTrip({ players: [bot(0, 0, 1)] }).bytes.slice();
+    forged[3]! |= 0b0001_0000;
+    expect(decodeRoster(createBitReader(forged))).toBeNull();
   });
 
   it("random rosters round-trip", () => {
