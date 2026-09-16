@@ -40,6 +40,8 @@ export class MenuView {
   private creditsLoading = false;
   private graphics: GraphicsPreset | null = null;
   private copiedCode: string | null = null;
+  /** The rejoin card is on its "are you sure?" step for abandoning the match. */
+  private abandoning = false;
   private queueRefs: { elapsed: HTMLElement; botsIn: HTMLElement; ticket: TicketView } | null = null;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly unsubscribe: (() => void)[] = [];
@@ -75,6 +77,7 @@ export class MenuView {
     const behindGame = screen.kind === "results" && screen.awaitingGame;
     this.root.hidden = screen.kind === "inGame" || behindGame;
     this.root.dataset.screen = screen.kind;
+    if (state.rejoin === null) this.abandoning = false;
     if (screen.kind === "results" && screen.fromGame && !behindGame && document.pointerLockElement) document.exitPointerLock();
     if (screen.kind !== "main" && screen.kind !== "lobby" && screen.kind !== "login") this.closePicker();
 
@@ -225,13 +228,7 @@ export class MenuView {
     item("menu.logout", false, () => this.controller.logout());
 
     const content = el("section", "tb-menu__panel tb-menu__content", undefined, layout);
-    if (state.rejoin) {
-      const card = el("div", "tb-menu__rejoin", undefined, content);
-      const text = el("div", "tb-menu__rejoin-text", undefined, card);
-      el("div", "tb-menu__rejoin-title", t("match.rejoinHint"), text);
-      el("div", "tb-menu__hint", t("match.mapLine", { map: mapLabel(state.rejoin.settings.mapId, state.catalog) }), text);
-      this.button(card, "match.rejoin", "tb-menu__primary", () => this.controller.rejoin(), state.busy);
-    }
+    if (state.rejoin) this.rejoinCard(content, state);
 
     switch (panel) {
       case "home": {
@@ -288,6 +285,41 @@ export class MenuView {
         this.creditsPanel(content);
         break;
     }
+  }
+
+  /**
+   * The running match this account can go back into. Rejoining is the offer, but the player can also walk away from it:
+   * "Chơi trận mới" abandons it and opens a fresh match with the same settings, and "Thoát hẳn / bỏ trận" abandons it
+   * and nothing else. Abandoning is final, so it asks once in place; the card never disappears on its own.
+   */
+  private rejoinCard(content: HTMLElement, state: MenuState): void {
+    const rejoin = state.rejoin!;
+    const card = el("div", "tb-menu__rejoin", undefined, content);
+    const text = el("div", "tb-menu__rejoin-text", undefined, card);
+    if (this.abandoning) {
+      el("div", "tb-menu__rejoin-title", t("match.abandonTitle"), text);
+      el("div", "tb-menu__hint", t("match.abandonBody"), text);
+      const actions = el("div", "tb-menu__rejoin-actions", undefined, card);
+      this.button(actions, "match.abandonConfirm", "tb-menu__danger", () => {
+        this.abandoning = false;
+        void this.controller.abandonRejoin();
+      }, state.busy);
+      this.button(actions, "match.abandonCancel", "tb-menu__secondary", () => {
+        this.abandoning = false;
+        this.rerender();
+      });
+      return;
+    }
+    el("div", "tb-menu__rejoin-title", t("match.rejoinHint"), text);
+    el("div", "tb-menu__hint", t("match.mapLine", { map: mapLabel(rejoin.settings.mapId, state.catalog) }), text);
+    el("div", "tb-menu__hint", t("match.abandonHint"), text);
+    const actions = el("div", "tb-menu__rejoin-actions", undefined, card);
+    this.button(actions, "match.rejoin", "tb-menu__primary", () => this.controller.rejoin(), state.busy);
+    this.button(actions, "match.newGame", "tb-menu__secondary", () => void this.controller.newMatchInsteadOfRejoin(), state.busy);
+    this.button(actions, "match.abandon", "tb-menu__link", () => {
+      this.abandoning = true;
+      this.rerender();
+    }, state.busy);
   }
 
   private practiceForm(parent: HTMLElement): void {

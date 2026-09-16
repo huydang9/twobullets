@@ -150,6 +150,69 @@ describe("MenuController", () => {
     controller.dispose();
   });
 
+  it("abandoning the rejoin offer tells the API and drops the card for good", async () => {
+    const { server, controller, session } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_8" }) }) }));
+    server.on("POST /v1/matches/m_8/leave", () => ({ body: { ok: true } }));
+    await controller.boot();
+    expect(controller.state.rejoin?.matchId).toBe("m_8");
+
+    await controller.abandonRejoin();
+    expect(server.paths()).toContain("POST /v1/matches/m_8/leave");
+    expect(controller.state.rejoin).toBeNull();
+    expect(controller.state.busy).toBe(false);
+    // Survives the reload: the API still reports the match as running.
+    expect(session.getItem(LEFT_MATCH_KEY)).toBe("m_8");
+    expect(session.getItem(LAST_MATCH_KEY)).toBeNull();
+    controller.dispose();
+  });
+
+  it("a match the API already forgot counts as abandoned; a real failure keeps the card", async () => {
+    const { server, controller } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_8" }) }) }));
+    let gone = false;
+    server.on("POST /v1/matches/m_8/leave", () => (gone ? { status: 404, body: { error: "notFound", message: "gone" } } : { status: 500, body: { error: "internal", message: "boom" } }));
+    await controller.boot();
+
+    await controller.abandonRejoin();
+    expect(controller.state.rejoin?.matchId).toBe("m_8");
+    expect(controller.state.notice).toBe("internal");
+
+    gone = true;
+    await controller.abandonRejoin();
+    expect(controller.state.rejoin).toBeNull();
+    controller.dispose();
+  });
+
+  it("a new match instead of the rejoin: abandon, then a fresh lobby with the same settings", async () => {
+    const { server, controller } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_8" }), lobbyCode: "ABCDEF" }) }));
+    server.on("POST /v1/matches/m_8/leave", () => ({ body: { ok: true } }));
+    server.on("POST /v1/lobbies", (call) => ({ status: 201, body: { lobby: lobby({ code: "NEWLBY", settings: call.body as never }) } }));
+    await controller.boot();
+    expect(controller.state.rejoin?.matchId).toBe("m_8");
+
+    await controller.newMatchInsteadOfRejoin();
+    // The old lobby is still busy with the abandoned match, so this opens a new one with the same settings.
+    expect(server.paths()).toContain("POST /v1/matches/m_8/leave");
+    expect(server.calls.find((c) => c.path === "/v1/lobbies")?.body).toMatchObject({ ...settings, visibility: "private" });
+    expect(controller.state.screen).toMatchObject({ kind: "lobby", lobby: { code: "NEWLBY" } });
+    expect(controller.state.rejoin).toBeNull();
+    expect(controller.state.busy).toBe(false);
+    controller.dispose();
+  });
+
+  it("a new match after quick play queues again instead of opening a lobby", async () => {
+    const { server, controller } = setup({ loggedIn: true });
+    server.on("GET /v1/me/active-match", () => ({ body: active({ match: match({ matchId: "m_9", source: "queue" }) }) }));
+    server.on("POST /v1/matches/m_9/leave", () => ({ body: { ok: true } }));
+    server.on("POST /v1/queue/tickets", () => ({ status: 201, body: { ticket: ticket({ id: "t_9" }) } }));
+    await controller.boot();
+    await controller.newMatchInsteadOfRejoin();
+    expect(controller.state.screen).toMatchObject({ kind: "queue", ticket: { id: "t_9" } });
+    controller.dispose();
+  });
+
   it("play again from the results: back into the same lobby, or a new one when it is gone", async () => {
     const { server, controller, push } = setup({ loggedIn: true });
     server.on("POST /v1/lobbies", (call) => ({ status: 201, body: { lobby: lobby({ code: "NEWLBY", settings: call.body as never }) } }));

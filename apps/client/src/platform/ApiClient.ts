@@ -206,6 +206,11 @@ export class ApiClient {
     return this.authed("GET", `/v1/matches/${encodeURIComponent(matchId)}/result`);
   }
 
+  /** Gives a running match up for good: the API frees the account's slot, so a new lobby or ticket is allowed again. */
+  async leaveMatch(matchId: string): Promise<void> {
+    await this.authed<LeaveResponse>("POST", `/v1/matches/${encodeURIComponent(matchId)}/leave`);
+  }
+
   // ─── transport ────────────────────────────────────────────────────────────────────────────────────────────────────
 
   private async authed<T>(method: string, path: string, body?: unknown): Promise<T> {

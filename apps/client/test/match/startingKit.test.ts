@@ -92,15 +92,18 @@ describe("starting kit", () => {
     sim.dispose();
   });
 
-  it("networked local inventory: the server's starting kit (B5): guns, spare rounds, Lv1 backpack, no grenades or heals", () => {
+  it("networked local inventory: the server's starting kit (v9): guns, spare rounds, one frag, one smoke, Lv1 backpack", () => {
     const inventory = createNetLocalInventory();
     expect(inventory).toEqual(createNetStartingInventory());
+    expect(inventory).toEqual(createStartingInventory());
     expect(inventory.weapons.map((w) => w?.weaponId ?? null)).toEqual(["rifle", null, "pistol"]);
     expect(inventory.stacks).toEqual([
       { itemId: "ammo_556", quantity: 60 },
       { itemId: "ammo_9mm", quantity: 24 },
+      { itemId: "frag", quantity: 1 },
+      { itemId: "smoke", quantity: 1 },
     ]);
     expect(inventory.backpack).toBe(1);
-    expect(inventory.selectedThrowable).toBeNull();
+    expect(inventory.selectedThrowable).toBe("frag");
   });
 });

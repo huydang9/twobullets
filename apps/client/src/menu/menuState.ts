@@ -75,7 +75,7 @@ export type MenuEvent =
   | { readonly type: "connectFailed"; readonly code: ClientErrorCode }
   | { readonly type: "gameLaunched"; readonly matchId: string }
   | { readonly type: "matchEnded"; readonly matchId: string }
-  /** The player quit this match on purpose: drop any rejoin offer for it. */
+  /** The player quit this match on purpose (pause menu, or "abandon" from the rejoin card): drop any rejoin offer for it. */
   | { readonly type: "matchLeft"; readonly matchId: string }
   /** The game closed its in-game result screen for this match. */
   | { readonly type: "gameExited"; readonly matchId: string }
@@ -176,7 +176,7 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
     case "matchEnded":
       return matchEnded(state, event.matchId);
     case "matchLeft":
-      return { ...state, leftMatchId: event.matchId, rejoin: state.rejoin?.matchId === event.matchId ? null : state.rejoin };
+      return { ...state, busy: false, notice: null, leftMatchId: event.matchId, rejoin: state.rejoin?.matchId === event.matchId ? null : state.rejoin };
     case "gameExited":
       if (screen.kind === "inGame" && screen.matchId === event.matchId) {
         return { ...state, busy: false, rejoin: null, screen: { kind: "results", matchId: event.matchId, result: null, fromGame: true, awaitingGame: false } };

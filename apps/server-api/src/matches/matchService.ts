@@ -186,6 +186,23 @@ export class MatchService implements AllocatorListener {
     return { wsUrl: record.wsUrl, joinToken: token, expiresAt, matchId, teamId: human.teamId, reconnect: previous !== undefined };
   }
 
+  /**
+   * "Abandon": the player gives a running match up from the front door (they are not connected to it any more, so there
+   * is no socket to send `MatchCommand{leave}` on). The API forgets their active-match pointer, which is what frees them
+   * to create a lobby or queue again and stops the rejoin offer, and retires any join token already issued so a stale
+   * one cannot put them back in. The match itself carries on for the others and ends on the normal rules.
+   */
+  leave(accountId: string, matchId: string): void {
+    const record = this.matches.get(matchId);
+    if (record === undefined || record.humans.get(accountId) === undefined) throw new HttpError("notFound", "No such match for this account");
+    if (this.activeByAccount.get(accountId) === matchId) this.activeByAccount.delete(accountId);
+    const previous = record.epochs.get(accountId);
+    record.epochs.set(accountId, previous === undefined ? 0 : previous + 1);
+    record.connected.delete(accountId);
+    this.o.metrics.inc("tb_match_abandons_total", {}, 1, "Running matches given up from the front door");
+    this.o.log?.(`[match] ${matchId} abandoned by ${accountId}`);
+  }
+
   /** Asks every running match to stop (maintenance). */
   releaseAll(): void {
     for (const m of this.matches.values()) if (m.status === "running") this.o.allocator.release(m.id);

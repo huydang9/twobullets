@@ -33,8 +33,9 @@ import { resolveLaunch, type GameLaunch } from "./launch";
  * Networked (`{ kind: "net" }`, DEV `?net=ws://localhost:7350/m/local[&map=v1]`, docs/release/local-stack.md): the
  * server is authoritative for movement, combat and the battle royale loop; the local player's movement and weapons are
  * predicted and reconciled, remote players are interpolated, and NetMatch draws phases, zone, names and results from
- * server messages. Ground loot, inventory, armor and heals are the server's (B5, through the net equipment view); local
- * equipment still reads the use hotkeys; practice dummies are off.
+ * server messages. Ground loot, inventory, armor, heals and throwables are the server's (B5 and v9, through the net
+ * equipment view and NetThrowables); local equipment still reads the use hotkeys and runs the throwing hands; practice
+ * dummies are off.
  */
 export class Game {
   private net: NetGame | null = null;

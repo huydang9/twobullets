@@ -205,6 +205,48 @@ export class MenuController {
   }
 
   /**
+   * "Thoát hẳn / bỏ trận": give up the match the rejoin card offers, instead of going back into it. The API frees the
+   * account's slot (so a new lobby or ticket is allowed straight away) and the card is gone for good, here and after a
+   * reload; the match keeps running for everyone else.
+   */
+  async abandonRejoin(): Promise<void> {
+    const target = this.stateValue.rejoin;
+    if (target !== null) await this.abandon(target.matchId);
+  }
+
+  /** Abandon, then straight into a new match with the same mode, size and map: a fresh private lobby, or the queue. */
+  async newMatchInsteadOfRejoin(): Promise<void> {
+    const target = this.stateValue.rejoin;
+    if (target === null || !(await this.abandon(target.matchId))) return;
+    this.dispatch({ type: "busy" });
+    try {
+      // No lobby code: the old lobby is still busy with the match that was abandoned, so this always opens a new one.
+      this.dispatch(await this.restart({ source: target.source, settings: target.settings, lobbyCode: null }));
+    } catch (error) {
+      this.dispatch({ type: "failed", code: errorCodeOf(error) });
+    }
+  }
+
+  /** Tells the API the match is given up. False when the call failed for a reason the player should see first. */
+  private async abandon(matchId: string): Promise<boolean> {
+    this.dispatch({ type: "busy" });
+    try {
+      await this.deps.api.leaveMatch(matchId);
+    } catch (error) {
+      const code = errorCodeOf(error);
+      // notFound / conflict: the API no longer holds this match for us, which is what abandoning wanted anyway.
+      if (code !== "notFound" && code !== "conflict") {
+        this.dispatch({ type: "failed", code });
+        return false;
+      }
+    }
+    removeItem(this.deps.session, LAST_MATCH_KEY);
+    setItem(this.deps.session, LEFT_MATCH_KEY, matchId);
+    this.dispatch({ type: "matchLeft", matchId });
+    return true;
+  }
+
+  /**
    * The game is done with a match: after its in-game result screen the front door's results take over; a player who
    * left early goes back to the menu, which offers "Rejoin" while the match runs (and its results after).
    */

@@ -244,6 +244,11 @@ export function createApi(deps: ApiDeps): ApiApp {
       requireBuild(ctx);
       return { body: matches.issueJoin(account.id, ctx.params.id!) };
     })
+    .add("POST", "/v1/matches/{id}/leave", (ctx) => {
+      const account = authed(ctx);
+      matches.leave(account.id, ctx.params.id!);
+      return { body: { ok: true } };
+    })
     .add("GET", "/v1/matches/{id}/result", (ctx) => {
       authed(ctx);
       const result = results.getResult(ctx.params.id!);

@@ -154,8 +154,13 @@ export class OfflineMatch {
     // Practice has no other players, so "end for everyone" is meaningless and is not offered.
     this.pauseMenu = new PauseMenu(this.layer, {
       // The menu closes when the lock actually arrives (`onLockChange`), not here: a browser can refuse a lock asked
-      // for right after the Esc that released it, and closing first would leave no menu and no mouse.
-      onResume: () => input.requestLock(),
+      // for right after the Esc that released it, and closing first would leave no menu and no mouse. Over a death or
+      // result screen there is no lock to take back, so it just closes onto the screen it covered.
+      onResume: () => {
+        if (this.deathScreen.visible || this.resultScreen.visible) this.closePause();
+        else input.requestLock();
+      },
+      resumeKey: () => (this.deathScreen.visible || this.resultScreen.visible ? "pause.backToScreen" : "pause.resume"),
       subtitle: () => t("pause.practice"),
       actions: () =>
         pauseOptions({ kind: "practice" }).map((option) =>
@@ -177,12 +182,13 @@ export class OfflineMatch {
     deps.combat.gate = () => (this.humanFrozen() ? NO_WEAPONS : equipment.modifiers);
 
     // Esc never reaches the page while the mouse is captured, so losing the lock mid-match is what opens the pause menu
-    // (unless the bag, the map or a death/result screen took the mouse for themselves).
+    // (unless the bag or the map took the mouse for themselves). Once the human is dead the mouse is already free, so
+    // the death and spectate screens get the menu from the Esc key itself (`handleKey`) instead.
     input.onLockChange((locked) => {
       if (locked) {
         if (!this.sim) this.start();
         else this.closePause();
-      } else {
+      } else if (!this.humanDead && this.sim?.state.phase !== "ended") {
         this.openPause();
       }
     });
@@ -513,9 +519,9 @@ export class OfflineMatch {
 
   // ---- Pause menu (Esc) ------------------------------------------------------------------------------------------------
 
+  /** Opens over whatever is showing, death and result screens included (z-order puts it on top). */
   private openPause(): void {
-    if (!this.sim || this.pauseMenu.visible) return;
-    if (this.deathScreen.visible || this.resultScreen.visible || this.deps.hud.overlayOpen) return;
+    if (!this.sim || this.pauseMenu.visible || this.deps.hud.overlayOpen) return;
     this.deps.hud.setModal(true);
     this.pauseMenu.open();
   }
@@ -523,7 +529,7 @@ export class OfflineMatch {
   private closePause(): void {
     if (!this.pauseMenu.visible) return;
     this.pauseMenu.close();
-    this.deps.hud.setModal(this.spectator?.active === true);
+    this.deps.hud.setModal(this.deathScreen.visible || this.resultScreen.visible || this.spectator?.active === true);
   }
 
   /** Back to the front door, keeping the chosen language. */
@@ -536,9 +542,17 @@ export class OfflineMatch {
   }
 
   private readonly handleKey = (event: KeyboardEvent): void => {
-    if (event.code === "Escape" && this.pauseMenu.visible) {
-      event.preventDefault();
-      if (this.pauseMenu.handleEscape()) return;
+    if (event.code === "Escape") {
+      if (this.pauseMenu.visible) {
+        event.preventDefault();
+        if (this.pauseMenu.handleEscape()) return;
+      } else if (!document.pointerLockElement) {
+        // Dead, spectating or the match is over: the mouse is already free, so this Esc reaches the page and is the
+        // only way to the pause menu (a dead player must always be able to quit).
+        event.preventDefault();
+        this.openPause();
+        return;
+      }
     }
     if (event.code === "F7" && this.debugOverlay) {
       event.preventDefault();

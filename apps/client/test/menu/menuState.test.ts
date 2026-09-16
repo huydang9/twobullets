@@ -135,6 +135,32 @@ describe("menu state: reconnect and results", () => {
     expect(state.rejoin).toBeNull();
   });
 
+  it("abandoning a match drops the rejoin card for good, here and after a reload", () => {
+    const offered = run(loggedIn(), { type: "push", message: { t: "match.updated", match: match() } });
+    expect(offered.rejoin?.matchId).toBe("m_1");
+
+    const gone = run(offered, { type: "busy" }, { type: "matchLeft", matchId: "m_1" });
+    expect(gone.rejoin).toBeNull();
+    expect(gone.leftMatchId).toBe("m_1");
+    expect(gone.busy).toBe(false);
+    // The match keeps running, so the API and the push socket keep reporting it: neither may offer it back.
+    expect(run(gone, { type: "push", message: { t: "match.updated", match: match() } }).rejoin).toBeNull();
+    expect(run(gone, { type: "resumed", account: ACCOUNT, active: active({ match: match() }), lobby: null }).rejoin).toBeNull();
+    // Another running match is still offered.
+    expect(run(gone, { type: "push", message: { t: "match.updated", match: match({ matchId: "m_2" }) } }).rejoin?.matchId).toBe("m_2");
+  });
+
+  it("abandoning keeps the settings, so a new match can start from the same state", () => {
+    const offered = run(loggedIn(), { type: "resumed", account: ACCOUNT, active: active({ match: match() }), lobby: null });
+    const gone = run(offered, { type: "matchLeft", matchId: "m_1" });
+    expect(gone.lastMatch).toEqual({ source: "lobby", settings: match().settings, lobbyCode: null });
+    // Straight into a new lobby with those settings; the abandoned match stays forgotten.
+    const next = run(gone, { type: "lobbyEntered", lobby: lobby() });
+    expect(next.screen.kind).toBe("lobby");
+    expect(next.rejoin).toBeNull();
+    expect(next.leftMatchId).toBe("m_1");
+  });
+
   it("remembers what the last match was started from, so the results screen can offer 'play again'", () => {
     // From a lobby: the code comes along, so play again goes back to the same (reopened) lobby.
     let state = run(loggedIn(), { type: "lobbyEntered", lobby: lobby() }, { type: "push", message: { t: "lobby.updated", lobby: lobby({ status: "inMatch", matchId: "m_1" }) } });

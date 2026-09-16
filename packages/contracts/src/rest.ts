@@ -26,6 +26,7 @@ import type { BotDifficulty, MatchPhase, TeamMode } from "./match";
 //   GET    /v1/queue/tickets/{id}                  → TicketResponse
 //   DELETE /v1/queue/tickets/{id}                  → LeaveResponse
 //   POST   /v1/matches/{id}/join                   → JoinMatchResponse       (fresh single-use join token)
+//   POST   /v1/matches/{id}/leave                  → LeaveResponse           (abandon: free the slot, no rejoin offer)
 //   GET    /v1/matches/{id}/result                 → MatchResultResponse
 //   GET    /.well-known/jwks.json                  → JwksResponse
 //   GET    /healthz, /readyz                       → HealthResponse

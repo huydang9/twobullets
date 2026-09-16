@@ -1,4 +1,4 @@
-import { onLanguageChange, t } from "../../i18n";
+import { onLanguageChange, t, type MessageKey } from "../../i18n";
 import { getControlSettings, HOLD_TOGGLE_MODES, setControlSettings, TOGGLE_ACTIONS, type ControlSettings } from "../../input/controlSettings";
 import { el } from "../dom";
 import type { PauseOption } from "./pauseOptions";
@@ -36,6 +36,8 @@ export interface PauseMenuOptions {
   readonly actions: () => readonly PauseMenuAction[];
   /** Optional line under the title (map, mode, "you are the host"). */
   readonly subtitle?: () => string;
+  /** Label of the first button: "Resume" while playing, "Back to the match screen" over a death or result screen. */
+  readonly resumeKey?: () => MessageKey;
 }
 
 /** Translates a `PauseOption` (pure data) into a menu button that calls `run`. */
@@ -84,6 +86,16 @@ export class PauseMenu {
 
   open(): void {
     this.pending = null;
+    this.root.hidden = false;
+    this.render();
+  }
+
+  /**
+   * Opens straight on the "are you sure?" step of `action` — how a destructive button that lives outside this menu (the
+   * death screen's host-only "end for everyone") borrows its confirmation. Esc still steps back to the normal menu.
+   */
+  openConfirm(action: PauseMenuAction): void {
+    this.pending = action.confirm ? action : null;
     this.root.hidden = false;
     this.render();
   }
@@ -145,7 +157,7 @@ export class PauseMenu {
       });
       return;
     }
-    this.button(this.body, t("pause.resume"), "primary", () => this.resume());
+    this.button(this.body, t(this.options.resumeKey?.() ?? "pause.resume"), "primary", () => this.resume());
     for (const action of this.options.actions()) {
       const button = this.button(this.body, action.label, action.danger ? "danger" : action.primary ? "primary" : "", () => {
         if (action.confirm) {

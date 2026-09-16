@@ -1,7 +1,7 @@
 import { MatchCommandCode, MatchCommandStatus } from "@twobullets/protocol/messages/control";
 import { describe, expect, it } from "vitest";
 import { setLanguage, t, type MessageKey } from "../../src/i18n";
-import { commandRefusalKey, pauseOptions } from "../../src/ui/match/pauseOptions";
+import { commandRefusalKey, deathQuitOptions, pauseOptions } from "../../src/ui/match/pauseOptions";
 
 // What the pause menu offers (ui/match/pauseOptions.ts), and that every key it names exists in both catalogs.
 
@@ -28,6 +28,32 @@ describe("pause menu options", () => {
     expect(pauseOptions({ kind: "net", warmup: true })[0]!.hintKey).toBe("pause.leaveWarmupHint");
   });
 
+  it("a dead player still gets out, and the host can still end it for everyone", () => {
+    const dead = pauseOptions({ kind: "net", dead: true });
+    expect(dead.map((o) => o.id)).toEqual(["leaveAlone"]);
+    expect(dead[0]!.hintKey).toBe("pause.leaveDeadHint");
+    expect(pauseOptions({ kind: "net", dead: true, isHost: true }).map((o) => o.id)).toEqual(["leaveAlone", "endForAll"]);
+    // Being dead is not warmup: the "you only give up your slot" line must not appear.
+    expect(pauseOptions({ kind: "net", dead: true, warmup: true })[0]!.hintKey).toBe("pause.leaveDeadHint");
+  });
+
+  it("once the match is over there is nothing to leave or end, only the results", () => {
+    expect(pauseOptions({ kind: "net", ended: true, isHost: true, dead: true }).map((o) => o.id)).toEqual(["seeResults"]);
+    // Practice keeps its own two, which already work from the result screen.
+    expect(pauseOptions({ kind: "practice", ended: true }).map((o) => o.id)).toEqual(["playAgain", "quitToMenu"]);
+  });
+
+  it("the death and spectate screens carry their own quit buttons (host's end-for-all still asks first)", () => {
+    expect(deathQuitOptions({ kind: "net" }).map((o) => o.id)).toEqual(["leaveAlone"]);
+    expect(deathQuitOptions({ kind: "net" })[0]!.labelKey).toBe("screens.leaveMatch");
+    const host = deathQuitOptions({ kind: "net", isHost: true, dead: true });
+    expect(host.map((o) => o.id)).toEqual(["leaveAlone", "endForAll"]);
+    expect(host[1]!.confirm).toBeDefined();
+    // Over, or offline: the screens already offer results / play again / back to menu.
+    expect(deathQuitOptions({ kind: "net", ended: true, isHost: true })).toEqual([]);
+    expect(deathQuitOptions({ kind: "practice", isHost: true })).toEqual([]);
+  });
+
   it("practice offers play again and quitting to the menu, never ending for everyone", () => {
     const options = pauseOptions({ kind: "practice", isHost: true });
     expect(options.map((o) => o.id)).toEqual(["playAgain", "quitToMenu"]);
@@ -35,7 +61,18 @@ describe("pause menu options", () => {
   });
 
   it("every label is translated in Vietnamese and English (no hardcoded strings)", () => {
-    const keys = [...keysOf(pauseOptions({ kind: "net", isHost: true, warmup: true })), ...keysOf(pauseOptions({ kind: "practice" })), "pause.title", "pause.resume", "pause.cancel", "pause.escHint"] as MessageKey[];
+    const keys = [
+      ...keysOf(pauseOptions({ kind: "net", isHost: true, warmup: true })),
+      ...keysOf(pauseOptions({ kind: "net", isHost: true, dead: true })),
+      ...keysOf(pauseOptions({ kind: "net", ended: true })),
+      ...keysOf(pauseOptions({ kind: "practice" })),
+      ...keysOf(deathQuitOptions({ kind: "net", isHost: true })),
+      "pause.title",
+      "pause.resume",
+      "pause.backToScreen",
+      "pause.cancel",
+      "pause.escHint",
+    ] as MessageKey[];
     for (const language of ["vi", "en"] as const) {
       setLanguage(language);
       for (const key of keys) {
