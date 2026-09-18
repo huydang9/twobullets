@@ -2105,3 +2105,267 @@
   text-shadow: none;
   will-change: transform;
 }
+
+/* ---------- Low-FPS warning: banner + fix-your-GPU guide (ui/PerfWarning.ts) ---------- */
+
+/*
+ * Top-left, under the FPS strip: the crosshair (centre) and the compass / zone timer (top-centre) stay clear. The
+ * banner takes no pointer events at all, so it can sit there while the pointer is locked; only its two small buttons
+ * opt back in, for when the player has the mouse.
+ */
+.tb-perfwarn {
+  position: absolute;
+  top: 32px;
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(360px, 40vw);
+  padding: 7px 8px 7px 9px;
+  background: rgba(10, 12, 14, 0.72);
+  border-left: 2px solid var(--tb-amber);
+  pointer-events: none;
+  transition: opacity 600ms ease;
+}
+
+/* After ~10 s the warning steps back but stays readable until dismissed. */
+.tb-perfwarn--quiet {
+  opacity: 0.5;
+}
+
+.tb-perfwarn__icon {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tb-amber);
+}
+
+.tb-perfwarn__text {
+  min-width: 0;
+}
+
+.tb-perfwarn__title {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tb-amber);
+}
+
+/* One line, whatever the GPU is called: the name is also capped in PerfWarning.ts. */
+.tb-perfwarn__status {
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--tb-text-dim);
+}
+
+.tb-perfwarn__hint {
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  font: 400 11px var(--tb-font);
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  color: var(--tb-text-faint);
+  background: none;
+  border: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.tb-perfwarn__hint:hover,
+.tb-perfwarn__close:hover {
+  color: var(--tb-text);
+}
+
+.tb-perfwarn__close {
+  flex: none;
+  padding: 0 2px;
+  font: 400 15px/1 var(--tb-font);
+  color: var(--tb-text-faint);
+  background: none;
+  border: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* The guide assumes the pointer was released (PerfWarning exits pointer lock when it opens). */
+.tb-perfwarn-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: auto;
+  background: rgba(6, 8, 10, 0.74);
+  animation: tb-fade-in 160ms ease-out;
+}
+
+.tb-perfwarn-guide__panel {
+  width: min(680px, 100%);
+  max-height: min(86vh, 780px);
+  padding: 20px 26px 16px;
+  overflow-y: auto;
+  background: var(--tb-panel-strong);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-shadow: none;
+  /* Players copy chrome://gpu and the setting names out of here. */
+  user-select: text;
+  cursor: default;
+}
+
+.tb-perfwarn-guide__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tb-perfwarn-guide__title {
+  font-size: 19px;
+  font-weight: 300;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.tb-perfwarn-guide__close {
+  flex: none;
+  padding: 0 4px;
+  font: 400 18px/1 var(--tb-font);
+  color: var(--tb-text-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.tb-perfwarn-guide__close:hover {
+  color: var(--tb-text);
+}
+
+.tb-perfwarn-guide__detected {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tb-text);
+}
+
+.tb-perfwarn-guide__intro {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--tb-amber);
+}
+
+.tb-perfwarn-guide__steps {
+  counter-reset: tb-perfwarn-step;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A hidden step is display:none, so it takes no number either. */
+.tb-perfwarn-guide__step {
+  position: relative;
+  margin-top: 14px;
+  padding-left: 28px;
+  counter-increment: tb-perfwarn-step;
+}
+
+.tb-perfwarn-guide__step::before {
+  content: counter(tb-perfwarn-step);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  font: 500 13px/1.5 var(--tb-font);
+  text-align: center;
+  color: var(--tb-amber);
+  border-bottom: 1px solid color-mix(in srgb, var(--tb-amber) 45%, transparent);
+}
+
+.tb-perfwarn-guide__step-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--tb-text);
+}
+
+.tb-perfwarn-guide__line {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--tb-text-dim);
+}
+
+.tb-perfwarn-guide__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tb-perfwarn-guide__button {
+  padding: 8px 18px;
+  font: 500 12px var(--tb-font);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tb-text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--tb-stroke);
+  cursor: pointer;
+}
+
+.tb-perfwarn-guide__button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-perfwarn-guide__button--primary {
+  border-color: var(--tb-stroke-strong);
+}
+
+.tb-perfwarn-guide__button:disabled {
+  color: var(--tb-text-faint);
+  cursor: default;
+}
+
+.tb-perfwarn-guide__done {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--tb-amber);
+}
+
+.tb-perfwarn-guide__esc {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tb-text-faint);
+}
+
+/* 1280x720 and other short screens: keep the banner and the panel inside the frame. */
+@media (max-height: 800px) {
+  .tb-perfwarn-guide__panel {
+    padding: 16px 20px 14px;
+  }
+
+  .tb-perfwarn-guide__step {
+    margin-top: 10px;
+  }
+}
+
+/* Both layers set `display`, so hiding them needs to beat that (outside .tb-hud there is no !important rule to lean on). */
+.tb-perfwarn[hidden],
+.tb-perfwarn-guide[hidden] {
+  display: none !important;
+}

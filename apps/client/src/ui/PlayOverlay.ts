@@ -26,6 +26,7 @@ const SYSTEM_CONTROLS: readonly ControlRow[] = [
   [["F3"], "controls.debugStats"],
   [["F8"], "controls.physicsDebug"],
   [["F9"], "controls.inspector"],
+  [["F10"], "controls.perfHelp"],
 ];
 
 const LANGUAGE_SHORT: Readonly<Record<Language, string>> = { vi: "VI", en: "EN" };

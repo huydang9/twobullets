@@ -14,7 +14,9 @@ import { WeaponPresentation } from "../fx/WeaponPresentation";
 import { InputManager } from "../input/InputManager";
 import { DynamicResolution } from "../perf/DynamicResolution";
 import { OPTIMIZATIONS } from "../perf/flags";
-import { loadGraphicsSettings } from "../perf/graphicsSettings";
+import { graphicsOf, loadGraphicsSettings } from "../perf/graphicsSettings";
+import { classifyGpu, type GpuInfo } from "../perf/gpuClass";
+import { PerfWatchdog } from "../perf/perfWatchdog";
 import type { PerfTools } from "../perf/PerfTools";
 import { PlayerController } from "../player/PlayerController";
 import { PlayerLife } from "../player/PlayerLife";
@@ -22,9 +24,13 @@ import { Hud } from "../ui/Hud";
 import { showFatalError } from "../ui/FatalError";
 import { InventoryScreen } from "../ui/inventory";
 import { cameraMapSource } from "../ui/map";
+import type { PerfWarning } from "../ui/PerfWarning";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime, resolveMapDefinition } from "../world/mapRuntime";
 import { resolveLaunch, type GameLaunch } from "./launch";
+
+/** Opens the low-FPS guide. Polled through the InputManager like the other function keys (debug/debugTools.ts). */
+const PERF_HELP_KEY = "F10";
 
 /**
  * Top-level wiring: engine, physics, assets, world, player, combat, equipment, HUD. Owns the frame loop.
@@ -57,6 +63,9 @@ export class Game {
     private readonly perf: PerfTools | null,
     private readonly dynamicResolution: DynamicResolution | null,
     private readonly match: OfflineMatch | null,
+    private readonly gpu: GpuInfo,
+    private readonly perfWarning: PerfWarning | null,
+    private readonly perfWatchdog: PerfWatchdog | null,
   ) {}
 
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLDivElement, launch: GameLaunch = { kind: "dev" }): Promise<Game> {
@@ -70,6 +79,9 @@ export class Game {
     const aa = import.meta.env.DEV ? params.get("aa") : null;
     const msaa = benchmark !== null || (aa === "msaa" || aa === "fxaa" ? aa : loadGraphicsSettings().antiAliasing) === "msaa";
     const engine = new Engine(canvas, msaa, { stencil: true, preserveDrawingBuffer: false }, true);
+    // Which GPU the browser actually bound: a Windows laptop can end up on the integrated chip with the discrete card
+    // idle. Read once — it never changes for the life of the context. Advice only; nothing warns on the class alone.
+    const gpu = classifyGpu(engine.getGlInfo().renderer, navigator.userAgent);
     const scene = new Scene(engine);
     // Aiming uses pointer lock and Havok raycasts; Babylon's per-mousemove picking has nothing to find.
     scene.skipPointerMovePicking = OPTIMIZATIONS.skipPointerMovePicking;
@@ -162,7 +174,29 @@ export class Game {
     // Off by default (`?opt=dynamicResolution:1&fps=120`); never during a benchmark, which measures fixed resolutions.
     const dynamicResolution = OPTIMIZATIONS.dynamicResolution && !benchmark ? new DynamicResolution(engine, { targetFps: Number(params.get("fps")) || 120 }) : null;
 
-    const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution, match);
+    // Low-FPS banner and its F10 guide. Off during a benchmark, which measures fixed settings on purpose.
+    const perfWarning = benchmark ? null : hud.mountPerfWarning({ onReduceQuality: () => graphicsOf(scene)?.update({ preset: "performance" }) });
+    const perfWatchdog = perfWarning ? new PerfWatchdog() : null;
+    if (perfWarning) {
+      // The guide gives the mouse back itself, so the lost pointer lock must not also pause the match. The banner is
+      // not an overlay: it never takes the pointer, and it stays up for minutes — Esc must still reach the pause menu.
+      hud.addOverlaySource(() => hud.perfGuideOpen);
+      // F10 would open the browser's menu bar; the key state itself is polled through the InputManager in frame().
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.code === PERF_HELP_KEY) event.preventDefault();
+        },
+        { capture: true },
+      );
+      // DEV `?perfwarn=1|hybrid|software|unknown|discrete`: shows it now, so every guide variant can be checked.
+      if (import.meta.env.DEV) {
+        const forced = forcedGpu(params.get("perfwarn"), gpu);
+        if (forced) perfWarning.show({ gpu: forced, fps: FORCED_PERF_WARN_FPS });
+      }
+    }
+
+    const game = new Game(engine, scene, input, player, combat, equipment, presentation, hud, loot, inventory, world, perf, dynamicResolution, match, gpu, perfWarning, perfWatchdog);
     if (net) {
       // Networked: no offline life (the server owns health, knocks, deaths and respawns), weapons without equipment.
       life.dispose();
@@ -217,9 +251,45 @@ export class Game {
     if (this.hud.statsVisible) hudState.player = this.player.getDebugState();
     this.hud.update(hudState);
     this.inventory.update();
+    const warning = this.perfWarning;
+    const watchdog = this.perfWatchdog;
+    if (warning !== null && watchdog !== null && !perf?.drivesCamera) {
+      // F10 opens the guide the banner points at, and closes it again (with the banner) once it is up.
+      if (this.input.wasPressed(PERF_HELP_KEY)) {
+        if (this.hud.perfGuideOpen) warning.hide();
+        else warning.openGuide();
+      }
+      // Only sustained slowness raises it (never the GPU class alone); the object is built on that one frame.
+      if (watchdog.update(performance.now(), hudState.fps)) warning.show({ gpu: this.gpu, fps: watchdog.averageFps });
+    }
     this.input.endFrame();
     this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
     perf?.endFrame();
+  }
+}
+
+/** Fake frame rate for the DEV `?perfwarn=` preview, low enough to read like the real thing. */
+const FORCED_PERF_WARN_FPS = 13;
+
+/**
+ * DEV only (`?perfwarn=1|hybrid|software|unknown|discrete`): the GPU the warning should pretend to have found, so all
+ * four guide intros and both step orderings can be seen without owning the hardware. `1` uses the real one.
+ * Referenced from a `import.meta.env.DEV` branch only, so production builds drop it.
+ */
+function forcedGpu(flag: string | null, real: GpuInfo): GpuInfo | null {
+  switch (flag) {
+    case "1":
+      return real;
+    case "hybrid":
+      return { renderer: "ANGLE (Intel, Intel(R) UHD Graphics (0x00009A60) Direct3D11 vs_5_0 ps_5_0, D3D11)", gpuClass: "integrated", name: "Intel UHD Graphics", hybridHint: true };
+    case "software":
+      return { renderer: "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)", gpuClass: "software", name: "SwiftShader Device", hybridHint: true };
+    case "unknown":
+      return { renderer: "WebKit WebGL", gpuClass: "unknown", name: "WebKit WebGL", hybridHint: false };
+    case "discrete":
+      return { renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 5050 Laptop GPU (0x00002D18) Direct3D11 vs_5_0 ps_5_0, D3D11)", gpuClass: "discrete", name: "NVIDIA GeForce RTX 5050 Laptop GPU", hybridHint: false };
+    default:
+      return null;
   }
 }
 

@@ -8,6 +8,7 @@ import { Crosshair } from "./Crosshair";
 import { el, elT } from "./dom";
 import type { EquipmentPreview, PreviewEquipment } from "./equipment/PreviewEquipment";
 import { MapHud, type MapHudOptions, type MapViewSource } from "./map";
+import { PerfWarning, type PerfWarningHandlers } from "./PerfWarning";
 import { PlayOverlay, type MatchSetup } from "./PlayOverlay";
 import { StatsPanel } from "./StatsPanel";
 import { StatsStrip, type StatsStripNet } from "./StatsStrip";
@@ -60,6 +61,7 @@ export class Hud {
   private readonly inspectorTag: HTMLDivElement;
   private combat: CombatHud | undefined;
   private mapHud: MapHud | null = null;
+  private perfWarning: PerfWarning | null = null;
   private equipment: EquipmentView | null = null;
   private preview: PreviewEquipment | null = null;
   private baseCredits: readonly string[] = [];
@@ -147,6 +149,25 @@ export class Hud {
   /** The map HUD, or null without a map (DEV console: `__twobullets.hud.map.screen.setOpen(true)`). */
   get map(): MapHud | null {
     return this.mapHud;
+  }
+
+  /**
+   * Low-FPS warning, mounted inside the HUD container so it inherits the HUD's CSS variables. The game owns when it
+   * shows (a sustained slow frame rate) and the F10 toggle; the HUD only owns the element.
+   */
+  mountPerfWarning(handlers: PerfWarningHandlers): PerfWarning {
+    this.perfWarning?.dispose();
+    this.perfWarning = new PerfWarning(this.container, handlers);
+    return this.perfWarning;
+  }
+
+  /**
+   * True only while the low-FPS *guide panel* is open. The banner alone must not count: it takes neither the pointer
+   * nor the screen, so the pause menu has to keep working behind it. `PerfWarning.visible` covers both layers, so the
+   * panel's own state is read through `PerfWarning.guideOpen`.
+   */
+  get perfGuideOpen(): boolean {
+    return this.perfWarning?.guideOpen ?? false;
   }
 
   /** Online: ping and packet loss for the top-left stats strip (read about 4 times per second); null shows FPS only. */
@@ -338,6 +359,18 @@ export class Hud {
     if (!import.meta.env.DEV) return;
     this.forceVisible = visible;
     this.refreshVisibility();
+  }
+
+  /** Drops the HUD's own listeners and DOM children (the game tears down by reloading the page today). */
+  dispose(): void {
+    this.perfWarning?.dispose();
+    this.perfWarning = null;
+    this.mapHud?.dispose();
+    this.mapHud = null;
+    this.preview?.dispose();
+    this.preview = null;
+    this.combat?.dispose();
+    this.combat = undefined;
   }
 
   private refreshVisibility(): void {
