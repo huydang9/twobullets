@@ -7,6 +7,7 @@ import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCullin
 import { LodBands, lodZoom } from "./lodBands";
 import { LodCell, type InstanceBatch, type LodCellSpec, type LodStep } from "./LodCell";
 import { LOD_FADE_ATTRIBUTE, attachLodFade } from "./lodFadePlugin";
+import { MIRROR_PROP, MirrorWalls, type MirrorStats } from "./MirrorWalls";
 import type { PropVisual, PropVisuals } from "./PropVisuals";
 
 export interface PropInstancesOptions {
@@ -36,6 +37,8 @@ export interface PropRenderStats {
   readonly lodSwitches: number;
   /** Instance counts per 250 m cell, "cx,cz" → count. */
   readonly perCell: Readonly<Record<string, number>>;
+  /** Mirror panels and how many of them are reflecting right now. */
+  readonly mirrors: MirrorStats;
 }
 
 const DEFAULT_SHADOW_DISTANCE: Readonly<Record<PropCategory, number>> = { tree: 70, rock: 50, prop: 50, bush: 25, grass: 0 };
@@ -87,6 +90,8 @@ const boundsMax = new Vector3();
  */
 export class PropInstances {
   private readonly cells: Cell[] = [];
+  /** The reflecting faces of the mirror panels: one mesh each, outside the thin-instance batches. */
+  readonly mirrors: MirrorWalls;
   private readonly selectDistance: number;
   private readonly fadeSeconds: number;
   private readonly lastSelect = new Vector3(Infinity, Infinity, Infinity);
@@ -112,6 +117,14 @@ export class PropInstances {
     const tilt = new Matrix();
     const scaling = new Matrix();
     const axis = new Vector3();
+    // A reflection needs a per-plane matrix, so mirror faces cannot share a batch; their frames still do.
+    // The silvered faces are the mirror panel's body (its stand-in is only the frame), so they cast its shadow.
+    this.mirrors = new MirrorWalls(scene, sets.filter((set) => set.prop === MIRROR_PROP), {
+      shadowCaster: (mesh) => {
+        environment.shadowGenerator.addShadowCaster(mesh, false);
+        markStaticShadowCaster(mesh);
+      },
+    });
 
     for (const set of sets) {
       const def = getMapProp(set.prop);
@@ -196,6 +209,7 @@ export class PropInstances {
       cell.lod.step(step);
       if (cell.lod.dirty) this.upload(cell);
     }
+    this.mirrors.update(camera, now);
   }
 
   /** Hides every batch (benchmark A/B); re-enabling shows them again as they were. */
@@ -203,6 +217,7 @@ export class PropInstances {
     if (enabled === this.enabled) return;
     this.enabled = enabled;
     this.lastTime = -1;
+    this.mirrors.setEnabled(enabled);
     invalidateStaticShadows();
     for (const cell of this.cells) {
       cell.lod.batches.forEach((batch, index) => cell.meshes[index]?.forEach((m) => m.setEnabled(enabled && (batch?.count ?? 0) > 0)));
@@ -231,10 +246,11 @@ export class PropInstances {
         if (batch.shadow) shadowInstances += batch.count;
       });
     }
-    return { instances: this.instanceCount, activeBatches, activeMeshes, shadowInstances, culledInstances, fadingInstances, lodSwitches, perCell };
+    return { instances: this.instanceCount, activeBatches, activeMeshes, shadowInstances, culledInstances, fadingInstances, lodSwitches, perCell, mirrors: this.mirrors.stats() };
   }
 
   dispose(): void {
+    this.mirrors.dispose();
     for (const cell of this.cells) for (const meshes of cell.meshes) meshes?.forEach((m) => m.dispose());
     this.cells.length = 0;
   }

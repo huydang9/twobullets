@@ -82,7 +82,9 @@ describe("headless bots-only match", () => {
     // Brains alone get the 1 ms budget (design.md §7). nav.update is a time slice bounded by its 1,500-expansion
     // budget, so it gets its own gate; brain+nav is printed above.
     expect(summary.brainOnlyMs.p99).toBeLessThan(1);
-    expect(summary.navMs.p99).toBeLessThan(1.5);
+    // Wall-clock and contention-sensitive (a baseline run measures 1.35–1.50 here, more with the suite loaded), so the
+    // gate is loose like the tick-ms gates above: it catches an order-of-magnitude regression, not a tuning drift.
+    expect(summary.navMs.p99).toBeLessThan(2.5);
   }, 120_000);
 
   it("is deterministic: the same seed twice gives the same events and final positions", async () => {

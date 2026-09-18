@@ -1,6 +1,6 @@
 import { Engine, HavokPlugin, Scene, Vector3 } from "@babylonjs/core";
 import HavokPhysics from "@babylonjs/havok";
-import { ARENA_LEVEL, MOVEMENT, type PlayerDebugState } from "@twobullets/shared";
+import { ARENA_LEVEL, MAZE_LEVEL, MOVEMENT, type LevelData, type PlayerDebugState } from "@twobullets/shared";
 import { buildLevel } from "@twobullets/sim";
 import { AssetLibrary, installAssetDevTools, type AssetLoadProgress, type Credit } from "../assets";
 import { CombatSystem } from "../combat/CombatSystem";
@@ -27,6 +27,7 @@ import { cameraMapSource } from "../ui/map";
 import type { PerfWarning } from "../ui/PerfWarning";
 import { createEnvironment } from "../world/environment";
 import { MAP_FAR_PLANE, MapOverlay, MapRuntime, resolveMapDefinition } from "../world/mapRuntime";
+import { MAZE_LEVEL_ID } from "../world/mapRuntime/maps";
 import { resolveLaunch, type GameLaunch } from "./launch";
 
 /** Opens the low-FPS guide. Polled through the InputManager like the other function keys (debug/debugTools.ts). */
@@ -90,7 +91,7 @@ export class Game {
     // Gravity lives in our own movement code for the player; the world value affects dynamic props only.
     scene.enablePhysics(new Vector3(0, -MOVEMENT.gravity, 0), new HavokPlugin(true, havok));
 
-    // `v1|<realMapId>` loads a full map; null (or `arena`) keeps the blockout arena.
+    // `v1|<realMapId>` loads a full map; null (or `arena`/`maze`) keeps a standalone level.
     const netConfig = resolved.net;
     const matchOptions = resolved.practice;
     const botsMatch = matchOptions !== null;
@@ -102,7 +103,7 @@ export class Game {
     // Thousands of meshes and light exclusions are added while loading; resync materials once at the end instead.
     scene.blockMaterialDirtyMechanism = OPTIMIZATIONS.blockMaterialDirtyOnLoad;
     const world = mapDefinition ? await MapRuntime.load(scene, environment, { ...mapDefinition, overlay: new MapOverlay() }) : null;
-    const levelData = world?.level ?? ARENA_LEVEL;
+    const levelData = world?.level ?? standaloneLevel(mapId);
     const level = buildLevel(scene, levelData);
     environment.decorateLevel(level);
     const [assets] = await Promise.all([assetsLoading, environment.ready, world?.ready]);
@@ -127,6 +128,8 @@ export class Game {
     const equipment = new EquipmentSystem(scene, input, player, {
       ...(world && !net ? { map: { pois: world.map.pois, buildings: world.layout.buildings, outdoor: { flatten: world.map.flatten, terrain: world.terrain, layout: world.layout } } } : {}),
       ...(net ? netEquipmentOptions((release) => net.onThrowRelease(release)) : {}),
+      // No map loot (arena, maze): the test piles belong in front of this level's spawns, not the arena's.
+      spawnPoints: levelData.spawnPoints,
       targets: () => targets,
     });
     // Networked movement ignores equipment gates (the M3 server doesn't simulate equipment).
@@ -137,6 +140,8 @@ export class Game {
     const presentation = new WeaponPresentation(scene, player, combat, assets, environment);
     presentation.attachEquipment(equipment);
     presentation.audio.attachEquipment(equipment);
+    // Rounds go straight through a mirror pane, and each one cuts a hole in it you can see the corridor through.
+    presentation.attachPanes(world?.props.mirrors ?? null);
     // Networked: the server owns out-of-bounds, so the map doesn't respawn the player locally.
     world?.attach(net ? null : player, presentation.audio.probe);
     // Ground loot shares the presentation's throwable and consumable meshes (and their materials). Networked: the server's
@@ -266,6 +271,14 @@ export class Game {
     this.dynamicResolution?.update(performance.now(), this.engine.getDeltaTime());
     perf?.endFrame();
   }
+}
+
+/**
+ * The level for a `?map=` id that `resolveMapDefinition` gave no map for: `maze` is the 150 m maze (walk and shoot
+ * only — no terrain or nav grid, so no bots, zone or BR rules), anything else the blockout arena.
+ */
+function standaloneLevel(mapId: string | null): LevelData {
+  return mapId === MAZE_LEVEL_ID ? MAZE_LEVEL : ARENA_LEVEL;
 }
 
 /** Fake frame rate for the DEV `?perfwarn=` preview, low enough to read like the real thing. */

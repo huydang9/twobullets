@@ -9,6 +9,8 @@ import type { MutVec3 } from "../brain/util";
 const ROTATE_SPEED = 6.5;
 /** Straight-line → path length fudge. */
 const DETOUR = 1.25;
+/** Never trust a measured detour below the open-ground default (a bot that has only walked short legs). */
+const MIN_DETOUR = DETOUR;
 /** Safe point depth inside the target circle, fraction of its radius. */
 const SAFE_DEPTH = 0.7;
 /** Inside this fraction of the next radius the bot is already safe. */
@@ -28,7 +30,7 @@ export function createRotatePlan(): RotatePlan {
   return { score: 0, outside: false, target: { x: 0, y: 0, z: 0 }, circle: null };
 }
 
-export function planRotate(zone: ZoneState, feet: Vec3, dt: number, marginSeconds: number, out: RotatePlan): RotatePlan {
+export function planRotate(zone: ZoneState, feet: Vec3, dt: number, marginSeconds: number, out: RotatePlan, detour = DETOUR): RotatePlan {
   out.score = 0;
   out.outside = false;
   out.circle = null;
@@ -48,7 +50,7 @@ export function planRotate(zone: ZoneState, feet: Vec3, dt: number, marginSecond
   }
   if (!next || dGoal <= next.r * SAFE_INSIDE) return out;
 
-  const pathSeconds = (Math.max(0, dGoal - next.r * SAFE_DEPTH) * DETOUR) / ROTATE_SPEED;
+  const pathSeconds = (Math.max(0, dGoal - next.r * SAFE_DEPTH) * (detour > MIN_DETOUR ? detour : MIN_DETOUR)) / ROTATE_SPEED;
   const edgeSeconds = secondsUntilEdge(zone, feet, dt);
   const p = (pathSeconds + marginSeconds) / Math.max(0.1, edgeSeconds);
   out.score = 0.9 * (p < 0 ? 0 : p > 1 ? 1 : p);

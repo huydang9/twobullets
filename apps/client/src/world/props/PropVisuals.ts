@@ -1,7 +1,7 @@
 import { Color3, PBRMaterial, VertexBuffer, type Mesh, type Scene } from "@babylonjs/core";
 import { PROP_MANIFEST, PropLibrary, isPropId, type PropId, type PropLevel, type PropLibraryOptions } from "../propAssets";
 import { detectImpostorPlanes, type ImpostorPlanes } from "./impostor";
-import { buildStandIn, standInSpec } from "./standInMeshes";
+import { buildStandIn, standInSpec, type StandInMaterials } from "./standInMeshes";
 
 export interface PropVisualLevel {
   /** Camera distance from which this level is used, m. */
@@ -29,12 +29,16 @@ export interface PropVisual {
  */
 export class PropVisuals {
   private readonly visuals = new Map<string, PropVisual>();
+  private glassMaterial: PBRMaterial | null = null;
+  private readonly standInMaterials: StandInMaterials;
 
   private constructor(
     private readonly scene: Scene,
     private readonly library: PropLibrary | null,
     private readonly standInMaterial: PBRMaterial,
-  ) {}
+  ) {
+    this.standInMaterials = { solid: standInMaterial, glass: () => (this.glassMaterial ??= createGlassMaterial(this.scene)) };
+  }
 
   /** `library` false skips environment assets entirely (stand-ins only), e.g. for headless checks. */
   static async load(scene: Scene, props: readonly string[], library: Omit<PropLibraryOptions, "ids"> | false = {}): Promise<PropVisuals> {
@@ -65,6 +69,7 @@ export class PropVisuals {
   dispose(): void {
     this.library?.dispose();
     this.standInMaterial.dispose();
+    this.glassMaterial?.dispose();
   }
 
   private resolve(prop: string): PropVisual {
@@ -91,9 +96,27 @@ export class PropVisuals {
       asset: false,
       cullDistance,
       castShadow: spec.castShadow,
-      levels: spec.levels.map((level, index) => ({ distance: level.distance, billboard: false, impostor: null, create: (name: string) => [buildStandIn(this.scene, prop, index, name, this.standInMaterial)] })),
+      levels: spec.levels.map((level, index) => ({ distance: level.distance, billboard: false, impostor: null, create: (name: string) => buildStandIn(this.scene, prop, index, name, this.standInMaterials) })),
     };
   }
+}
+
+/**
+ * Shared material for glazed stand-in parts (`wall_glass`): a tinted, near-mirror-smooth pane that picks up the sky
+ * from the scene's IBL, so it reads as glass instead of an invisible wall. Back faces are culled and depth writes are
+ * off, so a closed pane box blends exactly once from either side and everything behind it — including more panes —
+ * still shows through. One flat tint blends to the same result in any order, so hundreds of panes need no sorting.
+ */
+function createGlassMaterial(scene: Scene): PBRMaterial {
+  const material = new PBRMaterial("mat_prop_glass", scene);
+  material.albedoColor = new Color3(0.36, 0.47, 0.45);
+  material.metallic = 0;
+  material.roughness = 0.04;
+  material.alpha = 0.3;
+  material.transparencyMode = PBRMaterial.MATERIAL_ALPHABLEND;
+  material.disableDepthWrite = true;
+  material.enableSpecularAntiAliasing = true;
+  return material;
 }
 
 /** Shared plane layout of every mesh of an impostor level, or null. */

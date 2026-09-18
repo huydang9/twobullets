@@ -251,3 +251,137 @@ export class BuildingSearch {
     this.point.z = this.points[o + 2]!;
   }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Roam (maze fix): `BuildingSearch` is the only thing that makes an idle bot walk, and it needs buildings. A map made
+// of props — the maze is 682 walls and one watchtower — leaves every goal at zero, so `idle` (0.05) wins and the bot
+// stands still scanning for the whole match. Roam is the map-agnostic fallback: a seeded walkable destination from
+// `sampleRing`, biased away from where this bot has already been and toward the circle it has to end up in. Distances
+// come from the nav grid's own extent, so a 144 m maze and a 500 m Map v1 both get sensible legs.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Destinations remembered per bot, so a roam doesn't walk back the way it came. */
+const ROAM_MEMORY = 8;
+/** Ring candidates per pick. */
+const ROAM_CANDIDATES = 12;
+/** Fraction of the map span a roam leg covers at most. */
+const ROAM_SPAN_FRACTION = 0.3;
+const ROAM_MIN_RADIUS = 18;
+const ROAM_MAX_RADIUS = 120;
+/** Abandon a destination that is still not reached after this long, s. */
+const ROAM_SECONDS = 30;
+/** Stand and watch after arriving, s (a bot that never stops reads as a conveyor belt). */
+const ROAM_PAUSE_SECONDS: readonly [number, number] = [1.5, 4];
+
+export class Roam {
+  /** Current destination; valid while `active`. */
+  readonly point: MutVec3 = vec3();
+  active = false;
+
+  private readonly ring = new Float32Array(ROAM_CANDIDATES * 3);
+  /** Recent destinations as xz pairs (ring buffer). */
+  private readonly visited = new Float32Array(ROAM_MEMORY * 2);
+  private visitedCount = 0;
+  private visitedNext = 0;
+  private startTick = 0;
+  private pauseUntil = 0;
+
+  reset(): void {
+    this.active = false;
+    this.visitedCount = 0;
+    this.visitedNext = 0;
+    this.pauseUntil = 0;
+  }
+
+  /** True while the bot is standing at a reached destination (look around instead of walking). */
+  paused(tick: number): boolean {
+    return tick < this.pauseUntil;
+  }
+
+  /**
+   * Ensures a destination. `zone` (the circle the bot must end up in, or null) pulls picks inside it, more strongly as
+   * it shrinks. False when nav offers nothing walkable, in which case the caller falls back to scanning.
+   */
+  ensure(view: BotWorldView, zone: ZoneCircle | null, rng: BotRandom): boolean {
+    const tick = view.tick;
+    if (this.active && (tick - this.startTick) * view.dt <= ROAM_SECONDS) return true;
+    if (tick < this.pauseUntil) return false;
+    return this.choose(view, zone, rng);
+  }
+
+  /** After the motor ran toward `point`: arriving starts a short watch pause, giving up picks a new leg next call. */
+  advance(view: BotWorldView, arrived: boolean, gaveUp: boolean, rng: BotRandom): void {
+    if (!this.active) return;
+    if (arrived) {
+      this.active = false;
+      this.pauseUntil = view.tick + Math.round(rng.span(ROAM_PAUSE_SECONDS) / view.dt);
+    } else if (gaveUp) {
+      this.active = false;
+      this.pauseUntil = 0;
+    }
+  }
+
+  /** Half the nav grid's playable square, m — the scale every roam distance is derived from. */
+  private span(view: BotWorldView): number {
+    const info = view.nav.grid.info;
+    return Math.min(info.width, info.depth) * info.cellSize;
+  }
+
+  private choose(view: BotWorldView, zone: ZoneCircle | null, rng: BotRandom): boolean {
+    const self = view.self;
+    const feet = self.feet;
+    const span = this.span(view);
+    let max = span * ROAM_SPAN_FRACTION;
+    if (max > ROAM_MAX_RADIUS) max = ROAM_MAX_RADIUS;
+    if (max < ROAM_MIN_RADIUS) max = ROAM_MIN_RADIUS;
+    const min = max * 0.4;
+    // The zone only steers while it is small enough to matter against the map (early circles cover everything).
+    const pull = zone ? Math.max(0, Math.min(1, 1 - (zone.r * 2) / span)) : 0;
+    let best = -1;
+    let bestScore = -Infinity;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const lo = attempt === 0 ? min : 3;
+      const n = view.nav.sampleRing(feet, lo, max, (rng.next() * 0xffffffff) >>> 0, this.ring, ROAM_CANDIDATES);
+      for (let i = 0; i < n; i++) {
+        const x = this.ring[i * 3]!;
+        const z = this.ring[i * 3 + 2]!;
+        const dx = x - feet.x;
+        const dz = z - feet.z;
+        // Farther is better: a short hop leaves the bot in the same corridor.
+        let score = Math.sqrt(dx * dx + dz * dz) / max;
+        if (zone) {
+          const zx = x - zone.cx;
+          const zz = z - zone.cz;
+          const d = Math.sqrt(zx * zx + zz * zz);
+          if (d > zone.r) score -= 3;
+          else score += pull * (1 - d / Math.max(1, zone.r)) * 2;
+        }
+        for (let v = 0; v < this.visitedCount; v++) {
+          const vx = x - this.visited[v * 2]!;
+          const vz = z - this.visited[v * 2 + 1]!;
+          const d = Math.sqrt(vx * vx + vz * vz);
+          if (d < max) score -= 1.5 * (1 - d / max);
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = i;
+        }
+      }
+      if (best >= 0) break;
+    }
+    if (best < 0) {
+      this.active = false;
+      return false;
+    }
+    this.point.x = this.ring[best * 3]!;
+    this.point.y = this.ring[best * 3 + 1]!;
+    this.point.z = this.ring[best * 3 + 2]!;
+    this.visited[this.visitedNext * 2] = this.point.x;
+    this.visited[this.visitedNext * 2 + 1] = this.point.z;
+    this.visitedNext = (this.visitedNext + 1) % ROAM_MEMORY;
+    if (this.visitedCount < ROAM_MEMORY) this.visitedCount++;
+    this.active = true;
+    this.startTick = view.tick;
+    return true;
+  }
+}

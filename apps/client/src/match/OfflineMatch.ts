@@ -346,6 +346,7 @@ export class OfflineMatch {
       difficulty: this.difficulty,
       humanSlot: this.humanSlot,
       spawns: this.spawns,
+      playableHalfExtent: world.map.terrain.playableHalfExtent,
       killY: world.map.bounds.killY,
       raycastWorld: this.raycastWorld.cast,
       nav: this.nav,

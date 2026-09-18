@@ -10,6 +10,7 @@ import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { MOVEMENT } from "@twobullets/shared/constants";
 import { COLLIDER_STRIDE, propColliderGroups } from "@twobullets/shared/map/layout/collision";
+import { glassBlocksAt } from "@twobullets/shared/map/glassPhase";
 import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import type { Terrain } from "@twobullets/shared/map/terrain/terrain";
 import type { Vec3 } from "@twobullets/shared/movement/types";
@@ -41,6 +42,14 @@ export interface MapCollision {
   readonly terrain: TerrainBody;
   readonly buildings: readonly BuildingBody[];
   readonly stats: MapCollisionStats;
+  /**
+   * Puts the glazed panes into their mode at `seconds` of match time (`shared/map/glassPhase.ts`): in one mode a pane
+   * stops bullets and blocks a bot's sight ray, in the other rounds pass straight through it. Each phase group has its
+   * own shape, so they never switch together. Call it once per tick with the tick's own time — every client derives the
+   * same modes from the same number, with nothing sent over the wire, and a world that never calls it holds the resting
+   * mode (shoot-through) forever.
+   */
+  setPhaseTime(seconds: number): void;
   dispose(): void;
 }
 
@@ -53,6 +62,8 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
   const shapes: PhysicsShape[] = [];
   const bodies: PhysicsBody[] = [];
   const meshes: Mesh[] = [];
+  /** Panes that switch mode: one entry per phase group, each with its own shape (see `setPhaseTime`). */
+  const phases: { shape: PhysicsShape; phase: number; solid: number; blocking: boolean }[] = [];
   const matrix = new Matrix();
   const rotation = new Quaternion();
   const translation = new Vector3();
@@ -63,7 +74,9 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
         ? new PhysicsShapeCylinder(Vector3.Zero(), new Vector3(0, group.shape.height, 0), group.shape.radius, scene)
         : new PhysicsShapeBox(new Vector3(0, group.shape.centerY, 0), Quaternion.Identity(), new Vector3(...group.shape.size), scene);
     shape.material = LEVEL_MATERIAL;
+    const solid = shape.filterMembershipMask;
     if (!group.bulletproof) shape.filterMembershipMask = CollisionLayer.blocker;
+    if (group.phase >= 0) phases.push({ shape, phase: group.phase, solid, blocking: group.bulletproof });
     const count = group.transforms.length / COLLIDER_STRIDE;
     const matrices = new Float32Array(count * 16);
     for (let i = 0; i < count; i++) {
@@ -72,7 +85,7 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
       Matrix.ComposeToRef(Vector3.OneReadOnly, rotation, translation.set(group.transforms[t]!, group.transforms[t + 1]!, group.transforms[t + 2]!), matrix);
       matrix.copyToArray(matrices, i * 16);
     }
-    const mesh = new Mesh(`propCollider_${group.prop}_${group.scale}`, scene);
+    const mesh = new Mesh(`propCollider_${group.prop}_${group.scale}${group.phase >= 0 ? `_p${group.phase}` : ""}`, scene);
     mesh.isVisible = false;
     mesh.isPickable = false;
     mesh.doNotSyncBoundingInfo = true;
@@ -89,6 +102,14 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
     terrain,
     buildings,
     stats: { buildings: buildings.length, propShapes: shapes.length, propBodies, buildMs: performance.now() - started },
+    setPhaseTime(seconds: number) {
+      for (const pane of phases) {
+        const blocking = glassBlocksAt(pane.phase, seconds);
+        if (blocking === pane.blocking) continue;
+        pane.blocking = blocking;
+        pane.shape.filterMembershipMask = blocking ? pane.solid : CollisionLayer.blocker;
+      }
+    },
     dispose() {
       for (const body of bodies) body.dispose();
       for (const shape of shapes) shape.dispose();

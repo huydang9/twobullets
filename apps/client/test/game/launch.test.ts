@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readNetConfig, resolveLaunch, type GameLaunch } from "../../src/game/launch";
 import { readOfflineMatchOptions } from "../../src/match/options";
 
 const tokens = async () => ({ token: "J", matchId: "m_1", url: "ws://localhost:7400/m/m_1", expiresAt: 0 });
 const DEV: GameLaunch = { kind: "dev" };
+
+/** Resolves a DEV URL and collects whatever it warned about. */
+function resolveDev(search: string): { resolved: ReturnType<typeof resolveLaunch>; warnings: string[] } {
+  const warnings: string[] = [];
+  const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warnings.push(args.join(" ")));
+  try {
+    return { resolved: resolveLaunch(DEV, search, true, readOfflineMatchOptions), warnings };
+  } finally {
+    warn.mockRestore();
+  }
+}
 
 describe("game launch", () => {
   it("net launch: the match's endpoint, account, team and map, in DEV and production alike, whatever the URL says", () => {
@@ -46,6 +57,48 @@ describe("game launch", () => {
     expect(net).toMatchObject({ practice: null, mapId: null, benchmark: null });
     expect(net.net).toMatchObject({ sub: "alice", team: 1, tokens: null });
     expect(resolveLaunch(DEV, "?net=ws://localhost:7350&map=v1", true, readOfflineMatchOptions).mapId).toBe("v1");
+  });
+
+  it("a standalone level keeps the level and drops the bots flag (no nav grid on a LevelData)", () => {
+    const maze = resolveDev("?map=maze&bots=1&difficulty=hard");
+    expect(maze.resolved).toMatchObject({ net: null, practice: null, mapId: "maze", benchmark: null });
+    expect(maze.warnings).toEqual(['[map] bots need a full map; ignoring bots=1 on level "maze"']);
+    // The arena is a level too, so `?map=arena&bots=1` is the same trap.
+    expect(resolveDev("?map=arena&bots=1").resolved.practice).toBeNull();
+
+    // Unchanged: bots with no map imply Map v1, and an explicit real map still runs a bot match.
+    const v1 = resolveDev("?bots=1&difficulty=easy");
+    expect(v1.resolved.mapId).toBe("v1");
+    expect(v1.resolved.practice).toMatchObject({ enabled: true, difficulty: "easy" });
+    expect(v1.warnings).toEqual([]);
+    const explicit = resolveDev("?map=v1&bots=1");
+    expect(explicit.resolved.mapId).toBe("v1");
+    expect(explicit.resolved.practice).toMatchObject({ enabled: true });
+    expect(explicit.warnings).toEqual([]);
+
+    // The level on its own is exactly what it was: no match, no warning.
+    const alone = resolveDev("?map=maze");
+    expect(alone.resolved).toMatchObject({ net: null, practice: null, mapId: "maze", benchmark: null });
+    expect(alone.warnings).toEqual([]);
+  });
+
+  it("a networked session ignores a standalone level map id (the server would simulate the arena)", () => {
+    const net = resolveDev("?net=ws://localhost:7350/m/local&map=maze");
+    expect(net.resolved.mapId).toBeNull();
+    expect(net.resolved.net).not.toBeNull();
+    expect(net.warnings).toEqual([`[map] a networked match runs the server's map; ignoring level "maze" and loading the arena`]);
+
+    // The arena is what Game reports anyway, and a real map is the server's map: both pass through unwarned.
+    expect(resolveDev("?net=ws://localhost:7350/m/local&map=arena")).toMatchObject({ resolved: { mapId: "arena" }, warnings: [] });
+    expect(resolveDev("?net=ws://localhost:7350/m/local&map=v1")).toMatchObject({ resolved: { mapId: "v1" }, warnings: [] });
+
+    // From the front door the match's map wins the same way.
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warnings.push(args.join(" ")));
+    const launch: GameLaunch = { kind: "net", wsUrl: "ws://h:1/m/m_1", accountId: "acc_1", teamId: 0, mapId: "maze", matchId: "m_1", tokens };
+    expect(resolveLaunch(launch, "", true, readOfflineMatchOptions).mapId).toBeNull();
+    warn.mockRestore();
+    expect(warnings).toHaveLength(1);
   });
 
   it("?net= flags: endpoint and dev token URL, team range, avatar, hitbox debug, zone scale hint", () => {

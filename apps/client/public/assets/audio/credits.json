@@ -1,7 +1,7 @@
 {
   "note": "All shipped audio is CC0 (public domain) except the clips marked \"Owner-supplied\", which the project owner provided for the internal release. Attribution is not required but given here.",
   "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
-  "generated": "2026-09-15",
+  "generated": "2026-09-18",
   "formats": [
     "ogg (Opus)",
     "m4a (AAC-LC)"
@@ -576,6 +576,22 @@
       ],
       "files": [
         "voice.fragOut.0 ← chay-di-cac-chau-oi.mp3@0.000s"
+      ]
+    },
+    {
+      "id": "ownerGlassBlocked",
+      "title": "do-anh-bat-duoc-em.mp3 (bullet stopped by bulletproof glass)",
+      "authors": [
+        "Unknown (from the internet)"
+      ],
+      "license": "Owner-supplied",
+      "url": "",
+      "download": "",
+      "sounds": [
+        "voice.glassBlocked"
+      ],
+      "files": [
+        "voice.glassBlocked.0 ← do-anh-bat-duoc-em.mp3@2.713s"
       ]
     }
   ]

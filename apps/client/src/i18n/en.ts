@@ -505,6 +505,7 @@ export const en: Messages = {
   "mapPicker.previewAlt": "Map of {name}",
   "mapPicker.fictionalName": "Map v1",
   "mapPicker.fictionalPlace": "Fictional valley",
+  "mapPicker.fictionalPlaceGeneric": "Fictional map",
   "mapPicker.country.vn": "Vietnam",
   "mapPicker.pois": { one: "{count} place", other: "{count} places" },
   "mapPicker.buildings": { one: "{count} building", other: "{count} buildings" },

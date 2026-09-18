@@ -1,6 +1,7 @@
 import { MAX_MATCH_PLAYERS } from "@twobullets/shared/match/teams";
 import type { OfflineMatchOptions } from "../match/options";
 import { devPlayerId, parseNetParam, type DevToken, type NetEndpoint } from "../net/handshake";
+import { isLevelId } from "../world/mapRuntime/maps";
 
 // How a game starts (menu/README-wiring.md): an explicit launch from the front door (networked match or practice),
 // or DEV URL flags. Pure: no Babylon, no DOM, so the rules are unit-tested (test/game/launch.test.ts).
@@ -92,12 +93,30 @@ export interface ResolvedLaunch {
   readonly benchmark: string | null;
 }
 
+/** The standalone level Game builds without a map, and the map id it reports to the server for one (Game.ts). */
+const DEFAULT_LEVEL_ID = "arena";
+
+/**
+ * A networked session runs the server's map and reports any standalone level as the arena, so another level id would
+ * pit one world against the other's simulation. The session wins: drop the id and keep the arena.
+ */
+function netMapId(mapId: string | null): string | null {
+  if (mapId !== null && isLevelId(mapId) && mapId !== DEFAULT_LEVEL_ID) {
+    console.warn(`[map] a networked match runs the server's map; ignoring level "${mapId}" and loading the arena`);
+    return null;
+  }
+  return mapId;
+}
+
 /**
  * The single place that decides the game mode:
  * - `net`: networked on the match's map, whatever the URL says.
  * - `practice`: offline bot match on its map.
  * - `dev` (DEV builds only): `?bench=v1` (implies `?map=v1`), `?net=` (optionally `&map=`, default arena, the server's
  *   `--map`), `?bots=1` (implies `?map=v1`), `?map=`; nothing = the arena. Production ignores URL flags.
+ *
+ * A standalone level (`LEVEL_IDS`: `arena`, `maze`) is a bare `LevelData` with no `MapData` — no nav grid for bots and
+ * no twin on the server — so an explicit level id keeps the level and drops the bots flag / the networked map id.
  */
 export function resolveLaunch(launch: GameLaunch, search: string, dev: boolean, readPractice: (search: string, dev: boolean) => OfflineMatchOptions): ResolvedLaunch {
   const params = new URLSearchParams(search);
@@ -113,7 +132,7 @@ export function resolveLaunch(launch: GameLaunch, search: string, dev: boolean, 
       zoneTimeScale: 1,
       onExit: launch.onExit ?? null,
     };
-    return { net: config, practice: null, mapId: launch.mapId || null, benchmark: null };
+    return { net: config, practice: null, mapId: netMapId(launch.mapId || null), benchmark: null };
   }
   if (launch.kind === "practice") {
     return { net: null, practice: { ...launch.options, enabled: true }, mapId: launch.mapId || "v1", benchmark: null };
@@ -122,7 +141,12 @@ export function resolveLaunch(launch: GameLaunch, search: string, dev: boolean, 
   const benchmark = params.get("bench");
   const net = benchmark ? null : readNetConfig(params);
   const practice = readPractice(search, dev);
-  const bots = !benchmark && !net && practice.enabled;
-  const mapId = benchmark === "v1" ? "v1" : (params.get("map") ?? (bots ? "v1" : null));
+  const requested = params.get("map");
+  let bots = !benchmark && !net && practice.enabled;
+  if (bots && isLevelId(requested)) {
+    console.warn(`[map] bots need a full map; ignoring bots=1 on level "${requested}"`);
+    bots = false;
+  }
+  const mapId = benchmark === "v1" ? "v1" : ((net ? netMapId(requested) : requested) ?? (bots ? "v1" : null));
   return { net, practice: bots ? practice : null, mapId, benchmark };
 }

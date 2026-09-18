@@ -2,6 +2,7 @@
 export * from "./constants";
 export * from "./level/types";
 export * from "./level/arena";
+export * from "./level/maze";
 export * from "./movement/types";
 export * from "./movement/movement";
 export * from "./weapons/types";
@@ -15,6 +16,8 @@ export * from "./map/types";
 export * from "./map/terrain/index";
 export * from "./map/draftMapV1";
 export * from "./map/mapV1";
+export * from "./map/mazeBr";
+export * from "./map/glassPhase";
 export * from "./map/layout/index";
 export * from "./map/buildings/index";
 export * from "./equipment/index";

@@ -28,6 +28,13 @@ const C = {
   car: [0.24, 0.22, 0.2],
   hay: [0.62, 0.5, 0.24],
   sand: [0.45, 0.39, 0.27],
+  /** Shaded foliage mass inside a hedge, and the slightly lit band of it. */
+  hedge: [0.09, 0.16, 0.06],
+  hedgeLight: [0.13, 0.21, 0.07],
+  /** Glazing stays white: the shared glass material carries the tint. */
+  pane: [1, 1, 1],
+  /** Behind a mirror's silvered faces: never seen, but it is what casts the panel's shadow. */
+  mirrorBack: [0.16, 0.16, 0.17],
 } as const satisfies Record<string, Color>;
 
 class Builder {
@@ -138,6 +145,8 @@ export interface StandInLevel {
   /** Camera distance from which this level is used, m. */
   readonly distance: number;
   build(builder: Builder): void;
+  /** Glazed part, built as a second mesh with the shared glass material (`wall_glass`). */
+  glass?(builder: Builder): void;
 }
 
 export interface StandInSpec {
@@ -221,6 +230,147 @@ const rock = (size: readonly [number, number, number], seed: number, mossy: bool
   ],
 });
 
+/**
+ * Mirrored panel geometry (`wall_mirror`), prop-local meters: the silvered pane inside its frame. Shared by the frame
+ * stand-in below and by the reflective faces MirrorWalls builds, so the two always line up. The pane sits 0.02 m inside
+ * the frame: no z-fighting. The two faces are the whole body of the panel — there is nothing between them, so a hole
+ * punched through both is a hole you see the corridor through.
+ */
+export const MIRROR_PANEL = {
+  halfWidth: 1.88,
+  bottom: 0.12,
+  top: 2.44,
+  /** Pane offset from the wall's center plane along local Z; a pane on each side. */
+  faceOffset: 0.13,
+  frameOffset: 0.15,
+} as const;
+
+/**
+ * Glazed panel geometry (`wall_glass`), prop-local meters: the pane inside its frame. A pane looks exactly the same
+ * whether it is stopping bullets or letting them through — that is the whole deception — so there is nothing here that
+ * varies; what a round did to it is told by the flash where it struck (fx/ImpactEffects `paneStop`).
+ */
+export const GLASS_PANEL = {
+  halfWidth: 1.86,
+  bottom: 0.14,
+  top: 2.44,
+  /** Half the glass's own thickness: the surface a bullet hole sits on, either side of the centre plane. */
+  paneOffset: 0.02,
+} as const;
+
+/**
+ * Glazed wall panel (`wall_glass`): a metal frame (posts, sill, head rail, cap and a centre mullion) around a pane, at
+ * wall_concrete's size. There is one glazed panel now — it used to be two look-alikes, one of which quietly stopped
+ * bullets. What a pane does to a bullet changes on a clock instead (map/glassPhase.ts), and the tell is drawn over the
+ * pane by `PhaseGlass`, not built into it here: the geometry is thin-instanced and shared by every pane in the maze.
+ */
+function glassPanel(): StandInSpec {
+  const { halfWidth: w, bottom: y0, top: y1 } = GLASS_PANEL;
+  const d = 0.12; // frame half depth (the concrete wall's cap reaches 0.18)
+  const m = 0.05; // half a mullion
+  const frame = (b: Builder, mullion: boolean) => {
+    b.box([-2, -0.4, -d], [-w, 2.6, d], C.metal);
+    b.box([w, -0.4, -d], [2, 2.6, d], C.metal);
+    b.box([-w, -0.4, -d], [w, y0, d], C.metal);
+    b.box([-w, y1, -d], [w, 2.6, d], C.metal);
+    b.box([-2, 2.6, -d - 0.03], [2, 2.7, d + 0.03], C.metal);
+    if (mullion) b.box([-m, y0, -0.08], [m, y1, 0.08], C.metal);
+  };
+  const g = GLASS_PANEL.paneOffset;
+  const pane = (b: Builder, split: boolean) => {
+    if (!split) {
+      b.box([-w, y0, -g], [w, y1, g], C.pane);
+      return;
+    }
+    b.box([-w, y0, -g], [-m, y1, g], C.pane);
+    b.box([m, y0, -g], [w, y1, g], C.pane);
+  };
+  return {
+    cullDistance: 700,
+    // No shadow: the depth pass would cast an opaque slab.
+    castShadow: false,
+    levels: [
+      { distance: 0, build: (b) => frame(b, true), glass: (b) => pane(b, true) },
+      { distance: 60, build: (b) => frame(b, false), glass: (b) => pane(b, false) },
+    ],
+  };
+}
+
+/**
+ * Grass wall (`wall_grass`), at wall_concrete's size so it drops into the same lattice: the only panel in the maze with
+ * no collider, so you and your bullets go straight through it. That makes its looks the whole deception — it has to
+ * read as a barrier you cannot pass and cannot see through, and only give itself away when you push into it.
+ *
+ * So the body is an opaque lofted slab, not a sparse curtain of blades: 12 segments across the 4 m span, each with its
+ * own crown height and thickness from `hash2`, which gives a ragged hedge-top silhouette with no gap to see daylight
+ * through at any angle. The blades stand off the crown and both faces to make it read as foliage rather than a painted
+ * green box. Nothing is transparent and nothing alpha-tests, so this stays one ordinary opaque mesh per LOD inside the
+ * thin-instance batch — hundreds of hedges are still the same handful of draw calls as hundreds of concrete panels.
+ *
+ * Cull distance and shadows deliberately match `wall_concrete` (720 m, casting): a hedge that faded out or stopped
+ * casting where its neighbours did not would mark every walk-through wall on the map from across the maze.
+ */
+function grassWall(): StandInSpec {
+  const SEED = 0x67_72_73;
+  const SEGMENTS = 12;
+  const rnd = (i: number, salt: number) => hash2(i, salt, SEED) / 4294967296;
+  /** One column of the slab: its place along the wall, its crown height and half its thickness. */
+  const column = (i: number) => ({ x: -2 + (i / SEGMENTS) * 4, top: 2.2 + 0.45 * rnd(i, 1), half: 0.24 + 0.16 * rnd(i, 2) });
+
+  const slab = (b: Builder): void => {
+    let a = column(0);
+    // End caps: an edge's two pieces butt together and the next edge along may be concrete, so the run needs ends.
+    b.quad([a.x, -0.5, -a.half], [a.x, -0.5, a.half], [a.x, a.top, a.half], [a.x, a.top, -a.half], C.hedge);
+    for (let i = 1; i <= SEGMENTS; i++) {
+      const c = column(i);
+      const tint = i % 2 === 0 ? C.hedge : C.hedgeLight;
+      b.quad([a.x, -0.5, a.half], [c.x, -0.5, c.half], [c.x, c.top, c.half], [a.x, a.top, a.half], tint);
+      b.quad([a.x, -0.5, -a.half], [c.x, -0.5, -c.half], [c.x, c.top, -c.half], [a.x, a.top, -a.half], tint);
+      b.quad([a.x, a.top, -a.half], [a.x, a.top, a.half], [c.x, c.top, c.half], [c.x, c.top, -c.half], C.grass);
+      a = c;
+    }
+    b.quad([a.x, -0.5, -a.half], [a.x, -0.5, a.half], [a.x, a.top, a.half], [a.x, a.top, -a.half], C.hedge);
+  };
+
+  /** A tapered blade rooted at (x, y, z), leaning to (+lx, +ly, +lz). Two-sided, like the grass clumps. */
+  const blade = (b: Builder, x: number, y: number, z: number, lx: number, ly: number, lz: number, half: number, color: Color): void => {
+    b.tri([x - half, y, z], [x + lx, y + ly, z + lz], [x + half, y, z], color, true);
+  };
+
+  /** `crown` blades out of the top and `face` per side, so the outline frays instead of ending in a clean edge. */
+  const foliage = (b: Builder, crown: number, face: number): void => {
+    for (let i = 0; i < crown; i++) {
+      const t = rnd(i, 3);
+      const u = rnd(i, 4);
+      const x = -1.94 + (3.88 * (i + t * 0.7)) / crown;
+      const c = column(Math.min(SEGMENTS, Math.round(((x + 2) / 4) * SEGMENTS)));
+      const z = (u * 2 - 1) * c.half;
+      blade(b, x, c.top - 0.12, z, (t - 0.5) * 0.3, 0.3 + 0.45 * u, (u - 0.5) * 0.35, 0.05 + 0.04 * t, i % 3 === 0 ? C.grassTip : C.grass);
+    }
+    for (let i = 0; i < face; i++) {
+      const t = rnd(i, 5);
+      const u = rnd(i, 6);
+      for (const side of [-1, 1] as const) {
+        const x = -1.9 + (3.8 * (i + (side > 0 ? t : u) * 0.8)) / face;
+        const c = column(Math.min(SEGMENTS, Math.round(((x + 2) / 4) * SEGMENTS)));
+        const y = 0.2 + (c.top - 0.5) * (side > 0 ? t : u);
+        blade(b, x, y, side * c.half * 0.9, (t - 0.5) * 0.25, 0.25 + 0.4 * u, side * (0.12 + 0.16 * t), 0.05 + 0.03 * u, i % 4 === 0 ? C.grassTip : C.grass);
+      }
+    }
+  };
+
+  return {
+    cullDistance: 720,
+    castShadow: true,
+    levels: [
+      { distance: 0, build: (b) => (slab(b), foliage(b, 34, 17)) },
+      { distance: 45, build: (b) => (slab(b), foliage(b, 20, 0)) },
+      // The slab survives to the cull distance: the silhouette is the lie, and it must never change shape.
+      { distance: 150, build: slab },
+    ],
+  };
+}
+
 const solid = (cull: number, build: (b: Builder) => void, far?: (b: Builder) => void): StandInSpec => ({
   cullDistance: cull,
   castShadow: true,
@@ -288,6 +438,23 @@ const SPECS: Readonly<Record<string, StandInSpec>> = {
     (b) => (b.box([-2, -0.4, -0.15], [2, 2.6, 0.15], C.concrete), b.box([-2, 2.6, -0.18], [2, 2.7, 0.18], C.concrete)),
     (b) => b.box([-2, -0.4, -0.15], [2, 2.7, 0.15], C.concrete),
   ),
+  // Same size as wall_concrete so they all swap in a lattice.
+  wall_glass: glassPanel(),
+  // Mirrored panel: the metal frame only, at wall_concrete's size so the three swap in a lattice. The two silvered
+  // faces are NOT here — MirrorWalls draws them per mirror, because a reflection needs a per-plane material and cannot
+  // live in a thin-instance batch, and because since 2026-09-18 a round punches a see-through hole in one, which is a
+  // per-pane texture. Those faces are opaque and are what fills the frame; there is no shared core behind them any
+  // more, since a core in this batch would still be standing behind every hole. One level only: a far level with a
+  // plain solid box would swallow the faces.
+  wall_mirror: solid(700, (b) => {
+    const { halfWidth: w, bottom, top, frameOffset: f } = MIRROR_PANEL;
+    b.box([-2, -0.4, -f], [-w, 2.6, f], C.metal);
+    b.box([w, -0.4, -f], [2, 2.6, f], C.metal);
+    b.box([-w, -0.4, -f], [w, bottom, f], C.metal);
+    b.box([-w, top, -f], [w, 2.6, f], C.metal);
+    b.box([-2, 2.6, -0.18], [2, 2.7, 0.18], C.metal);
+  }),
+  wall_grass: grassWall(),
   sandbags: solid(250, (b) => {
     for (let row = 0; row < 3; row++) {
       for (let i = 0; i < 4 - (row % 2); i++) {
@@ -317,9 +484,22 @@ export function standInSpec(prop: string): StandInSpec {
   return SPECS[prop] ?? CATEGORY_FALLBACK[getMapProp(prop).category];
 }
 
-/** Builds the mesh for one stand-in level, disabled, at the prop origin. */
-export function buildStandIn(scene: Scene, prop: string, level: number, name: string, material: Material): Mesh {
-  const builder = new Builder();
-  standInSpec(prop).levels[level]!.build(builder);
-  return builder.build(name, scene, material);
+export interface StandInMaterials {
+  readonly solid: Material;
+  /** Created on first use: only glazed props need it. */
+  glass(): Material;
+}
+
+/** Builds the meshes for one stand-in level at the prop origin: the solid part, plus the glazed one where there is one. */
+export function buildStandIn(scene: Scene, prop: string, level: number, name: string, materials: StandInMaterials): Mesh[] {
+  const spec = standInSpec(prop).levels[level]!;
+  const solidBuilder = new Builder();
+  spec.build(solidBuilder);
+  const meshes = [solidBuilder.build(name, scene, materials.solid)];
+  if (spec.glass) {
+    const glassBuilder = new Builder();
+    spec.glass(glassBuilder);
+    meshes.push(glassBuilder.build(`${name}_glass`, scene, materials.glass()));
+  }
+  return meshes;
 }

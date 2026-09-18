@@ -11,8 +11,14 @@ import {
   zoneAt,
   zoneAtInto,
   zoneCloseSeconds,
+  zonePlayableHalfExtent,
+  zoneSpecForHalfExtent,
   zoneTickDamage,
+  type ZoneCenterCheck,
 } from "./zone";
+import { MAP_V1 } from "../map/mapV1";
+import { REAL_TERRAIN } from "../map/real/convert/elevation";
+import type { ZoneSpec } from "./types";
 
 const spec = DEFAULT_ZONE_SPEC;
 const START = 300;
@@ -140,5 +146,76 @@ describe("zoneAt", () => {
     expect(distanceOutsideZone(circle, 20, 0)).toBeCloseTo(5, 9);
     expect(zoneTickDamage(spec, 1)).toBeCloseTo(0.1, 9);
     expect(zoneTickDamage(spec, 20)).toBeCloseTo(2, 9);
+  });
+});
+
+describe("scaling to the map", () => {
+  const SEEDS = [1, 7, 42, 1234, 99999];
+  /** Captured from the ±250 m schedule before the zone read the map's half extent: [cx, cz, r] per phase, per seed. */
+  const V1_GOLDEN: number[][][] = [[[23.12,2.38,200],[-37.22,-9.62,125],[-26.5,-24.73,75],[-53.49,-25.85,45],[-64.93,-25.64,25],[-69.52,-14.62,12],[-77.91,-21.38,0]],[[58.84,115.31,200],[39.83,87.3,125],[48.22,49.32,75],[52.84,64.9,45],[35.03,67.53,25],[35.22,62.02,12],[38.14,66.04,0]],[[-42.29,-106.05,200],[19.48,-95.65,125],[-14.27,-85.69,75],[-5.18,-59.06,45],[-6.35,-49.83,25],[-12.88,-43.9,12],[-23.39,-43.27,0]],[[17.69,-50.84,200],[35.2,-80.15,125],[50.78,-33.13,75],[54.98,-60.37,45],[54.36,-42.81,25],[42.14,-42.97,12],[41.08,-48.4,0]],[[52.61,10.15,200],[-10.74,7.4,125],[-25.83,52.69,75],[-49.06,36.77,45],[-33.63,32.89,25],[-40.73,40.57,12],[-41.4,50.75,0]]];
+  /** Same seeds through the re-roll path (a check that rejects half the map). */
+  const V1_GOLDEN_CHECKED: number[][][] = [[[23.12,2.38,200],[26.7,52.02,125],[37.42,36.91,75],[10.43,35.79,45],[-1.01,36,25],[-5.6,47.02,12],[-13.99,40.26,0]],[[58.84,115.31,200],[39.83,87.3,125],[48.22,49.32,75],[52.84,64.9,45],[35.03,67.53,25],[35.22,62.02,12],[38.14,66.04,0]],[[-42.6,47.24,200],[19.17,51.22,125],[-14.58,61.18,75],[-5.49,87.81,45],[-6.66,97.04,25],[-13.19,102.97,12],[-23.7,103.6,0]],[[52.57,49.36,200],[70.08,20.05,125],[85.66,67.07,75],[89.86,39.83,45],[89.24,57.39,25],[77.02,57.23,12],[75.96,51.8,0]],[[52.61,10.15,200],[37.28,25.54,125],[22.19,70.83,75],[-1.04,54.91,45],[14.39,51.03,25],[7.29,58.71,12],[6.62,68.89,0]]];
+
+  const circles = (zone: ZoneSpec, seed: number, check: ZoneCenterCheck | null = null): number[][] =>
+    scheduleZonePhases(zone, seed, 0, 1, check).map((p) => [p.to.cx, p.to.cz, p.to.r]);
+
+  it("Map v1 and the real maps keep exactly the schedule they had before the zone scaled", () => {
+    expect(MAP_V1.terrain.playableHalfExtent).toBe(ZONE_PLAYABLE_HALF_EXTENT);
+    expect(REAL_TERRAIN.playableHalfExtent).toBe(ZONE_PLAYABLE_HALF_EXTENT);
+    // Same object, so nothing downstream (the server level, the net view) can see a different spec.
+    expect(zoneSpecForHalfExtent(MAP_V1.terrain.playableHalfExtent)).toBe(DEFAULT_ZONE_SPEC);
+    SEEDS.forEach((seed, i) => {
+      expect(circles(spec, seed), `seed ${seed}`).toEqual(V1_GOLDEN[i]);
+      expect(circles(spec, seed, (x, z) => x + z > 0), `seed ${seed}, rejecting checker`).toEqual(V1_GOLDEN_CHECKED[i]);
+    });
+  });
+
+  it("a smaller map gets the same schedule with every radius scaled", () => {
+    const half = 72; // the maze
+    const small = zoneSpecForHalfExtent(half);
+    const k = half / ZONE_PLAYABLE_HALF_EXTENT;
+    expect(zonePlayableHalfExtent(small)).toBe(half);
+    expect(small.initial).toEqual({ cx: 0, cz: 0, r: 102.24 });
+    // The first circle still covers the playable square, as 355 does at ±250 m.
+    expect(small.initial.r).toBeGreaterThan(half * Math.SQRT2);
+    expect(small.phases.map((p) => p.radius)).toEqual(spec.phases.map((p) => Math.round(p.radius * k * 100) / 100));
+    // Phase 1 squeezes the map instead of containing it (the bug: 200 m on a 144 m map).
+    expect(small.phases[0]!.radius).toBeLessThan(half);
+    // Timings, damage and the phase count are untouched: this is a scaling fix, not a re-design.
+    expect(small.phases.map((p) => [p.waitSeconds, p.shrinkSeconds, p.dps])).toEqual(spec.phases.map((p) => [p.waitSeconds, p.shrinkSeconds, p.dps]));
+    expect(zoneCloseSeconds(small)).toBe(zoneCloseSeconds(spec));
+    expect(small.firstAnnounceSeconds).toBe(spec.firstAnnounceSeconds);
+    expect(small.damageIntervalTicks).toBe(spec.damageIntervalTicks);
+  });
+
+  it("keeps a small map's circles inside its playable square", () => {
+    const half = 72;
+    const small = zoneSpecForHalfExtent(half);
+    for (let seed = 0; seed < 200; seed++) {
+      for (const p of scheduleZonePhases(small, seed, 0)) {
+        const bound = half - small.edgeMargin - 0.5 * p.to.r;
+        expect(Math.abs(p.to.cx), `seed ${seed} phase ${p.index}`).toBeLessThanOrEqual(bound + 1e-9);
+        expect(Math.abs(p.to.cz), `seed ${seed} phase ${p.index}`).toBeLessThanOrEqual(bound + 1e-9);
+        // And the circle itself stays on the map.
+        expect(Math.max(Math.abs(p.to.cx), Math.abs(p.to.cz)) + p.to.r).toBeLessThanOrEqual(half * Math.SQRT2);
+      }
+    }
+  });
+
+  it("scaling is proportional: the same seed draws the same picture on both maps", () => {
+    const k = 0.288; // 72 / 250
+    const small = zoneSpecForHalfExtent(72);
+    for (const seed of SEEDS) {
+      const big = scheduleZonePhases(spec, seed, 0);
+      scheduleZonePhases(small, seed, 0).forEach((p, i) => {
+        expect(p.to.cx).toBeCloseTo(big[i]!.to.cx * k, 1);
+        expect(p.to.cz).toBeCloseTo(big[i]!.to.cz * k, 1);
+      });
+    }
+  });
+
+  it("rejects a half extent that isn't a positive number", () => {
+    expect(() => zoneSpecForHalfExtent(0)).toThrow();
+    expect(() => zoneSpecForHalfExtent(Number.NaN)).toThrow();
   });
 });

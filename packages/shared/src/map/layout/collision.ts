@@ -1,3 +1,4 @@
+import { glassPhaseBucket, isPhaseGlass } from "../glassPhase";
 import type { MapLayout } from "./mapLayout";
 import { getMapProp } from "./props";
 import { INSTANCE_STRIDE } from "./scatter";
@@ -7,16 +8,22 @@ export type PropColliderShape =
   | { readonly kind: "box"; readonly size: readonly [number, number, number]; readonly centerY: number };
 
 /**
- * Static colliders for every prop instance with the same prop and scale: one shape, many transforms. Instances are
- * upright (yaw only) even when their visual is tilted to the terrain.
+ * Static colliders for every prop instance with the same prop, scale and phase group: one shape, many transforms.
+ * Instances are upright (yaw only) even when their visual is tilted to the terrain.
  */
 export interface PropColliderGroup {
   readonly prop: string;
   readonly scale: number;
   /** Shape at this scale, relative to an instance origin (its base on the ground). */
   readonly shape: PropColliderShape;
-  /** Solid to bullets; otherwise a movement-only blocker (fences). */
+  /** Solid to bullets; otherwise a movement-only blocker (fences, panes in their shoot-through mode). */
   readonly bulletproof: boolean;
+  /**
+   * Phase group of a pane whose mode switches during the match (`map/glassPhase.ts`), else -1. One shape per group is
+   * the whole reason this splits: the engines flip `filterMembershipMask` on the shape, and panes sharing one shape
+   * would flip together — which is exactly what the design forbids.
+   */
+  readonly phase: number;
   /** x, y, z, yaw per instance. */
   readonly transforms: Float32Array;
 }
@@ -29,14 +36,20 @@ export function propColliderGroups(layout: Pick<MapLayout, "props">): PropCollid
     const def = getMapProp(set.prop);
     const collision = def.collision;
     if (collision.kind === "none") continue;
-    const byScale = new Map<number, number[]>();
+    const phased = isPhaseGlass(set.prop);
+    // Key: scale, then phase group. Sorted so the group order is the same on every machine and every run.
+    const byKey = new Map<number, Map<number, number[]>>();
     for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
       const scale = set.data[i + 4]!;
-      let list = byScale.get(scale);
-      if (!list) byScale.set(scale, (list = []));
+      const phase = phased ? glassPhaseBucket(set.data[i]!, set.data[i + 2]!) : -1;
+      let byPhase = byKey.get(scale);
+      if (!byPhase) byKey.set(scale, (byPhase = new Map()));
+      let list = byPhase.get(phase);
+      if (!list) byPhase.set(phase, (list = []));
       list.push(set.data[i]!, set.data[i + 1]!, set.data[i + 2]!, set.data[i + 3]!);
     }
-    for (const scale of [...byScale.keys()].sort((a, b) => a - b)) {
+    for (const scale of [...byKey.keys()].sort((a, b) => a - b)) {
+      const byPhase = byKey.get(scale)!;
       const shape: PropColliderShape =
         collision.kind === "cylinder"
           ? { kind: "cylinder", radius: collision.radius * scale, height: collision.height * scale }
@@ -46,7 +59,9 @@ export function propColliderGroups(layout: Pick<MapLayout, "props">): PropCollid
               centerY: ((collision.size[1] / 2) + (collision.offsetY ?? 0)) * scale,
             };
       const bulletproof = collision.kind === "cylinder" || collision.bulletproof;
-      groups.push({ prop: set.prop, scale, shape, bulletproof, transforms: new Float32Array(byScale.get(scale)!) });
+      for (const phase of [...byPhase.keys()].sort((a, b) => a - b)) {
+        groups.push({ prop: set.prop, scale, shape, bulletproof, phase, transforms: new Float32Array(byPhase.get(phase)!) });
+      }
     }
   }
   return groups;

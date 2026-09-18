@@ -78,6 +78,28 @@ const DEFS = [
   // Map-only props (no environment asset yet; the client draws procedural stand-ins).
   { id: "fence_wood", category: "prop", footprint: 0.3, collision: { kind: "box", size: [4, 1.1, 0.12], bulletproof: false }, surface: "wood", sink: 0.1 },
   { id: "wall_concrete", category: "prop", footprint: 0.4, collision: { kind: "box", size: [4, 2.6, 0.3], bulletproof: true }, surface: "concrete", sink: 0.4 },
+  // Glazed wall panel, interchangeable with wall_concrete in a lattice: you see through it, you can't walk through it,
+  // and it never breaks (no destructible system). Whether you can SHOOT through it depends on when you ask — the pane
+  // switches between stopping bullets and letting them pass every ten seconds, each pane on its own clock and with a
+  // visible tell (map/glassPhase.ts). The flag here is its resting mode, the one the pure layout and the nav grid see:
+  // shoot-through, as this prop has always been. The engines that own a physics world flip the collider's layer as the
+  // clock turns. Surface "metal" for its glazing frame.
+  { id: "wall_glass", category: "prop", footprint: 0.4, collision: { kind: "box", size: [4, 2.6, 0.3], bulletproof: false }, surface: "metal", sink: 0.4 },
+  // Mirrored wall panel, same box again: a silvered pane in a metal frame, and the client makes the nearest few of them
+  // reflect (world/props/MirrorWalls.ts). Opaque to look at but NOT to bullets (2026-09-18): `bulletproof` false, so
+  // mechanically it is wall_glass with a silvered face — rounds punch through and leave a hole (combat/penetration.ts),
+  // the pane still stops you walking into it, and the nav grid still routes around it. That is its lie: a wall you can
+  // see yourself in, and see nothing through, that stops nothing. Surface "metal" like wall_glass: the frame and the
+  // silvered backing ring, they don't thud like poured concrete.
+  { id: "wall_mirror", category: "prop", footprint: 0.4, collision: { kind: "box", size: [4, 2.6, 0.3], bulletproof: false }, surface: "metal", sink: 0.4 },
+  // Grass wall: a 4 m span of hedge as tall as the concrete, dense enough that you cannot see through it — and with no
+  // collider at all, so bullets and players walk straight through. The lie is the other way round from the glazed
+  // panels: those look passable and are not, this looks solid and is not there. Category "bush", not "grass": the nav
+  // grid flags bush footprints as vegetation (bots/nav/buildNavGrid.ts), which is what conceals a player standing in
+  // one from a bot and what makes bots route through it as cover. Footprint 2 rather than the other walls' 0.4 for the
+  // same reason — with no collider the footprint IS this prop's extent to everything downstream, and 2 m around each of
+  // an edge's two pieces covers the whole 8 m edge with no unflagged gap in the middle.
+  { id: "wall_grass", category: "bush", footprint: 2, collision: { kind: "none" }, surface: "grass", sink: 0.4 },
   { id: "sandbags", category: "prop", footprint: 1, collision: { kind: "box", size: [2.4, 0.9, 0.7], bulletproof: true }, surface: "dirt" },
   { id: "hay_bale", category: "prop", footprint: 1, collision: { kind: "box", size: [1.3, 1.5, 1.5], bulletproof: true }, surface: "grass" },
   { id: "hay_stack", category: "prop", footprint: 1.6, collision: { kind: "box", size: [2.6, 1.9, 1.3], bulletproof: true }, surface: "grass" },

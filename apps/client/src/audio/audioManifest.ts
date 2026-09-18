@@ -57,7 +57,8 @@ export type SoundId =
   | "amb.birds"
   | "amb.birdCall"
   | "music.matchEnd"
-  | "voice.fragOut";
+  | "voice.fragOut"
+  | "voice.glassBlocked";
 
 export interface SoundVariant {
   /** File name without extension, relative to AUDIO_ROOT. */
@@ -118,26 +119,27 @@ export const AUDIO_MANIFEST: Readonly<Record<SoundId, SoundAsset>> = {
   "impact.wood": { channels: 1, load: "eager", variants: [{ file: "impact.wood.0", duration: 0.4565 }, { file: "impact.wood.1", duration: 0.4565 }, { file: "impact.wood.2", duration: 0.4565 }, { file: "impact.wood.3", duration: 0.4565 }, { file: "impact.wood.4", duration: 0.4565 }] },
   "impact.dirt": { channels: 1, load: "eager", variants: [{ file: "impact.dirt.0", duration: 0.1216 }, { file: "impact.dirt.1", duration: 0.1869 }, { file: "impact.dirt.2", duration: 0.1388 }, { file: "impact.dirt.3", duration: 0.1438 }, { file: "impact.dirt.4", duration: 0.1507 }] },
   "impact.flesh": { channels: 1, load: "eager", variants: [{ file: "impact.flesh.0", duration: 0.3565 }, { file: "impact.flesh.1", duration: 0.3565 }, { file: "impact.flesh.2", duration: 0.3565 }, { file: "impact.flesh.3", duration: 0.3565 }, { file: "impact.flesh.4", duration: 0.3565 }] },
-  "throw.pin": { channels: 1, load: "eager", variants: [{ file: "throw.pin.0", duration: 0.3500 }, { file: "throw.pin.1", duration: 0.2515 }] },
-  "throw.spoon": { channels: 1, load: "eager", variants: [{ file: "throw.spoon.0", duration: 0.2353 }, { file: "throw.spoon.1", duration: 0.3000 }, { file: "throw.spoon.2", duration: 0.2709 }] },
-  "throw.swish": { channels: 1, load: "eager", variants: [{ file: "throw.swish.0", duration: 0.1688 }, { file: "throw.swish.1", duration: 0.1130 }, { file: "throw.swish.2", duration: 0.1607 }] },
-  "throw.bounce": { channels: 1, load: "eager", variants: [{ file: "throw.bounce.0", duration: 0.4000 }, { file: "throw.bounce.1", duration: 0.4000 }, { file: "throw.bounce.2", duration: 0.4000 }, { file: "throw.bounce.3", duration: 0.3260 }] },
-  "explosion.near": { channels: 1, load: "eager", variants: [{ file: "explosion.near.0", duration: 1.2713 }, { file: "explosion.near.1", duration: 1.4464 }, { file: "explosion.near.2", duration: 1.3842 }, { file: "explosion.near.3", duration: 1.1292 }] },
-  "explosion.far": { channels: 1, load: "eager", variants: [{ file: "explosion.far.0", duration: 4.0000 }, { file: "explosion.far.1", duration: 2.9898 }] },
-  "explosion.debris": { channels: 1, load: "eager", variants: [{ file: "explosion.debris.0", duration: 0.9000 }, { file: "explosion.debris.1", duration: 0.7869 }, { file: "explosion.debris.2", duration: 0.6813 }, { file: "explosion.debris.3", duration: 0.9000 }, { file: "explosion.debris.4", duration: 0.8646 }] },
-  "flash.bang": { channels: 1, load: "eager", variants: [{ file: "flash.bang.0", duration: 1.2000 }, { file: "flash.bang.1", duration: 0.8304 }, { file: "flash.bang.2", duration: 0.8764 }] },
-  "smoke.burst": { channels: 1, load: "eager", variants: [{ file: "smoke.burst.0", duration: 0.3936 }, { file: "smoke.burst.1", duration: 0.4169 }] },
-  "molotov.shatter": { channels: 1, load: "eager", variants: [{ file: "molotov.shatter.0", duration: 1.1000 }, { file: "molotov.shatter.1", duration: 0.7537 }, { file: "molotov.shatter.2", duration: 0.7318 }, { file: "molotov.shatter.3", duration: 0.9158 }] },
-  "fire.loop": { channels: 1, load: "eager", variants: [{ file: "fire.loop.0", duration: 2.3000 }] },
-  "use.paper": { channels: 1, load: "eager", variants: [{ file: "use.paper.0", duration: 0.3540 }, { file: "use.paper.1", duration: 0.4980 }, { file: "use.paper.2", duration: 0.5074 }, { file: "use.paper.3", duration: 0.5556 }] },
-  "use.tape": { channels: 1, load: "eager", variants: [{ file: "use.tape.0", duration: 0.3500 }, { file: "use.tape.1", duration: 0.3500 }, { file: "use.tape.2", duration: 0.3500 }] },
-  "use.slosh": { channels: 1, load: "eager", variants: [{ file: "use.slosh.0", duration: 0.6000 }, { file: "use.slosh.1", duration: 0.6000 }] },
-  "use.rattle": { channels: 1, load: "eager", variants: [{ file: "use.rattle.0", duration: 0.2500 }, { file: "use.rattle.1", duration: 0.2258 }, { file: "use.rattle.2", duration: 0.2500 }, { file: "use.rattle.3", duration: 0.2381 }] },
-  "armor.hit": { channels: 1, load: "eager", variants: [{ file: "armor.hit.0", duration: 0.4500 }, { file: "armor.hit.1", duration: 0.4500 }, { file: "armor.hit.2", duration: 0.4500 }, { file: "armor.hit.3", duration: 0.4500 }, { file: "armor.hit.4", duration: 0.4500 }] },
-  "armor.break": { channels: 1, load: "eager", variants: [{ file: "armor.break.0", duration: 0.5223 }, { file: "armor.break.1", duration: 0.5971 }, { file: "armor.break.2", duration: 0.4555 }] },
+  "throw.pin": { channels: 1, load: "eager", variants: [{ file: "throw.pin.0", duration: 0.3565 }, { file: "throw.pin.1", duration: 0.2580 }] },
+  "throw.spoon": { channels: 1, load: "eager", variants: [{ file: "throw.spoon.0", duration: 0.2418 }, { file: "throw.spoon.1", duration: 0.3065 }, { file: "throw.spoon.2", duration: 0.2774 }] },
+  "throw.swish": { channels: 1, load: "eager", variants: [{ file: "throw.swish.0", duration: 0.1753 }, { file: "throw.swish.1", duration: 0.1195 }, { file: "throw.swish.2", duration: 0.1672 }] },
+  "throw.bounce": { channels: 1, load: "eager", variants: [{ file: "throw.bounce.0", duration: 0.4065 }, { file: "throw.bounce.1", duration: 0.4065 }, { file: "throw.bounce.2", duration: 0.4065 }, { file: "throw.bounce.3", duration: 0.3325 }] },
+  "explosion.near": { channels: 1, load: "eager", variants: [{ file: "explosion.near.0", duration: 1.2778 }, { file: "explosion.near.1", duration: 1.4529 }, { file: "explosion.near.2", duration: 1.3907 }, { file: "explosion.near.3", duration: 1.1357 }] },
+  "explosion.far": { channels: 1, load: "eager", variants: [{ file: "explosion.far.0", duration: 4.0065 }, { file: "explosion.far.1", duration: 2.9963 }] },
+  "explosion.debris": { channels: 1, load: "eager", variants: [{ file: "explosion.debris.0", duration: 0.9065 }, { file: "explosion.debris.1", duration: 0.7934 }, { file: "explosion.debris.2", duration: 0.6878 }, { file: "explosion.debris.3", duration: 0.9065 }, { file: "explosion.debris.4", duration: 0.8711 }] },
+  "flash.bang": { channels: 1, load: "eager", variants: [{ file: "flash.bang.0", duration: 1.2065 }, { file: "flash.bang.1", duration: 0.8369 }, { file: "flash.bang.2", duration: 0.8829 }] },
+  "smoke.burst": { channels: 1, load: "eager", variants: [{ file: "smoke.burst.0", duration: 0.4001 }, { file: "smoke.burst.1", duration: 0.4234 }] },
+  "molotov.shatter": { channels: 1, load: "eager", variants: [{ file: "molotov.shatter.0", duration: 1.1065 }, { file: "molotov.shatter.1", duration: 0.7602 }, { file: "molotov.shatter.2", duration: 0.7383 }, { file: "molotov.shatter.3", duration: 0.9223 }] },
+  "fire.loop": { channels: 1, load: "eager", variants: [{ file: "fire.loop.0", duration: 2.3065 }] },
+  "use.paper": { channels: 1, load: "eager", variants: [{ file: "use.paper.0", duration: 0.3605 }, { file: "use.paper.1", duration: 0.5045 }, { file: "use.paper.2", duration: 0.5139 }, { file: "use.paper.3", duration: 0.5621 }] },
+  "use.tape": { channels: 1, load: "eager", variants: [{ file: "use.tape.0", duration: 0.3565 }, { file: "use.tape.1", duration: 0.3565 }, { file: "use.tape.2", duration: 0.3565 }] },
+  "use.slosh": { channels: 1, load: "eager", variants: [{ file: "use.slosh.0", duration: 0.6065 }, { file: "use.slosh.1", duration: 0.6065 }] },
+  "use.rattle": { channels: 1, load: "eager", variants: [{ file: "use.rattle.0", duration: 0.2565 }, { file: "use.rattle.1", duration: 0.2323 }, { file: "use.rattle.2", duration: 0.2565 }, { file: "use.rattle.3", duration: 0.2446 }] },
+  "armor.hit": { channels: 1, load: "eager", variants: [{ file: "armor.hit.0", duration: 0.4565 }, { file: "armor.hit.1", duration: 0.4565 }, { file: "armor.hit.2", duration: 0.4565 }, { file: "armor.hit.3", duration: 0.4565 }, { file: "armor.hit.4", duration: 0.4565 }] },
+  "armor.break": { channels: 1, load: "eager", variants: [{ file: "armor.break.0", duration: 0.5288 }, { file: "armor.break.1", duration: 0.6036 }, { file: "armor.break.2", duration: 0.4620 }] },
   "amb.wind": { channels: 2, load: "lazy", variants: [{ file: "amb.wind.0", duration: 45.0065 }] },
   "amb.birds": { channels: 2, load: "lazy", variants: [{ file: "amb.birds.0", duration: 45.0065 }] },
   "amb.birdCall": { channels: 1, load: "lazy", variants: [{ file: "amb.birdCall.0", duration: 3.0065 }, { file: "amb.birdCall.1", duration: 2.0717 }, { file: "amb.birdCall.2", duration: 3.0065 }, { file: "amb.birdCall.3", duration: 3.0065 }, { file: "amb.birdCall.4", duration: 3.0065 }, { file: "amb.birdCall.5", duration: 3.0065 }, { file: "amb.birdCall.6", duration: 3.0158 }] },
-  "music.matchEnd": { channels: 2, load: "lazy", variants: [{ file: "music.matchEnd.0", duration: 17.1363 }] },
-  "voice.fragOut": { channels: 1, load: "eager", variants: [{ file: "voice.fragOut.0", duration: 4.4811 }] },
+  "music.matchEnd": { channels: 2, load: "lazy", variants: [{ file: "music.matchEnd.0", duration: 17.1428 }] },
+  "voice.fragOut": { channels: 1, load: "eager", variants: [{ file: "voice.fragOut.0", duration: 4.4876 }] },
+  "voice.glassBlocked": { channels: 1, load: "eager", variants: [{ file: "voice.glassBlocked.0", duration: 1.1870 }] },
 };

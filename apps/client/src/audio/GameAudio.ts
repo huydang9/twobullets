@@ -28,6 +28,7 @@ import {
   type MixLayer,
 } from "./equipmentMix";
 import { addCrackle, addUseCue, addZip, createHissBuffer } from "./equipment/foley";
+import { GLASS_BLOCKED, isGlassBlockedImpact } from "./glassBlocked";
 import { FOOTSTEP_SOUND, FOOTSTEP_TRIM, IMPACT_SOUND, LOCAL_MIX, STANCE, WEAPON_SOUNDS, firstPersonShot, type WeaponSound } from "./soundDesign";
 import type { SoundBank } from "./SoundBank";
 import type {
@@ -101,6 +102,8 @@ export class GameAudio {
   private areaTimer = 0;
   private hiss: AudioBuffer | null = null;
   private readonly callouts = new Map<FragCalloutAudioEvent["thrower"], Voice>();
+  /** Context time before which the bulletproof-glass line stays quiet (see {@link playGlassBlocked}). */
+  private glassBlockedUntil = 0;
   private music: Voice | null = null;
   private musicRequest = 0;
 
@@ -385,6 +388,8 @@ export class GameAudio {
     const ctx = this.engine.live;
     if (!ctx) return;
     const surface = event.surface ?? this.probe.surfaceAtImpact(event.position, event.normal);
+    // The probe's ray also names what was hit: a bulletproof glass pane adds the owner's line over its metal clank.
+    if (event.surface === undefined && isGlassBlockedImpact(this.probe.impactNode)) this.playGlassBlocked(event);
     const place = this.place(event.position, 3, AUDIBLE_RANGE.impact, 1, event.age);
     if (!place) return;
     const heavy = event.weaponId === "sniper" ? 1.25 : event.weaponId === "shotgun" ? 0.6 : 1;
@@ -555,6 +560,24 @@ export class GameAudio {
     voice.addTone({ when, gain: 0.45, frequency: 150, frequencyEnd: 60, sweep: 0.08, decay: 0.05 });
     voice.addNoise({ when, gain: 0.35, filter: "lowpass", frequency: 1200, decay: 0.04 });
     this.layer(voice, "smoke.burst", { when: when + 0.03, rate: 0.9 + Math.random() * 0.1 });
+  }
+
+  /**
+   * A bullet stopping dead in a bulletproof glass pane: the owner's line, spatial at the impact point, on top of the
+   * pane's own impact sound. Rate-limited to one per {@link GLASS_BLOCKED.cooldownSeconds} across all panes — it is a
+   * voice line, and a magazine emptied into one would otherwise stack dozens of copies. Dropped when the clip hasn't
+   * loaded, when the impact is out of range, or when the impacts bus is full.
+   */
+  playGlassBlocked(event: AreaStartAudioEvent): void {
+    const ctx = this.engine.live;
+    if (!ctx || ctx.currentTime < this.glassBlockedUntil) return;
+    const buffer = this.bank.pick(GLASS_BLOCKED.sound);
+    if (!buffer) return;
+    const voice = this.spatialOneShot("impacts", GLASS_BLOCKED.sound, event, GLASS_BLOCKED.reference, GLASS_BLOCKED.range, GLASS_BLOCKED.gain, GLASS_BLOCKED.echo);
+    if (!voice) return;
+    const when = voice.createdAt + (voice.options.distance !== undefined ? arrivalDelay(voice.options.distance, event.age) : 0);
+    voice.addBuffer(buffer, { when });
+    this.glassBlockedUntil = when + GLASS_BLOCKED.cooldownSeconds;
   }
 
   /** Molotov bursting: glass shattering and the whoosh of the fuel catching. */

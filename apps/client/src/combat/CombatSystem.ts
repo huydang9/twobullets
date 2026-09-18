@@ -20,6 +20,7 @@ import {
   type LevelData,
   type Projectile,
   type ProjectileImpact,
+  type ProjectileStepResult,
   type WeaponDef,
   type WeaponEvent,
   type WeaponId,
@@ -35,8 +36,9 @@ import { TargetRange } from "../targets/TargetRange";
 import type { Environment } from "../world/environment";
 import { CombatInputQueue } from "./CombatInputQueue";
 import { BULLET_COLLIDE_MASK, HitboxRegistry } from "./hitboxes";
+import { PenetrationProbe, type PenetrationHit } from "./penetration";
 import { TargetArmor, testTargetArmor } from "./TargetArmor";
-import type { CombatEquipmentLink, CombatView, DamageEvent, ImpactEvent, ShotEvent } from "./types";
+import type { CombatEquipmentLink, CombatView, DamageEvent, ImpactEvent, PenetrationEvent, ShotEvent } from "./types";
 
 const PLAYER_MAX_HEALTH = 100;
 /**
@@ -69,6 +71,7 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
   readonly onShot = new Observable<ShotEvent>();
   readonly onWeaponEvent = new Observable<WeaponEvent>();
   readonly onImpact = new Observable<ImpactEvent>();
+  readonly onPenetrate = new Observable<PenetrationEvent>();
   readonly onDamage = new Observable<DamageEvent>();
 
   weaponState: WeaponState = createWeaponState(DEFAULT_LOADOUT);
@@ -87,6 +90,10 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
   readonly targetArmor = new TargetArmor();
   private readonly hitboxes = new HitboxRegistry();
   private readonly raycaster: WorldRaycaster;
+  private readonly penetration: PenetrationProbe;
+  private readonly emitPenetration = (hit: PenetrationHit): void => {
+    this.onPenetrate.notifyObservers(hit);
+  };
   private readonly inputQueue: CombatInputQueue;
   private readonly tickObserver: Observer<PlayerTick>;
   private readonly weaponContext = createWeaponContext();
@@ -114,6 +121,7 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
       shouldHitTriggers: true,
       colliderIdOf: (body) => this.hitboxes.colliderIdOf(body),
     });
+    this.penetration = new PenetrationProbe(scene);
     this.targets = new TargetRange(scene, options.targets === false ? [] : level.targets, this.hitboxes, environment, assets);
     this.targetsAlive = this.targets.dummies.map((dummy) => dummy.alive);
     if (globalThis.location && new URLSearchParams(globalThis.location.search).get("targetArmor") === "1") {
@@ -206,6 +214,7 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     this.onShot.clear();
     this.onWeaponEvent.clear();
     this.onImpact.clear();
+    this.onPenetrate.clear();
     this.onDamage.clear();
   }
 
@@ -264,7 +273,33 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     this.raycaster.ignoreBody = player.physicsBody;
     const flight = stepProjectiles(projectiles, dt, this.raycaster.cast);
     this.projectiles = flight.alive;
+    this.scanPenetrations(projectiles, flight);
     for (const impact of flight.impacts) this.resolveImpact(impact);
+  }
+
+  /**
+   * Panes this tick's bullets flew through. The bullet ray cannot see them — BULLET_COLLIDE_MASK drops the blocker
+   * layer, which is where every shoot-through prop lives — so each projectile's segment is walked once more against
+   * that layer alone. The segment ends where the bullet ended (its new position, or the point it struck), so a pane
+   * behind whatever stopped the round is never marked.
+   *
+   * The step's three result lists each keep the input order, so one pass with a cursor per list pairs every projectile
+   * with where it got to, and allocates nothing.
+   */
+  private scanPenetrations(before: readonly Projectile[], flight: ProjectileStepResult): void {
+    if (!this.onPenetrate.hasObservers()) return;
+    const { alive, impacts, expired } = flight;
+    let a = 0;
+    let i = 0;
+    let e = 0;
+    for (const projectile of before) {
+      const id = projectile.id;
+      let end: Projectile["position"] | null = null;
+      if (alive[a]?.id === id) end = alive[a++]!.position;
+      else if (impacts[i]?.projectile.id === id) end = impacts[i++]!.projectile.position;
+      else if (expired[e]?.id === id) end = expired[e++]!.position;
+      if (end) this.penetration.scan(projectile.position, end, this.emitPenetration);
+    }
   }
 
   private resolveImpact({ projectile, hit, distance }: ProjectileImpact): void {
@@ -274,7 +309,9 @@ export class CombatSystem implements CombatView, PlayerCombatLink {
     const hitbox = hit.colliderId !== null ? this.hitboxes.get(hit.colliderId) : undefined;
 
     if (!hitbox) {
-      this.onImpact.notifyObservers({ weapon, point, normal, surface: "world", targetId: null, zone: null });
+      // A round that stopped in a transparent pane is the only way to learn the pane was armoured: name it for the FX.
+      const pane = this.penetration.paneAtImpact(hit.point, hit.normal);
+      this.onImpact.notifyObservers({ weapon, point, normal, surface: "world", targetId: null, zone: null, pane: pane?.prop ?? null });
       return;
     }
 

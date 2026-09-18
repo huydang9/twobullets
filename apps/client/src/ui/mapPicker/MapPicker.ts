@@ -1,5 +1,5 @@
 import { DEFAULT_REAL_MAP_ID } from "@twobullets/shared/map/real/index";
-import { mapChoices, type MapChoice } from "../../world/mapRuntime/maps";
+import { MAP_V1_ID, mapChoices, type MapChoice } from "../../world/mapRuntime/maps";
 import { el } from "../dom";
 import { mapPickerStrings, type MapPickerStrings } from "./strings";
 import "./mapPicker.css";
@@ -134,7 +134,7 @@ export class MapPicker {
 
     const body = el("div", "tb-mappicker__body", undefined, card);
     el("div", "tb-mappicker__name", this.displayName(choice), body);
-    el("div", "tb-mappicker__place", choice.fictional ? s.fictionalPlace : (s.countries[choice.countryCode] ?? choice.country), body);
+    el("div", "tb-mappicker__place", this.displayPlace(choice), body);
     const stats = [s.stats.pois(choice.pois), s.stats.buildings(choice.buildings)];
     if (choice.roadsKm !== null) stats.push(s.stats.roads(choice.roadsKm));
     if (!choice.fictional) stats.push(choice.reliefMeters !== null ? s.stats.relief(choice.reliefMeters) : s.stats.flat);
@@ -142,8 +142,16 @@ export class MapPicker {
     return card;
   }
 
+  /** Map v1's name is a translated label; every other map, invented or real, carries its own name. */
   private displayName(choice: MapChoice): string {
-    return choice.fictional ? this.strings.fictionalName : choice.name;
+    return choice.id === MAP_V1_ID ? this.strings.fictionalName : choice.name;
+  }
+
+  private displayPlace(choice: MapChoice): string {
+    const s = this.strings;
+    if (choice.id === MAP_V1_ID) return s.fictionalPlace;
+    if (choice.fictional) return s.fictionalPlaceGeneric;
+    return s.countries[choice.countryCode] ?? choice.country;
   }
 
   private renderCredits(): void {

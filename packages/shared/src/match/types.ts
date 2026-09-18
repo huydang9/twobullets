@@ -53,6 +53,8 @@ export interface ZoneSpec {
   readonly damageIntervalTicks: number;
   /** New centers stay at least this far inside the playable square edge, m. */
   readonly edgeMargin: number;
+  /** Half extent of the map's playable square the radii are tuned for and centers stay inside, m (default 250). */
+  readonly playableHalfExtent?: number;
 }
 
 /**

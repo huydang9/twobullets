@@ -434,4 +434,17 @@ export const CLIPS: readonly ClipSpec[] = [
     fadeOut: 0.03,
     cuts: [{ source: "ownerFragOut", file: "chay-di-cac-chau-oi.mp3", at: "whole", untrimmed: true }],
   },
+  {
+    // A bullet stopping dead in a bulletproof glass pane (wall_glass_solid). Spatial at the impact point, so mono and
+    // eager like the other impacts. The 3.9 s source holds two spoken lines over a quiet bed; only the second, louder
+    // one is taken (its first syllable lands at ~2.82 s and it runs to the end of the file), which is about as long as
+    // an impact sound can be before repeats pile up. For the first line instead, use at: [0.9] with maxSeconds 1.25.
+    id: "voice.glassBlocked",
+    ...ONE_SHOT,
+    kbps: 64,
+    highpass: 80,
+    maxSeconds: 1.3,
+    fadeOut: 0.06,
+    cuts: [{ source: "ownerGlassBlocked", file: "do-anh-bat-duoc-em.mp3", at: [2.82] }],
+  },
 ];

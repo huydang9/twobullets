@@ -5,14 +5,15 @@ import type { ZoneCircle, ZonePhase, ZoneSpec, ZoneStage, ZoneState } from "./ty
 // Shrinking zone (docs/bots/design.md §8.2): a pure schedule of phases and `zoneAt(tick)`. The rules, HUD, bots and the
 // future networked client compute the same circle from the announced phases. No engine imports, no Math.random.
 
-/** Playable half extent the zone centers are clamped to, m (the maps are a 500 m square). */
+/** Playable half extent `DEFAULT_ZONE_SPEC` is tuned for, m (Map v1 and the real maps are a 500 m square). */
 export const ZONE_PLAYABLE_HALF_EXTENT = 250;
 
 /**
  * Zone tuning (design.md §8.2 table, sped up 2026-09-15). The circle closes at 6:55 of combat.
  *
  * Every radius halved with the map on 2026-09-16: the initial circle still covers the playable square
- * (250·√2 ≈ 354) and the pacing in time is unchanged.
+ * (250·√2 ≈ 354) and the pacing in time is unchanged. A smaller map takes `zoneSpecForHalfExtent`, which
+ * scales the radii the same way.
  */
 export const DEFAULT_ZONE_SPEC: ZoneSpec = {
   initial: { cx: 0, cz: 0, r: 355 },
@@ -29,6 +30,32 @@ export const DEFAULT_ZONE_SPEC: ZoneSpec = {
   damageIntervalTicks: 6,
   edgeMargin: 20,
 };
+
+/** The playable half extent `spec` is tuned for, m (`ZONE_PLAYABLE_HALF_EXTENT` when the spec doesn't say). */
+export function zonePlayableHalfExtent(spec: ZoneSpec): number {
+  return spec.playableHalfExtent ?? ZONE_PLAYABLE_HALF_EXTENT;
+}
+
+/**
+ * `base` scaled to a map whose playable square is ±`halfExtent` m: every radius (the initial circle included) and the
+ * edge margin scale with the map; timings, dps and the phase count don't (that is the 2026-09-16 halving, generalized).
+ * The initial circle keeps its 1.42 × half extent, so it still covers the square (√2 ≈ 1.4142).
+ *
+ * Returns `base` itself at its own half extent, so Map v1, the real-world maps and every hand-written spec (arena) come
+ * out untouched.
+ */
+export function zoneSpecForHalfExtent(halfExtent: number, base: ZoneSpec = DEFAULT_ZONE_SPEC): ZoneSpec {
+  if (!(halfExtent > 0)) throw new Error(`zone half extent must be positive (got ${halfExtent})`);
+  const scale = halfExtent / zonePlayableHalfExtent(base);
+  if (scale === 1) return base;
+  return {
+    ...base,
+    initial: { cx: round2(base.initial.cx * scale), cz: round2(base.initial.cz * scale), r: round2(base.initial.r * scale) },
+    phases: base.phases.map((phase) => ({ ...phase, radius: round2(phase.radius * scale) })),
+    edgeMargin: round2(base.edgeMargin * scale),
+    playableHalfExtent: halfExtent,
+  };
+}
 
 /** Seconds before a shrink at which `zoneWarning` events fire. */
 export const ZONE_WARNING_SECONDS: readonly number[] = [30, 10];
@@ -75,7 +102,7 @@ export function computeZonePhase(
 
   const toR = row.radius;
   const reach = Math.max(0, from.r - toR);
-  const bound = Math.max(0, ZONE_PLAYABLE_HALF_EXTENT - spec.edgeMargin - 0.5 * toR);
+  const bound = Math.max(0, zonePlayableHalfExtent(spec) - spec.edgeMargin - 0.5 * toR);
   // The previous center already satisfies the (looser) bound of a smaller circle, so it is always a valid fallback.
   let cx = clampAbs(from.cx, bound);
   let cz = clampAbs(from.cz, bound);

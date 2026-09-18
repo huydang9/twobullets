@@ -15,6 +15,8 @@ export interface MapPickerStrings {
   readonly previewAlt: (name: string) => string;
   readonly fictionalName: string;
   readonly fictionalPlace: string;
+  /** Place line for invented maps other than Map v1. */
+  readonly fictionalPlaceGeneric: string;
   /** Country names by ISO code; unknown codes fall back to the map's English country name. */
   readonly countries: Readonly<Record<string, string>>;
   readonly stats: {
@@ -53,6 +55,7 @@ export function mapPickerStrings(): MapPickerStrings {
     previewAlt: (name) => t("mapPicker.previewAlt", { name }),
     fictionalName: t("mapPicker.fictionalName"),
     fictionalPlace: t("mapPicker.fictionalPlace"),
+    fictionalPlaceGeneric: t("mapPicker.fictionalPlaceGeneric"),
     countries,
     stats: {
       pois: (count) => t("mapPicker.pois", { count }),

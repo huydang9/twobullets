@@ -37,7 +37,8 @@ export type SourceId =
   | "breakingFalling"
   | "sfx100"
   | "ownerMatchEnd"
-  | "ownerFragOut";
+  | "ownerFragOut"
+  | "ownerGlassBlocked";
 
 /** Clips the project owner supplied for the internal release (not downloaded, no public license). */
 export const OWNER_DIR = path.join(SRC_DIR, "owner");
@@ -289,6 +290,17 @@ export const SOURCES: readonly AudioSource[] = [
     url: "",
     file: "chay-di-cac-chau-oi.mp3",
     bytes: 72_444,
+    ownerSupplied: true,
+  },
+  {
+    id: "ownerGlassBlocked",
+    title: "do-anh-bat-duoc-em.mp3 (bullet stopped by bulletproof glass)",
+    authors: ["Unknown (from the internet)"],
+    license: OWNER_LICENSE,
+    page: "",
+    url: "",
+    file: "do-anh-bat-duoc-em.mp3",
+    bytes: 221_114,
     ownerSupplied: true,
   },
 ];

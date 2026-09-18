@@ -10,7 +10,7 @@ import { AimModel, aimHeight, createAimSolution, solveAim } from "../aim/aim";
 import { FireControl } from "../aim/fire";
 import { chooseBoost, chooseHeal, chooseWeaponSlot, bestUsableRange, countOf, hasAmmo, hasGun, lootNeed, type LootNeed } from "../goals/equipment";
 import { GrenadeThrow } from "../goals/grenade";
-import { BuildingSearch, SEARCH_MAX_DISTANCE_UNARMED } from "../goals/search";
+import { BuildingSearch, Roam, SEARCH_MAX_DISTANCE_UNARMED } from "../goals/search";
 import { PositionPicker } from "../goals/tactics";
 import { createGoalFacts, GoalSelector, scoreGoals, type ActiveGoal } from "../goals/utility";
 import { createRotatePlan, planRotate } from "../goals/zone";
@@ -55,6 +55,11 @@ const INVESTIGATE_NEAR = 60;
 const INVESTIGATE_FAR = 180;
 const LOOT_OFFSET = 2;
 const SETTLE_SPEED = 1;
+/** After a contact an idle bot holds its angle for this long before it starts roaming again, s. */
+const IDLE_HOLD_SECONDS = 6;
+/** Metres of closing that count as chase progress, and the hard ceiling on a chase in multiples of `chaseSeconds`. */
+const CHASE_PROGRESS = 2;
+const CHASE_CEILING = 4;
 
 /** Look intent for this tick. */
 const Look = { Move: 0, Point: 1, Track: 2, Angles: 3 } as const;
@@ -75,6 +80,7 @@ class UtilityBrain implements BotBrain {
   private readonly grenade = new GrenadeThrow();
   private readonly picker = new PositionPicker();
   private readonly search = new BuildingSearch();
+  private readonly roam = new Roam();
   private readonly facts = createGoalFacts();
   private readonly rotate = createRotatePlan();
   private readonly solution = createAimSolution();
@@ -160,6 +166,10 @@ class UtilityBrain implements BotBrain {
   private readonly regroupPoint: MutVec3 = vec3();
   private regroupSide = 1;
   private readonly investigatePoint: MutVec3 = vec3();
+  private chaseSlot = -1;
+  private chaseBest = Infinity;
+  private chaseProgressTick = 0;
+  private chaseStartTick = 0;
   private scanBaseYaw = 0;
   private dodgeUntil = -1;
   private dodgeYaw = 0;
@@ -287,6 +297,8 @@ class UtilityBrain implements BotBrain {
     this.lootValue = 0;
     this.coverValid = false;
     this.search.reset();
+    this.roam.reset();
+    this.chaseSlot = -1;
     this.coverHoldUntil = -1;
     this.coverRollSlot = -1;
     this.fleeValid = false;
@@ -373,7 +385,7 @@ class UtilityBrain implements BotBrain {
       }
     }
 
-    planRotate(view.zone, self.feet, dt, profile.tactics.zoneMarginSeconds, this.rotate);
+    planRotate(view.zone, self.feet, dt, profile.tactics.zoneMarginSeconds, this.rotate, this.motor.pathDetour);
     f.rotateScore = this.rotate.score;
     f.zonePhaseIndex = view.zone.phaseIndex;
 
@@ -396,16 +408,31 @@ class UtilityBrain implements BotBrain {
     f.regrouping = this.goals.goal === "regroup";
     f.fleeing = this.goals.goal === "flee";
 
-    // Investigate the most confident unseen hostile memory, for at most chaseSeconds per goal.
+    // Investigate the most confident unseen hostile memory while the bot is still closing on it (chase budget below).
     f.investigateConfidence = 0;
     const entry = this.memory.bestHostile(0, -1);
     if (entry) {
       const t = perception.track(entry.slot);
-      const chasing = this.goals.goal === "investigate" && (tick - this.goals.startTick) * dt > profile.tactics.chaseSeconds;
+      const d = flatDistance(self.feet, entry.position);
+      // Chase time is a budget for getting *closer*, not for walking. A flat `chaseSeconds` cap is fine on open ground
+      // where 8 s is 40 m, but in corridors the walk is 2–3× the straight line, so the bot always gave up short of the
+      // noise. Give up after `chaseSeconds` without progress instead, with a hard ceiling so nobody chases forever.
+      if (entry.slot !== this.chaseSlot) {
+        this.chaseSlot = entry.slot;
+        this.chaseBest = d;
+        this.chaseProgressTick = tick;
+        this.chaseStartTick = tick;
+      } else if (d < this.chaseBest - CHASE_PROGRESS) {
+        this.chaseBest = d;
+        this.chaseProgressTick = tick;
+      }
+      const chaseSeconds = profile.tactics.chaseSeconds;
+      const chasing =
+        this.goals.goal === "investigate" &&
+        ((tick - this.chaseProgressTick) * dt > chaseSeconds || (tick - this.chaseStartTick) * dt > chaseSeconds * CHASE_CEILING);
       if (chasing) this.memory.forget(entry.slot);
       else if (!t || !t.visible) {
         // Distant fights aren't worth a walk across the map: interest fades from 60 m to nothing at 180 m.
-        const d = flatDistance(self.feet, entry.position);
         f.investigateConfidence = entry.confidence * Math.max(0, Math.min(1, 1 - (d - INVESTIGATE_NEAR) / (INVESTIGATE_FAR - INVESTIGATE_NEAR)));
       }
     }
@@ -466,9 +493,40 @@ class UtilityBrain implements BotBrain {
         return this.investigate(view, out);
       case "idle":
         this.maintain(view, out);
-        this.subState = "scan";
-        return this.scan(view, view.tick);
+        return this.idle(view);
     }
+  }
+
+  /**
+   * Nothing to fight, loot, search or run from. Right after contact the bot holds its angle and scans; otherwise it
+   * roams, because standing still for minutes is what a broken bot looks like (and on a map without buildings — the
+   * maze — `idle` is the goal that wins almost every planning tick).
+   */
+  private idle(view: BotWorldView): void {
+    const tick = view.tick;
+    if (this.facts.safeSeconds < IDLE_HOLD_SECONDS || this.roam.paused(tick)) {
+      this.subState = this.roam.paused(tick) ? "watch" : "scan";
+      return this.scan(view, tick);
+    }
+    if (!this.wander(view)) {
+      this.subState = "scan";
+      this.scan(view, tick);
+    }
+  }
+
+  /** Walks a roam leg. False when nav has nowhere to send the bot (caller scans instead). */
+  private wander(view: BotWorldView): boolean {
+    const zone = view.zone.next ?? view.zone.current;
+    if (!this.roam.ensure(view, zone, this.rngGoals)) return false;
+    const p = this.roam.point;
+    this.moveOptions.sprint = false;
+    this.moveOptions.preferCover = 0.3;
+    this.moveOptions.zone = null;
+    this.moveOptions.arriveRadius = 2.5;
+    const status = this.motor.moveTo(view, p.x, p.y, p.z, this.moveOptions);
+    this.roam.advance(view, status === "arrived", this.motor.gaveUp, this.rngGoals);
+    this.subState = "roam";
+    return true;
   }
 
   private engage(view: BotWorldView, out: BotTickOutput): void {
@@ -911,8 +969,12 @@ class UtilityBrain implements BotBrain {
   private searchBuildings(view: BotWorldView): void {
     const zone = view.zone.next ?? view.zone.current;
     if (!this.search.available(view, zone, this.facts.unarmed ? SEARCH_MAX_DISTANCE_UNARMED : undefined, view.tick < this.zonePressureUntil)) {
-      this.subState = "nothing-to-search";
-      this.scan(view, view.tick);
+      // No building left to search (or none on this map at all): keep walking instead of standing in a corridor —
+      // loot is found by moving, and a bot that stops is a bot that never meets anyone.
+      if (!this.wander(view)) {
+        this.subState = "nothing-to-search";
+        this.scan(view, view.tick);
+      }
       return;
     }
     const p = this.search.point;

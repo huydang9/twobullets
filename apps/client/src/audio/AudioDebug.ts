@@ -75,6 +75,7 @@ export class AudioDebug {
             "__audio.nearMiss(weapon='rifle', miss=1.5, fromBearing=0)",
             "__audio.footsteps(surface='concrete', stance='run', distance=8, bearing=90, steps=8)",
             "__audio.impact(surface='metal', distance=15, bearing=-30)   // surface='flesh' takes a 4th arg zone='head'",
+            "__audio.glassBlocked(distance=6, bearing=0)   // owner's line for a bullet stopped by bulletproof glass",
             "__audio.explosion(distance=60, bearing=0, kind='frag')   // kind 'flash' for the flashbang bang",
             "__audio.flashRing(strength=1, seconds=6)   // tinnitus, ducks and dulls the mix",
             "__audio.smoke(distance=12, bearing=30, seconds=12)   // pop + hiss loop",
@@ -119,6 +120,8 @@ export class AudioDebug {
       },
       impact: (surface: AcousticSurface | "flesh" = "concrete", distance = 15, bearing = 0, zone: HitZone = "body") =>
         audio.playImpact({ position: this.around(distance, bearing, -1), surface, weaponId: "rifle", zone }),
+      // Rate-limited like the real thing (GLASS_BLOCKED.cooldownSeconds), so calls in quick succession are ignored.
+      glassBlocked: (distance = 6, bearing = 0) => audio.playGlassBlocked({ position: this.around(distance, bearing, -1) }),
       explosion: (distance = 60, bearing = 0, kind: "frag" | "flash" = "frag") => audio.playExplosion({ position: this.around(distance, bearing, -1.5), kind }),
       flashRing: (strength = 1, seconds = 6 * strength) => audio.playFlashRing({ strength, seconds }),
       smoke: (distance = 12, bearing = 30, seconds = 12) => {

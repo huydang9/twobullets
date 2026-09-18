@@ -15,7 +15,17 @@ import {
 } from "@twobullets/shared";
 import type { AssetLibrary } from "../assets";
 import { AudioDirector } from "../audio/AudioDirector";
-import type { CombatView, DamageEvent, ImpactEvent, ShotEvent } from "../combat/types";
+import type { CombatView, DamageEvent, ImpactEvent, PenetrationEvent, ShotEvent } from "../combat/types";
+
+/** What a shot-through pane does about it: `MirrorWalls` implements this (world/props). */
+export interface PaneHoles {
+  /** The map prop these panes are, so a round through some other kind of pane is never offered to them. */
+  readonly paneProp: string;
+  /** Cuts a see-through hole at a world point; false when no pane of theirs is there. */
+  punch(point: Vector3): boolean;
+  /** How wide the hole it cuts is, m. */
+  readonly holeDiameter: number;
+}
 import { EquipmentPresentation } from "../equipment/presentation/EquipmentPresentation";
 import type { ItemMeshLibrary } from "../equipment/presentation/itemMeshes";
 import type { EquipmentView } from "../equipment/types";
@@ -99,6 +109,9 @@ export class WeaponPresentation {
   private readonly shotObserver: Observer<ShotEvent>;
   private readonly weaponObserver: Observer<WeaponEvent>;
   private readonly impactObserver: Observer<ImpactEvent>;
+  private readonly penetrateObserver: Observer<PenetrationEvent>;
+  /** Panes that open when they are shot through (the map's mirrors), or null off a map. */
+  private panes: PaneHoles | null = null;
   private readonly damageObserver: Observer<DamageEvent>;
   private readonly renderObserver: Observer<Scene>;
 
@@ -165,7 +178,8 @@ export class WeaponPresentation {
     this.atlas = createFxAtlas(scene);
     const atlas = this.atlas;
     // alphaIndex orders the world batches: decals under dust under glowing additive effects.
-    this.decalBatch = new FxBatch("fx_decals", scene, atlas, { capacity: 64, blend: "alpha", renderingGroupId: 0, alphaIndex: 0, zOffset: -2 });
+    // Capacity is per quad, and a bullet hole through glass is two of them (cracked rim, then the bore).
+    this.decalBatch = new FxBatch("fx_decals", scene, atlas, { capacity: 192, blend: "alpha", renderingGroupId: 0, alphaIndex: 0, zOffset: -2 });
     this.worldAlpha = new FxBatch("fx_worldAlpha", scene, atlas, { capacity: 192, blend: "alpha", renderingGroupId: 0, alphaIndex: 1 });
     this.worldAdditive = new FxBatch("fx_worldAdditive", scene, atlas, { capacity: 1024, blend: "additive", renderingGroupId: 0, alphaIndex: 2 });
     this.viewmodelAdditive = new FxBatch("fx_viewmodelAdditive", scene, atlas, {
@@ -209,8 +223,11 @@ export class WeaponPresentation {
     this.shotObserver = combat.onShot.add((event) => this.handleShot(event.shot));
     this.weaponObserver = combat.onWeaponEvent.add((event) => this.handleWeaponEvent(event));
     this.impactObserver = combat.onImpact.add((event) =>
-      this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone, event.targetId),
+      this.handleImpact(event.weapon.id, event.point, event.normal, event.surface, event.zone, event.targetId, event.pane ?? null),
     );
+    // A round through a glazed or mirrored pane: a bullet hole, nothing else. The event's vectors are reused by the
+    // emitter, and both of these copy them on the spot.
+    this.penetrateObserver = combat.onPenetrate.add((event) => this.handlePenetration(event));
     this.damageObserver = combat.onDamage.add((event) => this.handleDamage(event.zone, event.killed, event.targetId));
     this.equipment = new EquipmentPresentation({
       scene,
@@ -223,6 +240,15 @@ export class WeaponPresentation {
       assets,
     });
     this.renderObserver = scene.onBeforeRenderObservable.add(() => this.afterAnimations());
+  }
+
+  /**
+   * Connects the map's mirror panes (`world/props/MirrorWalls`, Game.ts wiring). A round crossing one takes a piece of
+   * the pane away, which is the pane's own business — this only forwards where it was hit. Without it, rounds through a
+   * mirror still mark it, they just don't open it.
+   */
+  attachPanes(panes: PaneHoles | null): void {
+    this.panes = panes;
   }
 
   /** Connects the local player's equipment: hands, grenades, smoke, fire, flash (Game.ts wiring). */
@@ -324,6 +350,7 @@ export class WeaponPresentation {
     this.combat.onShot.remove(this.shotObserver);
     this.combat.onWeaponEvent.remove(this.weaponObserver);
     this.combat.onImpact.remove(this.impactObserver);
+    this.combat.onPenetrate.remove(this.penetrateObserver);
     this.combat.onDamage.remove(this.damageObserver);
     this.scene.onBeforeRenderObservable.remove(this.renderObserver);
     this.player.setCameraPunch(0, 0, 0);
@@ -537,6 +564,16 @@ export class WeaponPresentation {
     }
   }
 
+  /**
+   * A round crossed a pane. A mirror cuts itself a hole you can look through and gets a ring of crazing round it; glass
+   * you could already see through gets the hole drawn on it instead.
+   */
+  private handlePenetration(event: PenetrationEvent): void {
+    const panes = this.panes;
+    const aperture = panes && event.prop === panes.paneProp && panes.punch(event.point) ? panes.holeDiameter : 0;
+    this.impacts.pierce(event.point, event.normal, aperture);
+  }
+
   private handleImpact(
     weaponId: WeaponId,
     point: Vector3,
@@ -544,11 +581,14 @@ export class WeaponPresentation {
     surface: "world" | "target",
     zone: HitZone | null,
     targetId: string | null,
+    pane: string | null = null,
   ): void {
     this.tracers.noteImpact(weaponId, point);
     let sound = this.impactSoundsThisFrame < MAX_IMPACT_SOUNDS_PER_FRAME;
     if (surface === "world") {
       this.impacts.world(point, normal, weaponId === "sniper");
+      // The round stopped in a pane you could see straight through: it was armoured this second, and now you know.
+      if (pane) this.impacts.paneStop(point, normal);
       if (sound) this.audio.impact(weaponId, point, normal);
     } else {
       const id = targetId ?? "";

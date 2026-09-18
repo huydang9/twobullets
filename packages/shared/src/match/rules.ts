@@ -3,7 +3,7 @@ import type { DamageKind } from "../equipment/armor";
 import { ITEMS } from "../equipment/items";
 import type { LifeState } from "../equipment/vitals";
 import type { WeaponId } from "../weapons/types";
-import { secondsToTicks, DEFAULT_ZONE_SPEC } from "./zone";
+import { secondsToTicks, ZONE_PLAYABLE_HALF_EXTENT, zoneSpecForHalfExtent } from "./zone";
 import { clampMaxPlayers, TEAM_MODE_SIZE, teamModeOfSize, type TeamMode } from "./teams";
 import type { ActorConfig, BrEndReason, BrMatchConfig, BrRules, BrTimings, KillCause, MatchEvent, TeamResult, TeamState, ZoneSpec } from "./types";
 
@@ -35,6 +35,8 @@ export interface BrMatchConfigOptions {
   readonly names?: (slot: number, kind: ActorConfig["kind"]) => string;
   readonly rules?: Partial<BrRules>;
   readonly zone?: ZoneSpec;
+  /** The map's `terrain.playableHalfExtent`, m: scales the default zone to the map (default 250, Map v1's). Ignored when `zone` is given. */
+  readonly playableHalfExtent?: number;
   readonly timings?: Partial<BrTimings>;
   readonly timeScale?: number;
 }
@@ -86,7 +88,7 @@ export function createBrMatchConfig(options: BrMatchConfigOptions): BrMatchConfi
     teamMode: options.teamMode ?? teamModeOfSize(size.teamSize) ?? undefined,
     actors: createActorConfigs(options),
     rules: { ...DEFAULT_BR_RULES, ...options.rules },
-    zone: options.zone ?? DEFAULT_ZONE_SPEC,
+    zone: options.zone ?? zoneSpecForHalfExtent(options.playableHalfExtent ?? ZONE_PLAYABLE_HALF_EXTENT),
     timings: { ...DEFAULT_BR_TIMINGS, ...options.timings },
     timeScale: options.timeScale ?? 1,
   };

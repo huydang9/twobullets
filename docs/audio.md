@@ -1,6 +1,6 @@
 # Audio
 
-Realistic, PUBG-style game audio built from free CC0 recordings (plus two owner-supplied voice clips): spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
+Realistic, PUBG-style game audio built from free CC0 recordings (plus three owner-supplied voice clips): spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
 
 > **Ambience is currently switched off** (`AMBIENCE_ENABLED = false` in `apps/client/src/audio/AudioSettings.ts`, by request).
 > - The gate wins over any saved ambience volume.
@@ -36,12 +36,18 @@ node_modules/.bin/tsc -p tools/audio/tsconfig.json
 
 All downloaded audio is **CC0**. Attribution isn't required, but every file is credited with its exact origin (file and cut time) in `credits.json`.
 
-**Owner-supplied (2026-09-15, internal release, the owner's choice).** Two voice clips the owner found on the internet (original author and license unknown, credited as "Unknown (from the internet)"; replace before any public release); `license: "Owner-supplied"` in `sources.ts` and `credits.json`, no URL, never fetched (`fetch.ts` only checks they were copied into `assets-src/audio/owner/`):
+**Owner-supplied (2026-09-15, internal release, the owner's choice).** Three voice clips the owner found on the internet (original author and license unknown, credited as "Unknown (from the internet)"; replace before any public release); `license: "Owner-supplied"` in `sources.ts` and `credits.json`, no URL, never fetched (`fetch.ts` only checks they were copied into `assets-src/audio/owner/`):
 
 | Source file | Sound | Plays |
 |---|---|---|
 | `trinh-la-gi.mp3` (stereo, 17.1 s) | `music.matchEnd` (stereo, 96 kbit/s, lazy) | Once per match on the placement screen (see "Event → sound") |
 | `chay-di-cac-chau-oi.mp3` (dual mono, 4.5 s) | `voice.fragOut` (mono, 64 kbit/s, eager) | When a frag grenade is thrown |
+| `do-anh-bat-duoc-em.mp3` (stereo, 3.9 s) | `voice.glassBlocked` (mono, 64 kbit/s, eager) | When a bullet stops dead in a bulletproof glass pane |
+
+The source of `voice.glassBlocked` holds two spoken lines over a quiet bed; only the second, louder one is cut
+(2.71 → 3.90 s, 1.19 s), because an impact sound that runs for seconds stacks horribly. For the first line instead,
+change its cut in `clips.ts` to `at: [0.9]` with `maxSeconds: 1.25` and rebuild with
+`--only=voice.glassBlocked`.
 
 | Source | Author | Used for |
 |---|---|---|
@@ -90,11 +96,11 @@ Equipment sounds that no CC0 recording covers are synthesized at runtime: the sm
 
   | | Opus | AAC |
   |---|---|---|
-  | Total | 2.93 MB | 4.37 MB |
-  | Eager (decoded before the first click) | 1.61 MB | |
+  | Total | 2.95 MB | 4.38 MB |
+  | Eager (decoded before the first click) | 1.62 MB | |
   | Lazy (ambience, fetched on first use, so never while ambience is off; the results clip, fetched in the background after the eager set) | the rest | |
 
-  57 sounds, 212 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
+  58 sounds, 213 variations. This is well under the 8–15 MB budget, which leaves room for more variations.
 - **Loudness:**
   - Each variation is measured with ffmpeg `loudnorm` (EBU R128 integrated loudness).
   - Short clips are padded with silence, which R128 gating ignores.
@@ -110,6 +116,7 @@ Equipment sounds that no CC0 recording covers are synthesized at runtime: the sm
     | Throwable and consumable foley, armor | −20 to −26 LUFS; peaky hits may shave ≤ 3–5 dB |
     | Ambience | −24/−26 LUFS |
     | Owner-supplied voice clips (results clip, frag-out shout) | −18 LUFS, kept whole (`untrimmed` cut) |
+    | Owner-supplied bulletproof-glass line | −18 LUFS, one line cut out of the source |
 
   - Relative mix levels live in `soundDesign.ts` and `weaponMix.ts`.
 - **Gun files:**
@@ -254,6 +261,7 @@ Pistol and shotgun sit either side of the rifle.
 | Dry fire | `mech.dryFire` |
 | Casing bounce | `foley.casing` pitched per weapon (shotgun hull duller) |
 | Impact on world | `impact.concrete/metal/wood/dirt` by the hit material; occasional ricochet whine on concrete/metal |
+| Impact on bulletproof glass (`wall_glass_solid`) | The pane's own `impact.metal`, plus the owner-supplied `voice.glassBlocked` spatial at the impact point. Recognized from the prop collider the surface ray hit (`propCollider_wall_glass_solid_*`), not from the material, so the shoot-through `wall_glass` stays silent. One line every 2.5 s across all panes, so emptying a magazine into one doesn't stack it. Everything about it (clip, prop, cooldown, mix, and an `enabled` switch) is in `audio/glassBlocked.ts` |
 | Impact on target | `impact.flesh`, spatial |
 | Hit confirm (shooter) | `impact.flesh` thud + tick; headshot adds a metallic tink; kill adds a low thump |
 | Footstep | `step.concrete/dirt/grass/gravel/wood/metal`, gain/rate by stance |
@@ -291,6 +299,7 @@ audio.playNearMiss({ position /* closest point */, velocity, weaponId })        
 audio.playFootstep({ position, surface?, stance: "crouch"|"walk"|"run"|"sprint", isLocal })
 audio.playLanding({ position, fallSpeed, surface?, isLocal })  audio.playJump({ position, surface?, isLocal })
 audio.playImpact({ position, normal?, surface?: AcousticSurface | "flesh", weaponId?, age? })
+audio.playGlassBlocked({ position, age? })                                       // bulletproof pane; playImpact calls it
 audio.playExplosion({ position, kind?: "frag"|"flash", power?, age? })            // Detonate
 audio.playThrowableBounce({ kind, position, normal?, impactSpeed, surface? })     // derived from local stepThrowables
 audio.playThrowAction({ action: "draw"|"pinPull"|"spoon"|"throw"|"pinReturn"|"holster", kind, style?, position /* null = first person */ })
@@ -327,6 +336,7 @@ __audio.nearMiss("shotgun", 1.5, 90)   // subsonic whiz sweeping past
 __audio.footsteps("gravel", "sprint", 10, 180)   // enemy running behind you
 __audio.footsteps("metal", "crouch", 4, -90)
 __audio.impact("metal", 12, 30)
+__audio.glassBlocked(); __audio.glassBlocked(20, 90)   // bulletproof-glass line; rate-limited to one per 2.5 s
 __audio.explosion(40, 0)             // frag; __audio.explosion(15, 90, "flash") for the bang
 __audio.explosion(4); __audio.explosion(250, -30)   // close overpressure + ringing vs distant rolling boom
 __audio.flashRing(1)                   // full tinnitus: mix ducked and dulled, recovering over 6 s
@@ -358,7 +368,8 @@ The cut points were chosen by transient analysis and spectrograms, **not by ear*
 9. **Explosions.** `__audio.explosion(d)` for d = 4, 20, 60, 150, 400: a frag must be clearly bigger than `__audio.ab("sniper", "rifle")`, the near → far handover shouldn't jump, and the debris shouldn't sound like crockery (swap `explosion.debris` cuts in `clips.ts`). The near layer is a firework/cannon bang slowed to 80 %; if it reads as a firework, try `rate: 0.7`.
 10. **Flashbang.** `__audio.explosion(8, 0, "flash")` then `__audio.flashRing(1)`: the ring must stay audible while the rest is dull, and recover smoothly.
 11. **Loops.** `__audio.smoke()` hiss should not sound like tape noise; `__audio.fire()` crackle loop is 2.3 s, so listen for repetition.
-12. **Pin, spoon, tape.** The pin pull uses key-in-lock recordings and the bandage tape uses tape-measure pulls; both were chosen by spectrum. Replace the cuts if they don't read as intended.
+12. **Bulletproof glass.** `__audio.glassBlocked()`, and in game empty a magazine into a `wall_glass_solid` pane. The cut was picked by envelope analysis, not by ear: check that it starts on the first syllable and isn't the wrong half of the source (the file holds two lines), and that one line per 2.5 s feels right rather than naggy.
+13. **Pin, spoon, tape.** The pin pull uses key-in-lock recordings and the bandage tape uses tape-measure pulls; both were chosen by spectrum. Replace the cuts if they don't read as intended.
 
 ## Known limitations
 

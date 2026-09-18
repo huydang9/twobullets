@@ -70,6 +70,8 @@ export class MapRuntime {
   readonly buildingAcoustics: BuildingAcoustics;
   readonly outOfBounds: OutOfBounds;
   private player: MapPlayer | null = null;
+  /** Seconds since the map loaded, the clock the phase-shifting panes run on (see `update`). */
+  private phaseSeconds = 0;
 
   private constructor(
     private readonly scene: Scene,
@@ -203,6 +205,12 @@ export class MapRuntime {
   }
 
   update(dt: number): void {
+    // The glazed panes switch between stopping bullets and letting them through on this clock, and nothing about them
+    // looks any different either way (shared/map/glassPhase.ts): you find out by firing. Offline there is one physics
+    // world, so bots and the player read the same shapes and agree by construction; once the match server owns combat
+    // this must be the match tick's own time.
+    this.phaseSeconds += dt;
+    this.colliders.setPhaseTime(this.phaseSeconds);
     const camera = this.scene.activeCamera?.globalPosition;
     if (camera) this.updateView(camera);
     if (!this.player) return;

@@ -3,7 +3,7 @@ import type { BotInput, BotWorldView, NavAvoidCircle, NavPath, NavQuery, PathSta
 import { NavFlag } from "../types";
 import type { ZoneCircle } from "../../match/types";
 import type { PerceptionState } from "../perception/perception";
-import { copyVec, vec3, wrapAngle, type BotRandom, type MutVec3 } from "../brain/util";
+import { clampNum, copyVec, vec3, wrapAngle, type BotRandom, type MutVec3 } from "../brain/util";
 
 // Motor (design.md §5.5): every tick turns "go there" / "move this way" into PlayerInput axes and movement buttons.
 // Path following is pure pursuit on the NavPath with a look-ahead; axes are −1/0/1 relative to the aim yaw, dithered
@@ -32,6 +32,11 @@ const PENDING_TIMEOUT_TICKS = 300;
 const RETRY_TICKS = 45;
 const DETOUR_MIN = 10;
 const DETOUR_MAX = 35;
+/** Path/straight-line ratio calibration: starting guess, shortest path worth sampling (m), cap and EMA weight. */
+const PATH_RATIO_START = 1.25;
+const PATH_RATIO_MIN_SAMPLE = 12;
+const PATH_RATIO_MAX = 4;
+const PATH_RATIO_SMOOTHING = 0.25;
 /** Displacement checks for stuck detection. */
 const PROGRESS_WINDOW_TICKS = 40;
 const PROGRESS_MIN = 0.6;
@@ -105,6 +110,12 @@ export class Motor {
   private gaveUpNext = false;
   /** Seconds the bot has been pushing without getting anywhere (debug, tests). */
   stuckSeconds = 0;
+  /**
+   * How much longer this map's paths run than the straight line, measured from the paths this bot actually walked
+   * (EMA over accepted searches). Open ground settles near 1.1; maze corridors run 2–3×. Zone planning reads it so the
+   * rotate margin is computed from real walking distance instead of a constant tuned on one map.
+   */
+  pathDetour = PATH_RATIO_START;
 
   private handle = -1;
   private pathValid = false;
@@ -186,6 +197,7 @@ export class Motor {
     this.failures = 0;
     this.crumbCount = 0;
     this.retraceLeft = 0;
+    this.pathDetour = PATH_RATIO_START;
   }
 
   /** Clears this tick's wishes; call before behaviors run. */
@@ -636,6 +648,11 @@ export class Motor {
     }
     const status: PathStatus = view.nav.readPath(this.handle, this.path);
     if (status === "found" || status === "partial") {
+      // Calibrate the map's path/straight-line ratio on complete paths long enough to be representative.
+      if (status === "found" && this.requestDistance > PATH_RATIO_MIN_SAMPLE && this.path.length > 0) {
+        const ratio = clampNum(this.path.length / this.requestDistance, 1, PATH_RATIO_MAX);
+        this.pathDetour += (ratio - this.pathDetour) * PATH_RATIO_SMOOTHING;
+      }
       view.nav.releasePath(this.handle);
       this.handle = -1;
       this.pathValid = this.path.count > 0;

@@ -14,6 +14,25 @@ export interface ImpactEvent {
   readonly surface: "world" | "target";
   readonly targetId: string | null;
   readonly zone: HitZone | null;
+  /**
+   * Map prop id when the round stopped dead in a transparent pane, else null. A glazed pane only stops bullets while
+   * its phase group is armoured (`shared/map/glassPhase.ts`), and the panes look identical either way — so this is the
+   * one moment the player finds out, and the presentation flashes where it struck.
+   */
+  readonly pane?: string | null;
+}
+
+/**
+ * A bullet went straight through a pane (a shoot-through prop on the blocker layer: `wall_glass`, `wall_mirror`), which
+ * the bullet ray itself never sees. One event per face punched — the entry face, then the exit face on a square hit.
+ * The vectors belong to the emitter and are reused: copy anything you keep past the call.
+ */
+export interface PenetrationEvent {
+  readonly point: Vector3;
+  /** Unit surface normal, pointing out of the pane on the side this hole is on. */
+  readonly normal: Vector3;
+  /** Map prop id of the pane. */
+  readonly prop: string;
 }
 
 export interface DamageEvent {
@@ -44,6 +63,8 @@ export interface CombatView {
   readonly onShot: Observable<ShotEvent>;
   readonly onWeaponEvent: Observable<WeaponEvent>;
   readonly onImpact: Observable<ImpactEvent>;
+  /** Panes a bullet passed through this tick (bullet holes); never fires for anything the bullet actually stopped in. */
+  readonly onPenetrate: Observable<PenetrationEvent>;
   readonly onDamage: Observable<DamageEvent>;
 
   readonly weaponState: WeaponState;

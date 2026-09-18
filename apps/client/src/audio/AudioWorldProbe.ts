@@ -51,6 +51,7 @@ export class AudioWorldProbe {
   private enclosureIndex = 0;
   private enclosureValue = 0;
   private lastSurface: AcousticSurface = "concrete";
+  private impactNodeName = "";
   private time = 0;
 
   constructor(scene: Scene, ignoreBody: PhysicsBody | undefined) {
@@ -113,7 +114,17 @@ export class AudioWorldProbe {
   surfaceAtImpact(point: Vec3Like, normal: Vec3Like | undefined): AcousticSurface {
     const n = normal ?? { x: 0, y: 1, z: 0 };
     const hit = this.cast(point.x + n.x * 0.15, point.y + n.y * 0.15, point.z + n.z * 0.15, point.x - n.x * 0.25, point.y - n.y * 0.25, point.z - n.z * 0.25);
+    this.impactNodeName = hit?.node?.name ?? "";
     return this.resolve(hit, point);
+  }
+
+  /**
+   * Name of the node the last {@link surfaceAtImpact} ray hit, "" when it hit nothing or was over budget. Prop
+   * colliders are named `propCollider_<prop>_<scale>`, which is how audio picks out one specific prop where its
+   * material alone isn't enough (audio/glassBlocked.ts).
+   */
+  get impactNode(): string {
+    return this.impactNodeName;
   }
 
   private resolve(hit: CastHit | null | undefined, at: Vec3Like): AcousticSurface {

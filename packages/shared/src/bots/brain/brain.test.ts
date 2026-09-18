@@ -22,10 +22,13 @@ describe("bot brain fixtures", () => {
     world.addLoot(11, "weapon_rifle", 8, 10);
     const brain = brainFor(world);
     let pickup = -1;
+    // Closest approach, not the final position: with nothing left to do the bot roams away again.
+    let closest = Infinity;
     world.run(brain, 600, {
       onTick: () => {
         const action = world.out.input.action;
         if (pickup < 0 && action?.type === PlayerActionType.pickup) pickup = action.arg;
+        closest = Math.min(closest, Math.sqrt((world.self.feet.x - 8) ** 2 + (world.self.feet.z - 10) ** 2));
       },
     });
     // Captures the action from the tick before onTick of the next tick, so check the final state too.
@@ -33,8 +36,7 @@ describe("bot brain fixtures", () => {
     if (pickup < 0 && last?.type === PlayerActionType.pickup) pickup = last.arg;
     expect(brain.debug().lootTargetId === 11 || pickup === 11).toBe(true);
     expect(pickup).toBe(11);
-    const d = Math.sqrt((world.self.feet.x - 8) ** 2 + (world.self.feet.z - 10) ** 2);
-    expect(d).toBeLessThan(2.6);
+    expect(closest).toBeLessThan(2.6);
   });
 
   it("low and safe heals with the right item", () => {

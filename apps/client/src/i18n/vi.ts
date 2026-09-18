@@ -507,6 +507,7 @@ export const vi = {
   "mapPicker.previewAlt": "Bản đồ {name}",
   "mapPicker.fictionalName": "Map v1",
   "mapPicker.fictionalPlace": "Thung lũng hư cấu",
+  "mapPicker.fictionalPlaceGeneric": "Bản đồ hư cấu",
   "mapPicker.country.vn": "Việt Nam",
   "mapPicker.pois": "{count} địa điểm",
   "mapPicker.buildings": "{count} tòa nhà",

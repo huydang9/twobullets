@@ -26,6 +26,8 @@ export interface OfflineMatchSimInput {
   readonly difficulty: BotDifficulty;
   /** Null: bots-only (`?spectate=1`). */
   readonly humanSlot: number | null;
+  /** The map's `terrain.playableHalfExtent`: scales the zone to the map (default Map v1's 250 m). */
+  readonly playableHalfExtent?: number;
   readonly spawns: readonly TeamSpawnPlan[];
   readonly killY: number;
   readonly raycastWorld: RaycastFn;
@@ -38,7 +40,7 @@ export interface OfflineMatchSimInput {
   readonly profile?: boolean;
 }
 
-export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed" | "options" | "difficulty" | "humanSlot">): BrMatchConfig {
+export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed" | "options" | "difficulty" | "humanSlot" | "playableHalfExtent">): BrMatchConfig {
   return createBrMatchConfig({
     seed: input.seed,
     maxPlayers: input.options.maxPlayers,
@@ -46,6 +48,7 @@ export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed
     humanSlot: input.humanSlot,
     humanTeammate: input.options.teammate,
     difficulty: input.difficulty,
+    playableHalfExtent: input.playableHalfExtent,
     timeScale: input.options.zoneScale,
   });
 }

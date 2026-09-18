@@ -74,6 +74,7 @@ import {
   type PointOfInterest,
   type RayHit,
   type SmokeCloud,
+  type SpawnPoint,
   type RaycastFn,
   type ThrowableSimEvent,
   type ThrowEvent,
@@ -160,8 +161,10 @@ export interface EquipmentOptions {
   readonly seed?: number;
   /** Map mode: spawns ground loot in these buildings, and along roads and on POI pads with `outdoor`. */
   readonly map?: { readonly pois: readonly PointOfInterest[]; readonly buildings: readonly LootBuilding[]; readonly outdoor?: OutdoorLootWorld };
-  /** Ground loot outside map mode. Default: a test pile in front of every arena spawn; `[]` for none. */
+  /** Ground loot outside map mode. Default: a test pile in front of every `spawnPoints` spawn; `[]` for none. */
   readonly loot?: readonly LootItem[];
+  /** Spawns the default test piles sit in front of — the level being played (default: the arena's). */
+  readonly spawnPoints?: readonly SpawnPoint[];
   /** Called every tick for the current targets. */
   readonly targets?: () => readonly EquipmentTarget[];
   /** Teammates the local player can revive (DEV teammate, squad bots later). */
@@ -269,7 +272,7 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
     this.world = createEquipmentWorld(seed);
     this.raycaster = new WorldRaycaster(scene);
     this.inputQueue = new EquipmentInputQueue(input);
-    const loot = options.map ? generateLoot(seed, options.map.pois, options.map.buildings, options.map.outdoor).items : (options.loot ?? createTestLoot(ARENA_LEVEL.spawnPoints));
+    const loot = options.map ? generateLoot(seed, options.map.pois, options.map.buildings, options.map.outdoor).items : (options.loot ?? createTestLoot(options.spawnPoints ?? ARENA_LEVEL.spawnPoints));
     this.groundLoot = createGroundLoot(loot);
     this.tickObserver = player.onTick.add((tick) => this.tick(tick));
   }
