@@ -8,13 +8,14 @@ import { PhysicsBody } from "@babylonjs/core/Physics/v2/physicsBody.js";
 import { PhysicsShapeBox, PhysicsShapeCylinder, type PhysicsShape } from "@babylonjs/core/Physics/v2/physicsShape.js";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { MOVEMENT } from "@twobullets/shared/constants";
+import { MOVEMENT, SIMULATION } from "@twobullets/shared/constants";
 import { COLLIDER_STRIDE, propColliderGroups } from "@twobullets/shared/map/layout/collision";
 import { isMirrorWallProp } from "@twobullets/shared/equipment/destructible";
 import { glassBlocksAt } from "@twobullets/shared/map/glassPhase";
 import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import type { Terrain } from "@twobullets/shared/map/terrain/terrain";
 import type { Vec3 } from "@twobullets/shared/movement/types";
+import type { RaycastFn } from "@twobullets/shared/weapons/types";
 import { CharacterBody } from "../CharacterBody";
 import { CollisionLayer } from "../collisionLayers";
 import type { HavokModule, PlayerBody, SimWorld } from "../index";
@@ -51,6 +52,14 @@ export interface MapCollision {
    * mode (shoot-through) forever.
    */
   setPhaseTime(seconds: number): void;
+  /**
+   * `setPhaseTime` for a match tick, and the only conversion the server side makes: match seconds are the absolute
+   * match tick over the tick rate, on every host. The client's half of it is `PropColliders.setPhaseTick`
+   * (apps/client/src/world/props/PropColliders.ts); the two are pinned against each other by
+   * apps/client/test/world/glassPhaseAgreement.test.ts, because if they ever drift apart a player shoots through a
+   * pane the server says is solid.
+   */
+  setPhaseTick(tick: number): void;
   /**
    * Takes one prop instance out of the world for good: a mirror pane a frag destroyed
    * (`shared/equipment/destructible.ts`). Returns false when that instance has no collider or is already gone.
@@ -164,17 +173,22 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
     meshes.push(mesh);
   }
 
+  const setPhaseTime = (seconds: number): void => {
+    for (const pane of phases) {
+      const blocking = glassBlocksAt(pane.phase, seconds);
+      if (blocking === pane.blocking) continue;
+      pane.blocking = blocking;
+      pane.shape.filterMembershipMask = blocking ? pane.solid : CollisionLayer.blocker;
+    }
+  };
+
   return {
     terrain,
     buildings,
     stats: { buildings: buildings.length, propShapes: shapes.length, propBodies, buildMs: performance.now() - started },
-    setPhaseTime(seconds: number) {
-      for (const pane of phases) {
-        const blocking = glassBlocksAt(pane.phase, seconds);
-        if (blocking === pane.blocking) continue;
-        pane.blocking = blocking;
-        pane.shape.filterMembershipMask = blocking ? pane.solid : CollisionLayer.blocker;
-      }
+    setPhaseTime,
+    setPhaseTick(tick: number) {
+      setPhaseTime(tick / SIMULATION.tickRate);
     },
     removeInstance(prop: string, instance: number) {
       return removeColliderInstance(destructible, prop, instance);
@@ -200,6 +214,24 @@ export interface MapSimWorld extends SimWorld {
   groundFeet(x: number, z: number): Vec3;
 }
 
+/** Map collision by the world ray it belongs to; see `worldPhaseClock`. */
+const PHASED_WORLDS = new WeakMap<RaycastFn, MapCollision>();
+
+/**
+ * The map collision behind a world raycast, for a caller holding nothing but the ray function.
+ *
+ * The server's hit registration (apps/server-match/src/hitreg) is that caller: `ServerCombat` hands it
+ * `SimWorld.raycastWorld` and nothing else, yet it is the one place that knows which tick a bullet is being resolved
+ * at — so it is the one place that can turn the glazed panes' clock (`MapCollision.setPhaseTick`) before the ray goes
+ * out. A WeakMap rather than a property hung on the function, so the ray stays a plain `RaycastFn` everywhere else and
+ * a disposed world's collision stays collectable.
+ *
+ * Null for a world with no map collision (the arena blockout), which has no panes to turn.
+ */
+export function worldPhaseClock(raycastWorld: RaycastFn): MapCollision | null {
+  return PHASED_WORLDS.get(raycastWorld) ?? null;
+}
+
 /**
  * Headless world for a built map: NullEngine scene, Havok (never stepped: static bodies and character controller
  * queries only, like ServerMatch), the map collision, a world-only raycast and CharacterBody factory.
@@ -211,6 +243,7 @@ export function createMapSimWorld(havok: HavokModule, input: MapCollisionInput):
   const collision = buildMapCollision(scene, input);
   const raycaster = new WorldRaycaster(scene);
   const bodies = new Set<CharacterBody>();
+  PHASED_WORLDS.set(raycaster.cast, collision);
   return {
     raycastWorld: raycaster.cast,
     scene,

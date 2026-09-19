@@ -26,7 +26,7 @@ export { LEVEL_MATERIAL, createBlockShape, createConvexHullShape, havokPluginOf,
 export { createTerrainBody, createTerrainShape, heightfieldToHavokOrder, type TerrainBody, type TerrainShapeOptions } from "./map/terrainBody";
 export { buildBuilding, type BuildingVisualHandle, type BuildingVisualHost, type BuiltBuilding } from "./map/buildBuilding";
 export { createBuildingBody, getBuildingShape, type BuildingBody } from "./map/buildingPhysics";
-export { buildMapCollision, createMapSimWorld, removeColliderInstance, type MapCollision, type MapCollisionInput, type MapCollisionStats, type MapSimWorld } from "./map/mapCollision";
+export { buildMapCollision, createMapSimWorld, removeColliderInstance, worldPhaseClock, type MapCollision, type MapCollisionInput, type MapCollisionStats, type MapSimWorld } from "./map/mapCollision";
 export * from "./match/index";
 
 /** The instantiated Havok WASM module (`await HavokPhysics()`). */

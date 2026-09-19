@@ -28,6 +28,7 @@ import { createNetWeaponState, netCombatLink, netHandsBusy } from "./netCombatRu
 import { NetCombatPresenter } from "./NetCombatPresenter";
 import { NetMatch } from "./NetMatch";
 import { NetThrowables, type NetThrowableTarget } from "./NetThrowables";
+import { NetWalls } from "./NetWalls";
 import { NET_MOVEMENT, NetMovement } from "./netMovement";
 import { NetPlayerBody } from "./NetPlayerBody";
 import { CosmeticHitPredictor, RemoteHitboxes } from "./RemoteHitboxes";
@@ -82,6 +83,7 @@ export class NetGame {
   private overlay: HitboxOverlay | null = null;
   private matchValue: NetMatch | null = null;
   private throwablesValue: NetThrowables | null = null;
+  private wallsValue: NetWalls | null = null;
   private throwTarget: NetThrowableTarget | null = null;
   private throwLife: number = LifeCode.alive;
   private clientValue: NetClient | null = null;
@@ -148,6 +150,12 @@ export class NetGame {
     this.player = player;
     this.throwTarget = deps.equipment;
     this.throwablesValue = new NetThrowables(deps.equipment);
+    // The maze's mirror panes and grass hedges (protocol v10). The server owns which are gone; this holds the copy the
+    // renderer and the prop colliders follow. Every other map builds a registry of count 0, so it costs nothing there.
+    if (deps.world !== null) {
+      const walls = new NetWalls({ layout: deps.world.layout, props: deps.world.props, colliders: deps.world.colliders });
+      this.wallsValue = walls.empty ? null : walls;
+    }
     combat.attachEquipment(null);
     combat.weaponState = createNetWeaponState();
     this.movement.weaponSource = () => combat.weaponState;
@@ -299,6 +307,7 @@ export class NetGame {
         movement: this.movement,
         loot: this.presenter?.equipmentView.loot ?? null,
         throwables: this.throwablesValue,
+        walls: this.wallsValue,
         onCommandResult: (result) => this.matchValue?.onCommandResult(result),
         onStateChange: (state, c) =>
           console.info(`[net] ${state}${state === "disconnected" ? `: ${c.stats.disconnectReason}${c.stats.disconnectExpected ? " (normal end)" : ""}` : ""}`),

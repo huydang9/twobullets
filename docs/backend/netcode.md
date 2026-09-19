@@ -537,6 +537,7 @@ IDs are the first byte of every datagram and every stream frame. Datagram IDs 0x
 | 0x50 | `MatchCommand` (v8: `leave`, `endForAll`; see §6.9) | C→S | S | 3 B | on the pause menu |
 | 0x51 | `MatchCommandResult` (v8: ok / denied / unavailable / unknown) | S→C | S | 4 B | one per command |
 | 0x52 | `ThrowableUpdate` (v9: grenades in flight and area effects in the client's area of interest, §8.4) | S→C | S | ≤ ~900 B per message (spawn 16 B) | throws, detonations, effects |
+| 0x53 | `WallUpdate` (v10: destructible walls the server took out of the map, §8.5) | S→C | S | ≤ ~900 B per message (a change 19 b) | frags, smoke heals, joins |
 
 ### 6.5 Layouts
 
@@ -860,6 +861,30 @@ The match server owns one `EquipmentWorld` (`ServerThrowables`, `apps/server-mat
 - **Damage** goes through `ServerCombat.areaDamage`, i.e. the same pipeline as bullets: armor, knock while a teammate stands, kill credit to the thrower, `Kill`/`DamageTaken` reliable events and the kill feed with cause `frag` / `molotov`. Friendly fire follows the match rules; self damage always lands.
 - **Carried counts** ride the owner items group (v9: 4 bits per kind), so the client's hands can only throw what the server says is in the bag.
 - **Measured** (`apps/server-match/test/throwables.integration.test.ts`): one frag, spawn to detonation (4.5 s fuse), **182 B** to a nearby client. A smoke cloud costs 13 B for 35 s, a molotov area 17 B for its whole burn.
+
+### 8.5 Destructible walls over the network (protocol v10)
+
+The maze (`shared/map/mazeBr.ts`) is the one map whose geometry a player can change: a frag within 3 m destroys a mirror pane outright (mesh, collider and nav block), a molotov burns a grass hedge away in ~2.5 s, and a smoke cloud sitting on a standing, holed pane closes its bullet holes over ~5 s. A destroyed pane never comes back. The rules are the shared pure resolvers in `shared/equipment/destructible.ts` and the server does not reimplement them: `ServerThrowables.setWalls` installs the match's `DestructibleWalls` in its `EquipmentWorld`, so `stepEquipmentWorld` runs `fragDestroysWalls` / `smokeRepairsWalls` / `fireBurnsWalls` on the tick — the same wiring the offline `MatchSim` uses.
+
+- **`ServerWalls`** (`apps/server-match/src/match/ServerWalls.ts`) owns what follows a change: the pane's static body leaves the Havok world (`MapCollision.removeInstance`), the nav grid is patched (`shared/bots/nav/navPatch.ts`) so the server's bots walk the corridor the blast opened, and every client is told. A map with no mirror and no hedge builds a registry of count 0 and the whole system short-circuits — Map v1, the real maps and the arena pay one comparison a tick.
+- **An index is the whole payload.** Both ends build the same registry from the same layout with `buildDestructibleWalls`, which walks `layout.props` in order, so wall 37 is the same pane on every machine. A frag that takes three panes is three 19-bit ops; no position, prop, instance or radius travels.
+- **Not area-of-interest limited**, unlike loot and throwables: a destroyed pane is map geometry, it changes routes and what a teammate across the map is looking at, and a whole match's changes are a few dozen ops.
+- **Apertures are server-owned.** A mirror is shoot-through on the collider layer, so the server's world ray passes it and no world hit reports the crossing. `ServerWalls.segment` is composed into `ServerProjectiles.onSegment` (beside the bots' near-miss hearing) and tests each bullet's flight segment against the standing panes' boxes (`wallsCrossedBy`, a slab test in the pane's own frame). Only the **0 → 1 transition** goes on the wire: nothing anywhere reads `holes` as a number, only as "this pane is holed", which is what decides when a cloud has finished healing one. The *visual* hole stays client-local — it needs a point on the pane's face that the wire would otherwise have to carry, and the client's own crossing already puts it in the right place.
+- **`WallUpdate` (0x53, control stream):** type 8, then ops (op 3 + payload) until `end` (7):
+
+| Op | Payload | Bits |
+|---|---|---|
+| 0 destroyed | index 16 | 19 |
+| 1 repaired | index 16 | 19 |
+| 2 holed | index 16 | 19 |
+| 3 healing | index 16, progress 4 (1/15) | 23 |
+| 4 clear | – | 3 |
+
+- **The heal is animated, not popped.** `healing` carries how far through closing a pane is, on 1/15 steps (finer than the renderer's `MIRROR_HOLE.healSteps` of 12), and the client writes it back as the tick count `wallRepairProgress` reads — so nothing downstream knows it came off a wire.
+- **Join and resync** send `clear` followed by one op per destroyed wall and one per holed wall: the **state**, not the history. The change log is a ring (`DestructibleWalls.logCapacity`) and `changeAt` returns −1 past it, so a client that was never there has nothing to replay from. Every op is idempotent, which makes a resync cost only its bytes.
+- **The client applies it** through `WallMirror` (`packages/netcode/src/walls.ts`), the same applier the headless tests and the browser run: it writes the op into its own registry, takes the collider out (`PropColliders.removeInstance`) and appends to the change log the renderer already polls (`PropInstances.bindWalls`), so a remote player's grenade opens the wall on your screen exactly as an offline one does.
+- **Bot nav is patched only on a grid built for this match.** `MatchLevel.createNav` caches one grid per map for the process; patching a shared grid would leave later matches with cells opened under walls that are standing again.
+- **Tested**: `apps/server-match/test/destructibleWalls.integration.test.ts` (two clients on the maze agree on the walls after a frag, a smoke heal and a molotov; a late joiner rebuilds from the state), `packages/netcode/test/walls.test.ts`, `packages/protocol/test/walls.test.ts`.
 
 ---
 

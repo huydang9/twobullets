@@ -1,4 +1,5 @@
 import type { LagCompHistory } from "@twobullets/netcode";
+import { worldPhaseClock, type MapCollision } from "@twobullets/sim";
 import type { MutableRigHit } from "@twobullets/shared/hitreg/rig";
 import type { Vec3 } from "@twobullets/shared/movement/types";
 import { ProjectileBuffer } from "@twobullets/shared/weapons/projectileBuffer";
@@ -40,6 +41,8 @@ export class ServerProjectiles {
   onSegment: ProjectileSegmentListener | null = null;
   private readonly history: LagCompHistory;
   private readonly raycastWorld: RaycastFn;
+  /** The map collision behind `raycastWorld`, when the level has one (`worldPhaseClock`); null on the arena. */
+  private readonly phaseClock: MapCollision | null;
   private viewDelay: Float64Array;
   private readonly from: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
   private readonly to: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
@@ -50,6 +53,7 @@ export class ServerProjectiles {
   constructor(history: LagCompHistory, raycastWorld: RaycastFn, capacity = 256) {
     this.history = history;
     this.raycastWorld = raycastWorld;
+    this.phaseClock = worldPhaseClock(raycastWorld);
     this.buffer = new ProjectileBuffer(capacity);
     this.viewDelay = new Float64Array(this.buffer.capacity);
   }
@@ -91,6 +95,16 @@ export class ServerProjectiles {
    * at present time (alive or downed, in the match); a bullet never hits its own shooter.
    */
   step(presentTick: number, dt: number, hittable: Uint8Array, sink: ProjectileHitSink): void {
+    // The maze's glazed panes stop bullets for ten seconds and let them through for the next ten
+    // (shared/map/glassPhase.ts), so the static world this tick's rays are cast against is only right once the clock
+    // has been turned to this tick. Present time, not the shooter's rewound time: the rigs are rewound because the
+    // shooter saw remote players late, but a client renders the static world at its own predicted tick — which is
+    // this one. One call per tick, and it writes only where a group actually changed mode.
+    //
+    // Everything else that casts against this Havok world (bot sight, thrown items, loot drops) reads the same panes.
+    // The ones that run earlier in the tick see the previous tick's modes, which is a 16 ms lag on a 10 s hold and
+    // touches no hit decision — only this call decides whether a bullet was stopped.
+    this.phaseClock?.setPhaseTick(presentTick);
     const b = this.buffer;
     const seg = b.segment;
     const from = this.from;

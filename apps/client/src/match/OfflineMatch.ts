@@ -269,6 +269,7 @@ export class OfflineMatch {
     this.hudView?.dispose();
     this.pauseMenu.dispose();
     this.zoneWall.dispose();
+    this.deps.world.setPhaseClock(null);
     this.sim?.dispose();
     this.bodies.dispose();
     this.deps.equipment.setTargetsSource(null);
@@ -370,6 +371,9 @@ export class OfflineMatch {
     }));
     const config = sim.config;
     this.sim = sim;
+    // The glazed panes run on the match's own tick, the same clock the server uses online: one number, one schedule,
+    // one answer for what a pane does to a bullet (shared/map/glassPhase.ts).
+    world.setPhaseClock(() => this.sim?.state.tick ?? null);
     // The renderer reads the same wall state the sim writes: hidden panes, withered hedges, closing apertures.
     if (walls) world.props.bindWalls(destructible, world.layout);
     trace.time("start bodies", () => this.bodies.attach(sim));

@@ -7,6 +7,7 @@ import { decodePing } from "../src/messages/ping";
 import { decodeRoster } from "../src/messages/roster";
 import { createLootUpdateBuffer, decodeLootUpdateInto } from "../src/messages/loot";
 import { createThrowableUpdateBuffer, decodeThrowableUpdateInto } from "../src/messages/throwables";
+import { createWallUpdateBuffer, decodeWallUpdateInto } from "../src/messages/walls";
 import { MAX_ENTITY_SLOTS, MAX_TEAMMATES, createSnapshotBuffer, decodeSnapshotInto, encodeSnapshot, type Snapshot } from "../src/messages/snapshot";
 import { describeMessage } from "../src/debug/describe";
 import { StreamDeframer } from "../src/framing";
@@ -28,6 +29,7 @@ const IDS = [
   MsgId.Roster,
   MsgId.LootUpdate,
   MsgId.ThrowableUpdate,
+  MsgId.WallUpdate,
   MsgId.MatchCommand,
   MsgId.MatchCommandResult,
 ];
@@ -53,6 +55,8 @@ function decodeAll(bytes: Uint8Array, baseline: Snapshot | null): void {
   decodeLootUpdateInto(r, createLootUpdateBuffer());
   r.reset(bytes);
   decodeThrowableUpdateInto(r, createThrowableUpdateBuffer());
+  r.reset(bytes);
+  decodeWallUpdateInto(r, createWallUpdateBuffer());
   describeMessage(bytes);
   new StreamDeframer().push(bytes, () => {});
 }

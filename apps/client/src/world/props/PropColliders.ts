@@ -1,8 +1,21 @@
 import { Matrix, Mesh, PhysicsBody, PhysicsMotionType, PhysicsShapeBox, PhysicsShapeCylinder, Quaternion, Vector3, type PhysicsShape, type Scene } from "@babylonjs/core";
-import { COLLIDER_STRIDE, getMapProp, glassBlocksAt, isMirrorWallProp, propColliderGroups, type MapLayout } from "@twobullets/shared";
+import { COLLIDER_STRIDE, SIMULATION, getMapProp, glassBlocksAt, isMirrorWallProp, propColliderGroups, type MapLayout } from "@twobullets/shared";
 import { CollisionLayer } from "../../combat/hitboxes";
 
 const MATERIAL = { friction: 0.6, restitution: 0 } as const;
+
+/**
+ * Match seconds at match tick `tick`, the clock the glazed panes run on. The whole point of the panes is that nothing
+ * is sent about them: every host derives each pane's mode from the tick, so every host has to turn a tick into seconds
+ * the same way. The server's half is `MapCollision.setPhaseTick` (packages/sim/src/map/mapCollision.ts) and
+ * apps/client/test/world/glassPhaseAgreement.test.ts holds the two against each other.
+ *
+ * `tick` is the absolute match tick — the server's own tick number online (`NetMatchView.phaseTick`), the MatchSim's
+ * offline. Free roam has no match and no tick, and runs the clock off wall time instead (`MapRuntime.update`).
+ */
+export function phaseSecondsAtTick(tick: number): number {
+  return tick / SIMULATION.tickRate;
+}
 
 export interface PropColliderStats {
   /** One Havok shape per prop per quantized scale (panes: per phase group too). */
@@ -125,6 +138,11 @@ export class PropColliders {
       pane.blocking = blocking;
       pane.shape.filterMembershipMask = blocking ? pane.solid : CollisionLayer.blocker;
     }
+  }
+
+  /** `setPhaseTime` for a match tick — see `phaseSecondsAtTick`. This is what a match drives the panes with. */
+  setPhaseTick(tick: number): void {
+    this.setPhaseTime(phaseSecondsAtTick(tick));
   }
 
   /**

@@ -7,6 +7,7 @@ export * from "./interpolation";
 export * from "./prediction";
 export * from "./reliableEvents";
 export * from "./replication";
+export * from "./walls";
 export * from "./hitreg/LagCompHistory";
 export * from "./testing/clock";
 export * from "./testing/rng";

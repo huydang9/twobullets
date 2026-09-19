@@ -20,7 +20,16 @@ import type {
   ZonePhase,
   ZoneSpec,
 } from "@twobullets/shared/match/types";
-import { createZoneState, DEFAULT_ZONE_SPEC, ZONE_WARNING_SECONDS, zoneAtInto, type MutableZoneState } from "@twobullets/shared/match/zone";
+import type { PointOfInterest } from "@twobullets/shared/map/types";
+import {
+  createZoneState,
+  DEFAULT_ZONE_SPEC,
+  ZONE_WARNING_SECONDS,
+  zoneAtInto,
+  zoneCenterBiasForPois,
+  zoneSpecForHalfExtent,
+  type MutableZoneState,
+} from "@twobullets/shared/match/zone";
 import { t } from "../i18n";
 
 // The networked battle royale as a `MatchView` (plan.md B1/B4/B7), so the offline match HUD, map source, zone wall and
@@ -92,7 +101,12 @@ export interface NetOwnState {
 
 export interface NetMatchViewOptions {
   readonly mapId: string;
-  /** The server level's zone; default Map v1's (real-world maps use it too), `arena` gets the arena radii. */
+  /**
+   * The map the server told this client to load (a `MapData`), which is what the zone is sized from. Omitted or null:
+   * the level has no map (the arena blockout).
+   */
+  readonly map?: ZoneMap | null;
+  /** The server level's zone. Default: `zoneSpecForMap` — derived from `map`, or the arena's radii without one. */
   readonly zone?: ZoneSpec;
   /** Zone time scale assumed until the first phase is announced (then measured). */
   readonly timeScale?: number;
@@ -102,6 +116,30 @@ export interface NetMatchViewOptions {
 
 /** Map v1's schedule with the arena's radii (server-match `ARENA_ZONE_SPEC`); only `initial` and the phase count matter here. */
 const ARENA_ZONE: ZoneSpec = { ...DEFAULT_ZONE_SPEC, initial: { cx: 0, cz: 0, r: 60 }, edgeMargin: 4 };
+
+/** What the zone needs from the loaded map; a `MapData` satisfies it. */
+export interface ZoneMap {
+  readonly terrain: { readonly playableHalfExtent: number };
+  readonly pois: readonly PointOfInterest[];
+}
+
+/**
+ * The zone spec for the map the server put this client on, by the same call the server's own level makes
+ * (`apps/server-match/src/level/serverLevel.ts`): the schedule scaled to the map's playable square, with the late
+ * circles pulled toward its hottest POI.
+ *
+ * The announced phases arrive from the server, so the circles this spec decides are the *first* one — drawn before any
+ * phase is announced — plus the edge margin and the phase count. That still has to be the map's: `DEFAULT_ZONE_SPEC`
+ * is written for a ±250 m square, and on the maze's ±92 m one it would open the match with a circle four times too
+ * wide. Map v1 and the real-world maps are ±250 m, where `zoneSpecForHalfExtent` returns its base untouched, so they
+ * keep `DEFAULT_ZONE_SPEC` exactly.
+ *
+ * Without a map there is no square to scale to: that is the arena blockout, which has its own hand-written radii.
+ */
+export function zoneSpecForMap(map: ZoneMap | null | undefined, mapId: string): ZoneSpec {
+  if (!map) return mapId === "arena" ? ARENA_ZONE : DEFAULT_ZONE_SPEC;
+  return zoneSpecForHalfExtent(map.terrain.playableHalfExtent, undefined, { centerBias: zoneCenterBiasForPois(map.pois) });
+}
 
 const PHASE_NAMES: Readonly<Record<number, BrPhase>> = {
   [PhaseCode.Warmup]: "warmup",
@@ -195,7 +233,7 @@ export class NetMatchView implements MatchView {
   private tickKnown = false;
 
   constructor(options: NetMatchViewOptions) {
-    const zone = options.zone ?? (options.mapId === "arena" ? ARENA_ZONE : DEFAULT_ZONE_SPEC);
+    const zone = options.zone ?? zoneSpecForMap(options.map, options.mapId);
     this.timeScaleHint = options.timeScale ?? 1;
     this.botName = options.botName ?? ((n) => t("match.botName", { n: n + 1 }));
     this.config = {
@@ -249,6 +287,17 @@ export class NetMatchView implements MatchView {
 
   get ended(): boolean {
     return this.matchEnd !== null;
+  }
+
+  /**
+   * The match tick the map's glazed panes run their clock on, or null before the first server tick estimate.
+   *
+   * This is the server's own tick number, the one its hit registration resolves bullets at
+   * (`apps/server-match/src/hitreg/ServerProjectiles.step`) — so a pane that stops a bullet here stops it there.
+   * `NetMatch` hands this to `MapRuntime.setPhaseClock`.
+   */
+  get phaseTick(): number | null {
+    return this.tickKnown ? this.mutable.tick : null;
   }
 
   /** "Bạn" is the HUD's job; this is the roster name ("Bot 3" for bots), or "" for an empty slot. */

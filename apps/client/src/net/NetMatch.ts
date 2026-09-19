@@ -82,7 +82,10 @@ export class NetMatch {
 
   constructor(deps: NetMatchDeps) {
     this.deps = deps;
-    const view = (this.view = new NetMatchView({ mapId: deps.mapId, timeScale: deps.config.zoneTimeScale ?? 1 }));
+    const view = (this.view = new NetMatchView({ mapId: deps.mapId, map: deps.world?.map ?? null, timeScale: deps.config.zoneTimeScale ?? 1 }));
+    // The map's phase-shifting panes run on the server's tick, not on this client's wall clock: two clients on a
+    // local clock would disagree about which panes are armoured (shared/map/glassPhase.ts).
+    deps.world?.setPhaseClock(() => view.phaseTick);
     this.frame = { focusSlot: -1, localSlot: null, viewerX: 0, viewerZ: 0, headingDegrees: 0 };
     this.hudView = new MatchHud(deps.layer, view, this.frame);
     this.labels = new TeammateLabels(deps.layer, deps.scene, deps.roster);
@@ -185,6 +188,7 @@ export class NetMatch {
     this.unsubscribeLanguage();
     this.deps.presenter.setMatchHooks(null);
     this.deps.hud.setMapSource(null);
+    this.deps.world?.setPhaseClock(null);
     this.hudView.dispose();
     this.labels.dispose();
     this.zoneWall.dispose();

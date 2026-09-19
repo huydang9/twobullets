@@ -7,6 +7,7 @@ import {
   ThrowableUpdateWriter,
 } from "@twobullets/protocol";
 import { dequantizePitch, dequantizeYaw } from "@twobullets/shared/aim";
+import type { DestructibleWalls } from "@twobullets/shared/equipment/destructible";
 import { createEquipmentWorld, stepEquipmentWorld, type EquipmentWorld, type EquipmentWorldEvent, type WorldEntity } from "@twobullets/shared/equipment/equipmentStep";
 import { countItem, cycleThrowable, removeStack, type InventoryState } from "@twobullets/shared/equipment/inventory";
 import { THROWABLE_KINDS, throwableDef } from "@twobullets/shared/equipment/items";
@@ -130,6 +131,16 @@ export class ServerThrowables {
 
   get smokes(): readonly SmokeCloud[] {
     return this.world.smokes;
+  }
+
+  /**
+   * Installs the match's destructible walls (`ServerWalls`) in this world. From here on a frag takes the mirror panes
+   * in range out, a cloud closes a holed pane's apertures and a fire burns a hedge away — inside `stepEquipmentWorld`,
+   * through the shared pure resolvers, exactly as the offline `MatchSim` drives them. The match owns what follows
+   * (colliders, nav, the wire); this only lets the rules write.
+   */
+  setWalls(walls: DestructibleWalls): void {
+    this.world.walls = walls;
   }
 
   /** Everything in flight, for bot perception (`BotWorldView.throwables`). Rebuilt in place each tick. */

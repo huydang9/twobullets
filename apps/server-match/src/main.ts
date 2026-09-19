@@ -1,7 +1,8 @@
 // Match server entry point (T3.4).
 //   pnpm --filter @twobullets/server-match dev -- [--mode=local|single-match|packed|agent] [--port=7350] [--host=127.0.0.1]
 //     [--fake-net=lan|good|typical|bad|awful|tcp-fallback] [--matches=2] [--metrics=text|json|off] [--exit-after=<s>]
-//     [--max-players=2..20] [--team-mode=solo|duo|squad] [--map=arena|v1] [--flow=sandbox|br]
+//     [--max-players=2..20] [--team-mode=solo|duo|squad] [--map=<id>] [--flow=sandbox|br]
+//     `--map` takes any id the level registry knows (`knownServerMapIds()`: arena, v1, mazebr, the real-world maps).
 //     BR timings: [--warmup-seconds=60] [--all-joined-seconds=10] [--end-linger-seconds=8] [--time-scale=1]
 //     [--no-humans-timeout=120]
 // `--mode=agent` is how server-api starts one match per process (agent/MatchAgent.ts): no match at boot, no dev tokens.

@@ -200,6 +200,17 @@ export class MapPropAudio {
     return true;
   }
 
+  /**
+   * Forgets which mode each phase group was in, so the next update clicks nothing.
+   *
+   * Called when the clock behind `phaseSeconds` is swapped (`MapRuntime.setPhaseClock`): walking around the map before
+   * a match runs the panes off wall time, and the match hands them its own tick, which is a jump. Without this the
+   * groups that read as changed across the jump would all click at once, for a flip that never happened.
+   */
+  resetPhaseTell(): void {
+    this.modes = null;
+  }
+
   /** Phase groups that changed mode since the last frame click at the nearest few of their panes. */
   private updatePanes(audio: GameAudio, listener: Vec3Like): void {
     if (this.panes.length === 0) return;

@@ -35,6 +35,7 @@ import { CLOSE_CODE_CLIENT_LEAVE, describeCloseCode, describeDisconnectReason, h
 import type { LocalPlayerNet } from "./LocalPlayerNet";
 import type { NetLoot } from "./NetLoot";
 import type { NetThrowables } from "./NetThrowables";
+import type { NetWalls } from "./NetWalls";
 import type { NetEventSink } from "./NetCombat";
 import { RESYNC_RESETS_RELIABLE_EVENTS, viewOffset8 } from "./netCombatRules";
 import type { NetClock } from "./NetClock";
@@ -145,6 +146,8 @@ export interface NetClientOptions {
   readonly loot?: NetLoot | null;
   /** Throwable and area-effect mirror (protocol v9 `ThrowableUpdate` on the control stream). */
   readonly throwables?: NetThrowables | null;
+  /** Destructible wall mirror (protocol v10 `WallUpdate` on the control stream); null on a map without any. */
+  readonly walls?: NetWalls | null;
   /** Answer to a `MatchCommand` (protocol v8: leave / end for everyone); `client.matchCommandResult` is already set. */
   readonly onCommandResult?: (result: MatchCommandResult, client: NetClient) => void;
 }
@@ -196,6 +199,7 @@ export class NetClient {
   private readonly onRoster: ((roster: Roster, client: NetClient) => void) | null;
   private readonly loot: NetLoot | null;
   private readonly throwables: NetThrowables | null;
+  private readonly walls: NetWalls | null;
   private readonly onCommandResult: ((result: MatchCommandResult, client: NetClient) => void) | null;
   private deliverTick = 0;
   private readonly deliver = (event: ReliableEvent): void => this.events?.onReliableEvent(event, this.deliverTick);
@@ -242,6 +246,7 @@ export class NetClient {
     this.onRoster = options.onRoster ?? null;
     this.loot = options.loot ?? null;
     this.throwables = options.throwables ?? null;
+    this.walls = options.walls ?? null;
     this.onCommandResult = options.onCommandResult ?? null;
     this.interpDelay = new InterpolationDelay({ floorMs: options.interpFloorMs ?? (session.kind === "websocket" ? 50 : 25) });
     this.packet = { newestTick: 0, ackSnapshotTick: -1, clientTimeMs: 0, interpDelayMs: 0, ackEventSeq: -1, inputs: this.packetInputs };
@@ -498,6 +503,9 @@ export class NetClient {
         break;
       case MsgId.ThrowableUpdate:
         this.throwables?.apply(reader, bytes.length);
+        break;
+      case MsgId.WallUpdate:
+        this.walls?.apply(reader, bytes.length);
         break;
       case MsgId.MatchCommandResult: {
         const result = decodeMatchCommandResult(reader);

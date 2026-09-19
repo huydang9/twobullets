@@ -1,5 +1,12 @@
 import { clampViewDelayTicks, LagCompHistory, MAX_REWIND_TICKS } from "@twobullets/netcode";
+import { createMapSimWorld } from "@twobullets/sim";
+import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import type { HitPose } from "@twobullets/shared/hitreg/rig";
+import { GLASS_PHASE, PHASE_GLASS_PROP, glassBlocksAt, glassPhaseBucket } from "@twobullets/shared/map/glassPhase";
+import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
+import { INSTANCE_STRIDE } from "@twobullets/shared/map/layout/scatter";
+import { Heightfield } from "@twobullets/shared/map/terrain/heightfield";
+import type { Terrain } from "@twobullets/shared/map/terrain/terrain";
 import type { Vec3 } from "@twobullets/shared/movement/types";
 import type { AimedShot, HitZone, RayHit, RaycastFn, WeaponId } from "@twobullets/shared/weapons/types";
 import { describe, expect, it } from "vitest";
@@ -199,6 +206,42 @@ describe("ServerProjectiles", () => {
     expect(s.hits.length).toBe(8);
     expect(new Set(s.hits.map((h) => h.victim))).toEqual(new Set([TARGET]));
   });
+});
+
+describe("ServerProjectiles on a map world", () => {
+  // The maze's glazed panes stop bullets for ten seconds and let them through for the next ten, on nothing but the
+  // match clock (shared/map/glassPhase.ts) — nothing about them is sent. So the tick a bullet is resolved at has to
+  // reach the static world before the ray does, and the hit registration is the only thing that knows that tick.
+  // The mode it lands on is checked against the client's in apps/client/test/world/glassPhaseAgreement.test.ts.
+
+  /** One pane on a constant-X line, so it runs along Z with yaw -π/2 (map/mazeBr.ts). */
+  const PANE_X = 8;
+  const PANE_YAW = -Math.PI / 2;
+  const BUCKET = glassPhaseBucket(PANE_X, 0, PANE_YAW);
+
+  it("turns the glazed panes to the tick it is resolving, and leaves a level with none alone", async () => {
+    const data = new Float32Array(INSTANCE_STRIDE);
+    data.set([PANE_X, 0, 0, PANE_YAW, 1, 0, 0]);
+    const world = createMapSimWorld(await loadHavok(), {
+      terrain: { field: new Heightfield(64, 65) } as unknown as Terrain,
+      layout: { props: [{ prop: PHASE_GLASS_PROP, data }], buildings: [] } as unknown as MapLayout,
+    });
+    const projectiles = new ServerProjectiles(new LagCompHistory(), world.raycastWorld);
+    const empty = new Uint8Array(20);
+    /** A bullet fired along the pane: stopped only while the pane is in its armoured mode. */
+    const paneStops = (): boolean => world.raycastWorld({ x: PANE_X, y: 1, z: -3 }, { x: PANE_X, y: 1, z: 3 }) !== null;
+
+    expect(paneStops()).toBe(false); // the resting mode of a world nobody has told the time to
+    for (let tick = 0; tick <= GLASS_PHASE.holdSeconds * 2 * 60 * 1.5; tick += 7) {
+      projectiles.step(tick, DT, empty, sink());
+      expect(paneStops(), `tick ${tick}`).toBe(glassBlocksAt(BUCKET, tick / 60));
+    }
+    world.dispose();
+
+    // The arena blockout has no map collision, so there is no clock to turn and stepping must not reach for one.
+    const arena = new ServerProjectiles(new LagCompHistory(), worldWithWall(null));
+    expect(() => arena.step(1000, DT, empty, sink())).not.toThrow();
+  }, 60_000);
 });
 
 describe("ViewDelayEstimator", () => {

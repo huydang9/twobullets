@@ -20,7 +20,7 @@ import { terrainSurfaceProvider } from "../../audio/surfaces";
 import { BuildingVisuals } from "../buildings";
 import type { Environment } from "../environment";
 import type { PropLibraryOptions } from "../propAssets";
-import { PropColliders, PropInstances, PropVisuals } from "../props";
+import { PropColliders, PropInstances, PropVisuals, phaseSecondsAtTick } from "../props";
 import { TerrainMaterial, TerrainRenderer, createHorizonMesh } from "../terrain";
 import { StreetSigns } from "../streetSigns";
 import { GrassField } from "../vegetation";
@@ -71,8 +71,13 @@ export class MapRuntime {
   readonly buildingAcoustics: BuildingAcoustics;
   readonly outOfBounds: OutOfBounds;
   private player: MapPlayer | null = null;
-  /** Seconds since the map loaded, the clock the phase-shifting panes run on (see `update`). */
+  /** Match seconds the phase-shifting panes are standing at (see `update`). */
   private phaseSeconds = 0;
+  /** The match clock the panes run on, when there is a match; see `setPhaseClock`. */
+  private matchTick: (() => number | null) | null = null;
+  /** True while `update` is reading the match clock rather than wall time (see `setPhaseClock`). */
+  private onMatchClock = false;
+  private propAudio: MapPropAudio | null = null;
 
   private constructor(
     private readonly scene: Scene,
@@ -203,18 +208,46 @@ export class MapRuntime {
       audio.enclosureProvider = this.buildingAcoustics.enclosure;
       // Sounds the placed props make on their own: a bullet through a hedge, a glazed pane switching mode. It reads
       // the layout's prop instances and this runtime's phase clock — the same one the colliders switch on.
-      audio.mapProps = new MapPropAudio(this.layout, () => this.phaseSeconds);
+      audio.mapProps = this.propAudio = new MapPropAudio(this.layout, () => this.phaseSeconds);
     }
     this.overlay?.hideLoading();
   }
 
+  /**
+   * Hands the glazed panes the match's own clock: `tick` returns the absolute match tick, or null while the match has
+   * no tick yet (a networked client before its first time sync). Passing null puts the panes back on wall time.
+   *
+   * The panes switch between stopping bullets and letting them through every ten seconds and look identical either way
+   * (shared/map/glassPhase.ts), and nothing about them is sent over the wire: every host derives each pane's mode from
+   * the tick alone. So this clock has to be the match's, not this runtime's own — a local accumulator drifts from the
+   * server, and then a round passes through a pane that stopped somebody else's.
+   *
+   * Set by whoever hosts the match: `NetMatch` (the server's tick) and `OfflineMatch` (the MatchSim's). Free roam sets
+   * nothing and keeps the wall clock, which is all a map with no match needs.
+   */
+  setPhaseClock(tick: (() => number | null) | null): void {
+    this.matchTick = tick;
+    // Swapping clocks jumps the panes' time; the audio tell must not read that jump as a flip.
+    this.propAudio?.resetPhaseTell();
+  }
+
   update(dt: number): void {
-    // The glazed panes switch between stopping bullets and letting them through on this clock, and nothing about them
-    // looks any different either way (shared/map/glassPhase.ts): you find out by firing. Offline there is one physics
-    // world, so bots and the player read the same shapes and agree by construction; once the match server owns combat
-    // this must be the match tick's own time.
-    this.phaseSeconds += dt;
-    this.colliders.setPhaseTime(this.phaseSeconds);
+    // On the match clock (see `setPhaseClock`) the colliders are turned by tick, so this client's panes and the
+    // server's stand in the same mode at the same tick. Free roam has no match: the panes run off wall time, which
+    // nothing else has to agree with.
+    const tick = this.matchTick?.() ?? null;
+    if (tick === null) {
+      this.onMatchClock = false;
+      this.phaseSeconds += dt;
+      this.colliders.setPhaseTime(this.phaseSeconds);
+    } else {
+      // The first tick of the match (a networked client's first time sync) jumps the clock off wall time; that is a
+      // new clock, not a flip, so the audio tell forgets what it saw rather than clicking every group at once.
+      if (!this.onMatchClock) this.propAudio?.resetPhaseTell();
+      this.onMatchClock = true;
+      this.phaseSeconds = phaseSecondsAtTick(tick);
+      this.colliders.setPhaseTick(tick);
+    }
     const camera = this.scene.activeCamera?.globalPosition;
     if (camera) this.updateView(camera);
     if (!this.player) return;

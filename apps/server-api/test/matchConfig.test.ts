@@ -39,7 +39,7 @@ describe("match config from lobby/queue settings", () => {
     // Real-world maps use the client's ids and are playable; unknown or old ids are rejected.
     for (const mapId of ["vn-hangxanh", "vn-phandangluu"]) expect(parseSettings({ mapId })).toMatchObject({ mapId });
     expect(parseSettings({ mapId: "vn-hoian" })).toBe("mapId");
-    expect(MAPS.map((m) => m.id)).toEqual(["v1", "arena", "vn-hangxanh", "vn-phandangluu"]);
+    expect(MAPS.map((m) => m.id)).toEqual(["v1", "arena", "mazebr", "vn-hangxanh", "vn-phandangluu"]);
   });
 
   it("botDifficulty is optional, validated, inherited by updates and copied into MatchConfig", () => {

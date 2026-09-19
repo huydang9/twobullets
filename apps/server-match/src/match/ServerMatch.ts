@@ -41,7 +41,7 @@ import { createZoneState } from "@twobullets/shared/match/zone";
 import { TICK_SECONDS } from "@twobullets/shared/tickClock";
 import type { BotBrainFactory } from "@twobullets/shared/bots/types";
 import type { BrPhase } from "@twobullets/shared/match/types";
-import { stepPlayer, type HavokModule, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
+import { stepPlayer, type HavokModule, type MapSimWorld, type ServerLevel, type SimWorld, type StepOptions } from "@twobullets/sim";
 import { createHmac } from "node:crypto";
 import type { AttachResult, Match } from "../host/MatchHost";
 import { disconnectSession } from "../session/control";
@@ -54,6 +54,7 @@ import { ServerCombat, type CombatHost, type ServerCombatOptions } from "./Serve
 import { ServerItems } from "./ServerItems";
 import { ServerLoot } from "./ServerLoot";
 import { ServerThrowables } from "./ServerThrowables";
+import { ServerWalls } from "./ServerWalls";
 import { chooseSlot, matchSlotCount, matchTeamCount, matchTeamSize } from "./slots";
 
 // One match: slots/teams, per-client input rings, one Havok world, server-authoritative movement, weapons, hit
@@ -147,6 +148,11 @@ export class ServerMatch implements Match, CombatHost {
   loot: ServerLoot | null = null;
   /** Grenades in flight and the area effects they leave; null until the sim world is ready. */
   throwables: ServerThrowables | null = null;
+  /**
+   * Destructible walls (protocol v10): null on the arena, on a blockout, and on any map without a mirror pane or a
+   * grass hedge — which is every map but the maze.
+   */
+  walls: ServerWalls | null = null;
   /** Null in the sandbox and until the world is ready. */
   lifecycle: BrLifecycle | null = null;
   /** Null when the match has no bot seats (and can't fill any), and until the world is ready. */
@@ -223,8 +229,26 @@ export class ServerMatch implements Match, CombatHost {
         noise: (slot, position) => this.bots?.explosionNoise(slot, position),
       });
       this.throwables = throwables;
+      // Walls a throwable can take out of the map (the maze's mirror panes and grass hedges). The blockout has no
+      // layout and every other map builds a registry of count 0, so this is the maze and nothing else.
+      const map = mapWorld(world);
+      if (map !== null) {
+        const walls = new ServerWalls({
+          layout: map.layout,
+          removeCollider: (prop, instance) => map.collision.removeInstance(prop, instance),
+          players: () => this.active,
+          tickSeconds: 1 / (options.tickRate ?? 60),
+        });
+        if (!walls.empty) {
+          this.walls = walls;
+          // Whoever steps the throwables writes into this state: the shared frag / smoke / fire resolvers run inside
+          // `stepEquipmentWorld`, so the server and the offline match can never disagree about which pane went down.
+          throwables.setWalls(walls.walls);
+        }
+      }
       if (this.phaseValue !== "Booting") return;
       if (this.needsBots()) this.startBots(world, combat);
+      else this.installSegmentListener(combat);
       if (options.lifecycle) {
         this.lifecycle = new BrLifecycle(this.lifecycleHost(combat, teamCount, teamSize), options.lifecycle, this.clock.now(), this.next);
         this.setPhase("Warmup");
@@ -411,6 +435,8 @@ export class ServerMatch implements Match, CombatHost {
     if (!frozen) {
       this.throwables?.step(players);
       combat.endTick(tick);
+      // After the frags went off and the bullets flew: colliders out, nav patched, this tick's changes queued.
+      this.walls?.step();
     }
     lifecycle?.endTick(tick);
     this.next = tick + 1;
@@ -418,6 +444,7 @@ export class ServerMatch implements Match, CombatHost {
     this.flushRoster();
     this.loot?.replicate(players);
     this.throwables?.replicate(players);
+    this.walls?.replicate(players);
     const now = this.clock.now();
     this.snapshots.build(tick, now, players, combat);
     if (now - this.lastSweepMs >= 1000) {
@@ -517,6 +544,9 @@ export class ServerMatch implements Match, CombatHost {
       resetLoot: () => {
         this.loot?.reset();
         this.throwables?.reset();
+        // The walls themselves are not reset — a pane a frag took out stays out, by design — but every client
+        // re-streams the state alongside the loot and the throwables, so nothing is left over from warmup.
+        this.walls?.reset();
       },
       fillBots: () => this.fillEmptySlotsWithBots(),
       lifecyclePhase: (phase) => this.setPhase(phase),
@@ -555,6 +585,21 @@ export class ServerMatch implements Match, CombatHost {
     return false;
   }
 
+  /**
+   * Every bullet's flight segment, to whoever wants one: the bots hear near misses, and the walls count the apertures
+   * a round punched through a mirror pane (a mirror is shoot-through, so no world hit reports the crossing).
+   * `ServerProjectiles` holds one listener, so the two are composed here rather than fighting over the slot.
+   */
+  private installSegmentListener(combat: ServerCombat): void {
+    const bots = this.bots;
+    const walls = this.walls;
+    if (walls === null && bots === null) return;
+    combat.projectiles.onSegment = (shooter, weaponId, from, to, tEnd, struck) => {
+      walls?.segment(from.x, from.y, from.z, to.x, to.y, to.z, tEnd);
+      bots?.onSegment(shooter, weaponId, from, to, tEnd, struck);
+    };
+  }
+
   /** Nav for this match, the bot driver, and the roster's bot seats (slot = team · size + index in the team list). */
   private startBots(world: SimWorld, combat: ServerCombat): void {
     const made = this.level.createNav?.() ?? arenaMatchLevel().createNav!();
@@ -575,8 +620,15 @@ export class ServerMatch implements Match, CombatHost {
       throwables: () => this.throwables?.throwableViews ?? [],
     });
     this.bots = bots;
+    // Bots only route through the maze's new corridors when the grid is this match's own. `createNav` caches one grid
+    // per map for the whole process, and patching a shared grid would leave later matches with cells opened under
+    // walls that are standing again — a wall the bots walk through and the players do not.
+    if (this.walls !== null) {
+      if (made.kind === "grid") this.walls.attachNav(made.nav.grid);
+      else console.warn(`[walls] ${this.level.mapId}: nav grid is ${made.kind}; destroyed walls will not open bot routes in this match`);
+    }
     combat.onDamage = (victim, attacker, amount, kind, dirX, dirZ) => bots.onDamage(victim, attacker, amount, kind, dirX, dirZ);
-    combat.projectiles.onSegment = (shooter, weaponId, from, to, tEnd, struck) => bots.onSegment(shooter, weaponId, from, to, tEnd, struck);
+    this.installSegmentListener(combat);
     const teamSize = matchTeamSize(this.config);
     for (const team of this.config.teams) {
       team.accountIds.forEach((id, index) => {
@@ -906,6 +958,14 @@ export class ServerMatch implements Match, CombatHost {
 function botIndexOf(accountId: string): number {
   const n = Number(accountId.slice(accountId.indexOf(":") + 1));
   return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * The world as a built map, or null for a blockout (the arena): only a map carries a prop layout and the per-instance
+ * colliders a destroyed pane's body has to be taken out of.
+ */
+function mapWorld(world: SimWorld): MapSimWorld | null {
+  return "layout" in world && "collision" in world ? (world as MapSimWorld) : null;
 }
 
 /** The zone a bot sees outside BR combat: the level's initial circle, not shrinking. */

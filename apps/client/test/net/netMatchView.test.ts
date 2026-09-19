@@ -3,7 +3,10 @@ import { PhaseCode, type Welcome } from "@twobullets/protocol/messages/control";
 import { MatchEndReason, type MatchEnd, type PhaseChange, type ZonePhaseMessage } from "@twobullets/protocol/messages/match";
 import type { Roster } from "@twobullets/protocol/messages/roster";
 import { RemoteFlags } from "@twobullets/protocol/quantize";
+import { MAP_V1 } from "@twobullets/shared/map/mapV1";
+import { MAZE_BR } from "@twobullets/shared/map/mazeBr";
 import type { MatchEvent } from "@twobullets/shared/match/types";
+import { DEFAULT_ZONE_SPEC, zoneCenterBiasForPois, zoneSpecForHalfExtent } from "@twobullets/shared/match/zone";
 import { describe, expect, it } from "vitest";
 import { createNetTeammateVitals, NetMatchView, type NetMatchSource, type NetOwnState, type NetPoseSource, type NetTeammateVitals } from "../../src/net/NetMatchView";
 
@@ -194,10 +197,20 @@ describe("NetMatchView", () => {
     expect(view.state.zone.current).toEqual({ cx: 100, cz: -50, r: 200 });
   });
 
-  it("arena matches use the arena's initial circle", () => {
-    const view = new NetMatchView({ mapId: "arena" });
-    expect(view.state.zone.current.r).toBe(60);
+  it("sizes the zone from the map the server loaded, not from the map id", () => {
+    // Without a map there is no playable square to scale to: the arena keeps its own circle, anything else Map v1's.
+    expect(new NetMatchView({ mapId: "arena" }).state.zone.current.r).toBe(60);
     expect(new NetMatchView({ mapId: "vn-hangxanh" }).state.zone.current.r).toBe(355);
+
+    // ±250 m maps come out on DEFAULT_ZONE_SPEC untouched — the same object, so Map v1 and the real maps cannot move.
+    expect(new NetMatchView({ mapId: "v1", map: MAP_V1 }).config.zone).toBe(DEFAULT_ZONE_SPEC);
+
+    // The maze is ±92 m, where DEFAULT's 355 m opening circle would be four times the map. Same call the server's own
+    // level makes (apps/server-match/src/level/serverLevel.ts), so both sides schedule the same circles.
+    const maze = new NetMatchView({ mapId: MAZE_BR.id, map: MAZE_BR });
+    expect(maze.config.zone).toEqual(zoneSpecForHalfExtent(MAZE_BR.terrain.playableHalfExtent, undefined, { centerBias: zoneCenterBiasForPois(MAZE_BR.pois) }));
+    expect(maze.state.zone.current.r).toBe(130.64); // 355 × 92 / 250, still 1.42 × the half extent
+    expect(maze.config.zone.playableHalfExtent).toBe(92);
   });
 
   it("MatchEnd: ended phase, winner, reason, placements and stats from the server; cancelled keeps a null reason", () => {

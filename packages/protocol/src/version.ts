@@ -23,8 +23,11 @@
  * (0x52) on the control stream (grenades in flight, detonations, smoke and fire areas, and a flash for the player it
  * blinded, all area-of-interest limited like loot), and a throwable-count part in the owner items group. The starting
  * kit and the match's ground loot carry throwables again.
+ * v10: server-authoritative destructible walls (the maze's mirror panes and grass hedges): `WallUpdate` (0x53) on the
+ * control stream carries a wall index and what happened to it (destroyed, repaired, holed, healing), with both ends
+ * numbering the walls from the map layout, plus a `clear` and a full-state replay on join and resync.
  */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const CONTENT_HASH = 0x4bc5f495;
 
 export interface CompatKey {

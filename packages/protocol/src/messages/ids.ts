@@ -32,6 +32,8 @@ export const MsgId = {
   MatchCommandResult: 0x51,
   /** v9: throwables in the client's area of interest (grenades in flight, detonations, smoke, fire, flash). */
   ThrowableUpdate: 0x52,
+  /** v10: destructible walls the server took out of the map (mirror panes, grass hedges) and their bullet holes. */
+  WallUpdate: 0x53,
 } as const;
 export type MsgId = (typeof MsgId)[keyof typeof MsgId];
 

@@ -15,4 +15,5 @@ export * from "./messages/snapshot";
 export * from "./messages/events";
 export * from "./messages/loot";
 export * from "./messages/throwables";
+export * from "./messages/walls";
 export { describeMessage, hexToBytes, bytesToHex } from "./debug/describe";

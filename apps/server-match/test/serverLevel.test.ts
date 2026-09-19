@@ -1,6 +1,7 @@
 import { planTeamSpawns } from "@twobullets/shared/match/spawns";
 import { MAP_V1 } from "@twobullets/shared/map/mapV1";
-import { DEFAULT_ZONE_SPEC } from "@twobullets/shared/match/zone";
+import { MAZE_BR } from "@twobullets/shared/map/mazeBr";
+import { DEFAULT_ZONE_SPEC, zoneCenterBiasForPois, zoneSpecForHalfExtent } from "@twobullets/shared/match/zone";
 import type { HavokModule } from "@twobullets/sim";
 import { loadHavok } from "@twobullets/sim/node/loadHavok";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -19,13 +20,27 @@ beforeAll(async () => {
 
 describe("resolveServerLevel", () => {
   it("knows arena, v1 and the real-world maps, rejects unknown ids, and caches map data per process", async () => {
-    expect(knownServerMapIds()).toEqual(["arena", "v1", "vn-hangxanh", "vn-phandangluu"]);
+    expect(knownServerMapIds()).toEqual(["arena", "v1", MAZE_BR.id, "vn-hangxanh", "vn-phandangluu"]);
     const arena = await resolveServerLevel("arena");
     expect(arena).toMatchObject({ mapId: "arena", source: "arena", zone: ARENA_ZONE_SPEC });
     await expect(resolveServerLevel("vn-hoian")).rejects.toThrow(/unknown map "vn-hoian"/);
     expect(v1).toMatchObject({ mapId: "v1", killY: MAP_V1.bounds.killY, zone: DEFAULT_ZONE_SPEC });
     expect(["bake", "generated"]).toContain(v1.source);
     expect((await resolveServerLevel("v1")).loadMs).toBe(0);
+  });
+
+  it("the maze: its own baked terrain and a zone sized to its ±92 m square, not Map v1's ±250", async () => {
+    const maze = await resolveServerLevel(MAZE_BR.id);
+    expect(maze).toMatchObject({ mapId: MAZE_BR.id, killY: MAZE_BR.bounds.killY });
+    // A generated terrain still plays, but it means the bake next to the client's is missing or stale — and then the
+    // server's heights are not the ones the player is standing on.
+    expect(maze.source).toBe("bake");
+    expect(maze.zone).toEqual(zoneSpecForHalfExtent(MAZE_BR.terrain.playableHalfExtent, undefined, { centerBias: zoneCenterBiasForPois(MAZE_BR.pois) }));
+    expect(maze.zone.initial.r).toBe(130.64);
+    expect(maze.isValidZoneCenter!(0, 0)).toBe(true);
+    expect(maze.isValidZoneCenter!(200, 0)).toBe(false);
+    // Map v1 and the real maps keep the ±250 m schedule exactly, options or not.
+    expect(v1.zone).toBe(DEFAULT_ZONE_SPEC);
   });
 
   it("Map v1 team starts are the offline plan on the terrain; zone centers must be playable", () => {

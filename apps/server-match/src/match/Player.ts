@@ -15,6 +15,7 @@ import { ClientReplication, type ReplicatedPlayer } from "../snapshot/SnapshotBu
 import type { BotSeat } from "../bots/ServerBots";
 import { LootViewer } from "./ServerLoot";
 import { ThrowableViewer } from "./ServerThrowables";
+import { WallViewer } from "./ServerWalls";
 
 // One slot's character and connection state on the match server. Movement/weapon state is predicted by the client;
 // vitals, armor and the inventory are server-owned (replicated in the owner vitals and items groups and remote flags).
@@ -58,6 +59,8 @@ export class Player implements ReplicatedPlayer {
   readonly lootView = new LootViewer();
   /** Throwable and area-effect area of interest of this player's client (ServerThrowables, protocol v9). */
   readonly throwView = new ThrowableViewer();
+  /** Destructible walls this client has been told about (ServerWalls, protocol v10). */
+  readonly wallView = new WallViewer();
   /** Names this player's throws (`throwId(slot, counter)`); wraps at 16 bits like the shared id. */
   throwCounter = 0;
   use: ItemUseState = IDLE_ITEM_USE;

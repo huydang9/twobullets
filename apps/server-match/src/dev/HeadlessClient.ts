@@ -43,6 +43,9 @@ import {
   type Welcome,
 } from "@twobullets/protocol";
 import { remoteLifeCode } from "@twobullets/netcode/replication";
+import { WallMirror } from "@twobullets/netcode/walls";
+import { buildDestructibleWalls } from "@twobullets/shared/equipment/destructible";
+import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import { quantizePitch, quantizeYaw } from "@twobullets/shared/aim";
 import { Btn, type PlayerInput } from "@twobullets/shared/input";
 
@@ -122,6 +125,14 @@ export class HeadlessClient {
   throwableBytes = 0;
   throwableMalformed = 0;
   private readonly throwableBuffer = createThrowableUpdateBuffer();
+  /**
+   * Destructible walls as the server streamed them (protocol v10 `WallUpdate`), through the same applier the browser
+   * client runs. Null until `mirrorWalls` installs one: the map layout is what numbers the walls, and only the caller
+   * knows which map this match is on.
+   */
+  walls: WallMirror | null = null;
+  wallMessages = 0;
+  wallMalformed = 0;
   /** View offsets (1/8 tick) sent with fire, newest last (tests; capped). */
   readonly viewOffsets: number[] = [];
   private newestRecvMs = 0;
@@ -302,6 +313,16 @@ export class HeadlessClient {
     }
   }
 
+  /**
+   * Follows the server's destructible walls, numbering them off `layout` exactly as the server and the browser client
+   * do. Install it before the first `WallUpdate` arrives (right after `connect`) to see a match's whole wall history.
+   */
+  mirrorWalls(layout: Pick<MapLayout, "props">): WallMirror {
+    const mirror = new WallMirror(buildDestructibleWalls(layout), layout);
+    this.walls = mirror;
+    return mirror;
+  }
+
   private onStream(bytes: Uint8Array): void {
     this.bytesIn += bytes.length;
     const r = this.reader;
@@ -333,6 +354,9 @@ export class HeadlessClient {
       this.applyLoot(bytes);
     } else if (bytes[0] === MsgId.ThrowableUpdate) {
       this.applyThrowables(bytes);
+    } else if (bytes[0] === MsgId.WallUpdate) {
+      this.wallMessages++;
+      if (this.walls !== null && !this.walls.apply(r, bytes.length)) this.wallMalformed++;
     } else if (bytes[0] === MsgId.Roster) {
       const roster = decodeRoster(r);
       if (roster !== null) this.roster = roster;

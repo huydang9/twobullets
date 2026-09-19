@@ -2,12 +2,14 @@ import { FakeNavQuery, type FakeNavBox } from "@twobullets/shared/bots/brain/fak
 import { buildNavGrid } from "@twobullets/shared/bots/nav/buildNavGrid";
 import { createNavQuery } from "@twobullets/shared/bots/nav/navQuery";
 import type { NavGrid, NavQuery } from "@twobullets/shared/bots/types";
+import { buildDestructibleWalls } from "@twobullets/shared/equipment/destructible";
 import { generateLoot, type LootItem } from "@twobullets/shared/equipment/loot";
 import { createTestLoot } from "@twobullets/shared/equipment/presets";
 import type { LevelData } from "@twobullets/shared/level/types";
 import { ARENA_LEVEL } from "@twobullets/shared/level/arena";
 import { buildMapLayout, type MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import { MAP_V1 } from "@twobullets/shared/map/mapV1";
+import { MAZE_BR } from "@twobullets/shared/map/mazeBr";
 import { REAL_MAPS } from "@twobullets/shared/map/real/index";
 import { decodeTerrainBake } from "@twobullets/shared/map/terrain/bake";
 import { buildTerrain, type Terrain } from "@twobullets/shared/map/terrain/terrain";
@@ -124,7 +126,13 @@ export interface ServerMapSource {
 
 export type ServerMapLoader = () => Promise<ServerMapSource>;
 
-const MAP_LOADERS = new Map<string, ServerMapLoader>([["v1", async () => ({ map: MAP_V1, bakeFile: "mapV1.terrain.bin" })]]);
+const MAP_LOADERS = new Map<string, ServerMapLoader>([
+  ["v1", async () => ({ map: MAP_V1, bakeFile: "mapV1.terrain.bin" })],
+  // The maze (shared/map/mazeBr.ts). Both maps are authored in `@twobullets/shared`, which this module already
+  // imports, so neither needs the lazy module the real-world maps use. The bake file is the basename of the URL the
+  // client loads (apps/client/src/world/mapRuntime/maps.ts), so both sides read the same terrain.
+  [MAZE_BR.id, async () => ({ map: MAZE_BR, bakeFile: "mazebr.terrain.bin" })],
+]);
 
 /**
  * Adds (or replaces) a map id. Any `MapData` with a terrain spec, flatten list, POIs and spawns works. The real-world
@@ -207,6 +215,8 @@ export async function resolveServerLevel(mapId: string, options: ResolveLevelOpt
   if (first && data.bakeProblem !== null) options.log?.(`[level] ${mapId}: terrain bake unusable (${data.bakeProblem}); generated instead`);
   const { map, terrain, layout } = data;
   const input = { terrain, layout };
+  // True when this map has mirror panes or hedges a match can destroy (see createNav below).
+  const destructible = buildDestructibleWalls(layout).count > 0;
   return {
     mapId,
     name: map.name,
@@ -219,10 +229,14 @@ export async function resolveServerLevel(mapId: string, options: ResolveLevelOpt
     loadMs: first ? data.ms : 0,
     source: data.source,
     createNav: () => {
-      if (data.navGrid !== null) return { nav: createNavQuery(data.navGrid), buildMs: 0, kind: "cached" };
+      // A map whose walls can be destroyed gets a fresh grid per match: the match patches its own grid where a pane
+      // was blown out, and a grid shared with later matches would leave them routing bots through walls that are
+      // standing again. Costs one build (tens of ms) per match on those maps; every other map still caches.
+      if (data.navGrid !== null && !destructible) return { nav: createNavQuery(data.navGrid), buildMs: 0, kind: "cached" };
       const started = performance.now();
-      data.navGrid = buildNavGrid({ map, terrain, layout });
-      return { nav: createNavQuery(data.navGrid), buildMs: performance.now() - started, kind: "grid" };
+      const grid = buildNavGrid({ map, terrain, layout });
+      if (!destructible) data.navGrid = grid;
+      return { nav: createNavQuery(grid), buildMs: performance.now() - started, kind: "grid" };
     },
     createLoot: (seed) => generateLoot(seed, map.pois, layout.buildings, { flatten: map.flatten, terrain, layout }).items,
   };

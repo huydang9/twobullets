@@ -22,6 +22,8 @@ import { CONTENT_HASH, PROTOCOL_VERSION } from "@twobullets/protocol/version";
 export const MAPS: readonly MapInfo[] = [
   { id: "v1", name: { vi: "Bản đồ v1", en: "Map v1" }, sizeM: 500, available: true, kind: "handmade" },
   { id: "arena", name: { vi: "Sân tập", en: "Arena" }, sizeM: 120, available: true, kind: "dev" },
+  // Invented like Map v1: a 184 m maze of concrete, glass, mirror and hedge walls round a central watchtower.
+  { id: "mazebr", name: { vi: "Mê Cung", en: "Maze" }, sizeM: 184, available: true, kind: "handmade" },
   // Real-world maps: the `<countryCode>-<place>` ids of packages/shared/src/map/real (the client's map picker and the
   // match server's level registry use the same ids).
   { id: "vn-hangxanh", name: { vi: "Ngã Tư Hàng Xanh", en: "Hang Xanh Junction (Vietnam)" }, sizeM: 500, available: true, kind: "realWorld" },
