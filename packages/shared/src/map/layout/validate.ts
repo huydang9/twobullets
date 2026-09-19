@@ -45,7 +45,7 @@ export interface ValidationOptions {
 }
 
 /** Fence and wall pieces line the openings themselves. */
-const LINE_PROPS = new Set(["fence_wood", "fence_chainlink", "wall_concrete", "wall_glass", "wall_mirror"]);
+const LINE_PROPS = new Set(["fence_wood", "fence_chainlink", "wall_concrete", "wall_glass", "wall_mirror", "wall_concrete_2", "wall_glass_2", "wall_mirror_2"]);
 
 const MAX_SPAWN_SLOPE_TAN = 0.577; // 30°
 

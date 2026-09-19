@@ -11,11 +11,14 @@ import { PropColliders, colliderName } from "../../src/world/props/PropColliders
 // this asserts the client's physics world lands where the schedule says at every tick. If these two ever disagree, a
 // networked player shoots through a wall the server says is solid.
 
+/** Each pane stands on its own constant-X lattice line, so it runs along Z and its yaw is -π/2. That is what puts
+ * them in different phase groups (map/glassPhase.ts reads the group off the line the wall stands on). */
+const PANE_YAW = -Math.PI / 2;
 const PANES = [-32, -24, -16, -8, 0, 8, 16, 24, 32, 40];
 
 function sets(): PropInstanceSet[] {
   const data = new Float32Array(PANES.length * INSTANCE_STRIDE);
-  PANES.forEach((x, i) => data.set([x, 0, 0, 0, 1, 0, 0], i * INSTANCE_STRIDE));
+  PANES.forEach((x, i) => data.set([x, 0, 0, PANE_YAW, 1, 0, 0], i * INSTANCE_STRIDE));
   return [{ prop: PHASE_GLASS_PROP, data }];
 }
 
@@ -38,7 +41,7 @@ describe("phase glass colliders (client)", () => {
   };
 
   it("gives each phase group its own shape and its own collider mesh", () => {
-    const groups = new Set(PANES.map((x) => glassPhaseBucket(x, 0)));
+    const groups = new Set(PANES.map((x) => glassPhaseBucket(x, 0, PANE_YAW)));
     expect(colliders.stats().shapes).toBe(groups.size);
     expect(colliders.stats().bodies).toBe(PANES.length);
     for (const group of groups) expect(scene.meshes.some((m) => m.name === colliderName(PHASE_GLASS_PROP, 1, group))).toBe(true);
@@ -48,9 +51,9 @@ describe("phase glass colliders (client)", () => {
     for (let step = 0; step <= GLASS_PHASE.holdSeconds * 8; step++) {
       const seconds = step / 4;
       colliders.setPhaseTime(seconds);
-      const expected = PANES.map((x) => glassBlocksAt(glassPhaseBucket(x, 0), seconds));
+      const expected = PANES.map((x) => glassBlocksAt(glassPhaseBucket(x, 0, PANE_YAW), seconds));
       expect(PANES.map((x) => stopsBullets(x)), `t = ${seconds}`).toEqual(expected);
-      expect(colliders.stats().blockingPanes).toBe(new Set(PANES.filter((x) => glassBlocksAt(glassPhaseBucket(x, 0), seconds)).map((x) => glassPhaseBucket(x, 0))).size);
+      expect(colliders.stats().blockingPanes).toBe(new Set(PANES.filter((x) => glassBlocksAt(glassPhaseBucket(x, 0, PANE_YAW), seconds)).map((x) => glassPhaseBucket(x, 0, PANE_YAW))).size);
     }
   });
 

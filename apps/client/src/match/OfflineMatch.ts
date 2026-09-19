@@ -1,6 +1,7 @@
 import type { Scene, TargetCamera } from "@babylonjs/core";
 import {
   TICK_SECONDS,
+  buildDestructibleWalls,
   buildNavGrid,
   createActorConfigs,
   createNavQuery,
@@ -20,7 +21,7 @@ import {
   type ThrowableView,
   type ThrowableSnapshot,
 } from "@twobullets/shared";
-import { CharacterBody, DEATH_PILE_ID_BASE, WorldRaycaster, type MatchSim, type MatchSimEquipment } from "@twobullets/sim";
+import { CharacterBody, DEATH_PILE_ID_BASE, WorldRaycaster, type MatchSim, type MatchSimEquipment, type MatchWalls } from "@twobullets/sim";
 import type { AssetLibrary } from "../assets";
 import type { CombatSystem } from "../combat/CombatSystem";
 import type { EquipmentSystem } from "../equipment/EquipmentSystem";
@@ -146,6 +147,7 @@ export class OfflineMatch {
       },
       throwables: this.throwableViews,
       spawnRelease: (release, slot) => equipment.spawnExternalRelease(release, slot),
+      setWalls: (walls) => equipment.setWalls(walls),
     };
 
     this.layer = hud.mountMatchLayer();
@@ -340,6 +342,13 @@ export class OfflineMatch {
     const skip = options.skip;
     trace.mark("start");
     if (this.humanSlot !== null) this.human = new HumanActor(player, combat, equipment, () => this.onHumanEliminated(), DEATH_PILE_ID_BASE + HUMAN_SLOT);
+    // The maze's mirrors and hedges. `buildDestructibleWalls` finds none anywhere else, and a map without them gets no
+    // port at all, so the nav patcher and the equipment world's wall step never exist there.
+    const destructible = buildDestructibleWalls(world.layout);
+    const walls: MatchWalls | undefined =
+      destructible.count === 0
+        ? undefined
+        : { layout: world.layout, walls: destructible, removeCollider: (prop, instance) => world.colliders.removeInstance(prop, instance) };
     const sim = trace.time("start MatchSim", () => createOfflineMatchSim({
       seed: this.seed,
       options: { ...options, maxPlayers: this.maxPlayers, teamMode: this.teamMode },
@@ -347,18 +356,22 @@ export class OfflineMatch {
       humanSlot: this.humanSlot,
       spawns: this.spawns,
       playableHalfExtent: world.map.terrain.playableHalfExtent,
+      pois: world.map.pois,
       killY: world.map.bounds.killY,
       raycastWorld: this.raycastWorld.cast,
       nav: this.nav,
       isValidZoneCenter: isValidZoneCenter(this.grid),
       groundLoot: equipment.groundLoot,
       equipment: this.equipmentPort,
+      walls,
       external: this.human ? [this.human] : [],
       createBody: (feet) => new CharacterBody(scene, feet),
       profile: import.meta.env.DEV,
     }));
     const config = sim.config;
     this.sim = sim;
+    // The renderer reads the same wall state the sim writes: hidden panes, withered hedges, closing apertures.
+    if (walls) world.props.bindWalls(destructible, world.layout);
     trace.time("start bodies", () => this.bodies.attach(sim));
     if (!skip.has("equipment")) {
       equipment.setTargetsSource(() => this.bodies.targets);

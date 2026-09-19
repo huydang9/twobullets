@@ -16,7 +16,11 @@ import {
   type TeammateView,
   type ThrowableView,
 } from "@twobullets/shared/bots/types";
+import { NavPatcher } from "@twobullets/shared/bots/nav/navPatch";
+import { asNavGridData } from "@twobullets/shared/bots/nav/navGrid";
 import { SIMULATION } from "@twobullets/shared/constants";
+import { wallAtPoint, WallChange, WallKind, type DestructibleWalls } from "@twobullets/shared/equipment/destructible";
+import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import { armorLoadout, createInventory, drop as dropFromInventory, pickUp, withArmor, type InventoryState, type ItemInstance, type WeaponSlot } from "@twobullets/shared/equipment/inventory";
 import type { ArmorLoadout, DamageKind } from "@twobullets/shared/equipment/armor";
 import {
@@ -96,8 +100,32 @@ import { queryGroundLootInto } from "./lootQuery";
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableVec3 = Mutable<Vec3>;
 
+/**
+ * The map's destructible walls and the world that has to follow them (`shared/equipment/destructible.ts`).
+ *
+ * The match owns **which** walls are gone: it holds the `DestructibleWalls` state, hands it to whichever equipment
+ * world steps the throwables, and patches the nav grid itself. The host owns **how** its own world shows that — a
+ * headless world drops the Havok instance, a client also hides the mesh and opens the mirror. Nothing here is
+ * presentation the match reads back, so offline and headless stay identical.
+ */
+export interface MatchWalls {
+  /** The layout the walls, the colliders and the nav grid were all built from. */
+  readonly layout: Pick<MapLayout, "props">;
+  /** Built once with `buildDestructibleWalls(layout)`; the match installs it in the equipment world. */
+  readonly walls: DestructibleWalls;
+  /** Takes a destroyed wall's collider out of the world. Hedges have none, so this returns false for them. */
+  removeCollider(prop: string, instance: number): boolean;
+  /** The host's own presentation: hide the pane, clear the mirror's hole mask, wither the hedge. Never gameplay. */
+  onChange?(index: number, prop: string, instance: number, change: WallChange): void;
+}
+
 /** Equipment port with an optional throwables view (client: EquipmentSystem's world). */
 export interface MatchSimEquipment extends MatchEquipmentPort {
+  /**
+   * Installs the match's wall state in the host's own equipment world, when the host runs one (the offline client).
+   * A match whose equipment world is its own installs it directly and never calls this.
+   */
+  setWalls?(walls: DestructibleWalls): void;
   /** Throwables for bot perception; empty when absent. */
   readonly throwables?: readonly ThrowableView[];
 }
@@ -115,6 +143,8 @@ export interface MatchSimPorts {
   createBody(feet: Vec3): PlayerBody;
   /** Client: EquipmentSystem's world. Omitted: the match owns an EquipmentWorld and steps it (headless). */
   readonly equipment?: MatchSimEquipment;
+  /** Walls throwables can take out of the map (the maze's mirrors and hedges); absent on a map with none. */
+  readonly walls?: MatchWalls;
   /** Actors simulated by the host (the offline human). Their slots must be `kind: "human"` in the config. */
   readonly external?: readonly MatchExternalActor[];
   /** Zone center check (nav: walkable, main component). */
@@ -364,6 +394,9 @@ export class MatchSim implements MatchView {
   private readonly projectiles = new ProjectileBuffer();
   private readonly equipment: MatchSimEquipment;
   private readonly ownEquipment: OwnEquipment | null;
+  private readonly navPatcher: NavPatcher | null = null;
+  /** This match's read position in the wall change log (`DestructibleWalls.logged`). */
+  private wallCursor = 0;
   private readonly eventListeners: ((event: MatchEvent) => void)[] = [];
   private readonly fxListeners: ((event: MatchFxEvent) => void)[] = [];
   private readonly killY: number;
@@ -419,6 +452,13 @@ export class MatchSim implements MatchView {
     this.schedule = brPhaseSchedule(config, this.nextTick);
     this.ownEquipment = ports.equipment ? null : new OwnEquipment(config.seed, ports.raycastWorld);
     this.equipment = ports.equipment ?? this.ownEquipment!;
+    if (ports.walls) {
+      // Whoever steps the throwables writes into the match's state, so the two hosts can never disagree about which
+      // pane a blast took. The nav patch and the colliders are the match's to apply, on the tick it happened.
+      if (this.ownEquipment) this.ownEquipment.world.walls = ports.walls.walls;
+      else this.equipment.setWalls?.(ports.walls.walls);
+      this.navPatcher = new NavPatcher(asNavGridData(ports.nav.grid), ports.walls.layout, ports.walls.walls);
+    }
     this.zone = createZoneState(config.zone);
     for (let i = 0; i < NOISE_POOL; i++) {
       this.noisePoolA.push({ kind: "footstep", sourceSlot: -1, position: { x: 0, y: 0, z: 0 }, radius: 0, weaponId: null });
@@ -685,6 +725,8 @@ export class MatchSim implements MatchView {
 
     // 6. Equipment world (headless only).
     if (this.ownEquipment) this.stepOwnEquipment(tick);
+    // 6.1 Walls a throwable took out of the map: colliders, the nav grid, then the host's own presentation.
+    if (this.ports.walls) this.applyWallChanges();
 
     // 7. Vitals and teams.
     if (s.phase === "combat") this.stepZoneDamage(tick);
@@ -1381,6 +1423,58 @@ export class MatchSim implements MatchView {
       }
     }
     void tick;
+  }
+
+  // ---- Destructible walls --------------------------------------------------------------------------------------------
+
+  /** The map's destructible walls, or null on a map with none (DEV, the client's presentation, tests). */
+  get walls(): DestructibleWalls | null {
+    return this.ports.walls?.walls ?? null;
+  }
+
+  /** The match's own equipment world, or null when the host runs one (DEV and tests: spawn a grenade by hand). */
+  get equipmentWorld(): EquipmentWorld | null {
+    return this.ownEquipment?.world ?? null;
+  }
+
+  /** Cells the nav patches opened, kept shut, bared of vegetation, and component merges (DEV, tests). */
+  get navPatchStats(): NavPatcher["stats"] | null {
+    return this.navPatcher?.stats ?? null;
+  }
+
+  /**
+   * A round crossed a mirrored pane at this point: counts one aperture, which is what a smoke cloud later closes.
+   * Returns the wall's index, or -1. Purely bookkeeping — bullets already go through a mirror either way.
+   */
+  punchWall(x: number, y: number, z: number): number {
+    const walls = this.ports.walls?.walls;
+    if (!walls) return -1;
+    const index = wallAtPoint(walls, x, y, z);
+    if (index >= 0) walls.addHole(index);
+    return index;
+  }
+
+  /**
+   * Applies every wall change since the last tick: the collider goes, the nav grid opens where the pane stood (or
+   * loses the hedge's concealment), and only then is the host told, so nothing can read a half-applied world.
+   */
+  private applyWallChanges(): void {
+    const port = this.ports.walls!;
+    const walls = port.walls;
+    if (this.wallCursor === walls.logged) return;
+    for (; this.wallCursor < walls.logged; this.wallCursor++) {
+      const packed = walls.changeAt(this.wallCursor);
+      if (packed < 0) continue;
+      const index = packed >> 1;
+      const change = (packed & 1) as WallChange;
+      const prop = port.layout.props[walls.set[index]!]?.prop ?? "";
+      const instance = walls.instance[index]!;
+      if (change === WallChange.destroyed) {
+        if (walls.kind[index] === WallKind.pane) port.removeCollider(prop, instance);
+        this.navPatcher?.destroyed(index);
+      }
+      port.onChange?.(index, prop, instance, change);
+    }
   }
 
   private collectThrowables(): void {

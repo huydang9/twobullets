@@ -10,6 +10,7 @@ import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { MOVEMENT } from "@twobullets/shared/constants";
 import { COLLIDER_STRIDE, propColliderGroups } from "@twobullets/shared/map/layout/collision";
+import { isMirrorWallProp } from "@twobullets/shared/equipment/destructible";
 import { glassBlocksAt } from "@twobullets/shared/map/glassPhase";
 import type { MapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import type { Terrain } from "@twobullets/shared/map/terrain/terrain";
@@ -50,7 +51,49 @@ export interface MapCollision {
    * mode (shoot-through) forever.
    */
   setPhaseTime(seconds: number): void;
+  /**
+   * Takes one prop instance out of the world for good: a mirror pane a frag destroyed
+   * (`shared/equipment/destructible.ts`). Returns false when that instance has no collider or is already gone.
+   *
+   * Destructible props are the one kind that is not thin-instanced (see `removeColliderInstance`), so this is one
+   * `dispose()` on that pane's own static body, and the pane leaves Havok's broadphase the same instant.
+   */
+  removeInstance(prop: string, instance: number): boolean;
   dispose(): void;
+}
+
+/** One prop instance whose collider can leave the world on its own: its own static body, sharing a group shape. */
+export interface DestructibleCollider {
+  readonly prop: string;
+  readonly instance: number;
+  readonly mesh: Mesh;
+  readonly body: PhysicsBody;
+  gone: boolean;
+}
+
+/**
+ * Removes one destructible instance's collider. Shared by the headless world and the client's `PropColliders`, so
+ * offline and headless agree on what is still standing.
+ *
+ * **Why these props are not thin-instanced like every other one.** The Havok plugin makes a body per thin instance
+ * and only reconciles them when the *count* changes: shrinking the count releases the last body and re-pushes every
+ * survivor's transform. Taking out instance k therefore means swapping the last instance into slot k — which *moves*
+ * a live static body. These worlds are never stepped (static geometry plus character-controller queries), and Havok
+ * only picks a moved static body up in its broadphase on a step, so the swapped pane would go on blocking its old
+ * corridor and stop blocking its new one. In a maze that is a wall you cannot see.
+ *
+ * So a destructible prop gets one body per instance, all sharing the group's single `PhysicsShape`: the same shape
+ * count as before, no per-frame cost, and removal is one `dispose()` — `HP_World_RemoveBody`, effective at once.
+ */
+export function removeColliderInstance(colliders: readonly DestructibleCollider[], prop: string, instance: number): boolean {
+  for (const entry of colliders) {
+    if (entry.gone || entry.prop !== prop || entry.instance !== instance) continue;
+    entry.gone = true;
+    entry.body.dispose();
+    entry.mesh.dispose();
+    return true;
+  }
+  return false;
 }
 
 /** Static collision for a built map in a scene with Havok enabled. */
@@ -62,6 +105,7 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
   const shapes: PhysicsShape[] = [];
   const bodies: PhysicsBody[] = [];
   const meshes: Mesh[] = [];
+  const destructible: DestructibleCollider[] = [];
   /** Panes that switch mode: one entry per phase group, each with its own shape (see `setPhaseTime`). */
   const phases: { shape: PhysicsShape; phase: number; solid: number; blocking: boolean }[] = [];
   const matrix = new Matrix();
@@ -78,6 +122,30 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
     if (!group.bulletproof) shape.filterMembershipMask = CollisionLayer.blocker;
     if (group.phase >= 0) phases.push({ shape, phase: group.phase, solid, blocking: group.bulletproof });
     const count = group.transforms.length / COLLIDER_STRIDE;
+    const name = `propCollider_${group.prop}_${group.scale}${group.phase >= 0 ? `_p${group.phase}` : ""}`;
+    shapes.push(shape);
+    propBodies += count;
+
+    // Panes a grenade can destroy get a body each (see `removeColliderInstance`); everything else thin-instances.
+    if (isMirrorWallProp(group.prop)) {
+      for (let i = 0; i < count; i++) {
+        const t = i * COLLIDER_STRIDE;
+        const mesh = new Mesh(name, scene);
+        mesh.isVisible = false;
+        mesh.isPickable = false;
+        mesh.doNotSyncBoundingInfo = true;
+        mesh.position.set(group.transforms[t]!, group.transforms[t + 1]!, group.transforms[t + 2]!);
+        mesh.rotation.y = group.transforms[t + 3]!;
+        mesh.computeWorldMatrix(true);
+        const body = new PhysicsBody(mesh, PhysicsMotionType.STATIC, false, scene);
+        body.shape = shape;
+        bodies.push(body);
+        meshes.push(mesh);
+        destructible.push({ prop: group.prop, instance: group.instances[i]!, mesh, body, gone: false });
+      }
+      continue;
+    }
+
     const matrices = new Float32Array(count * 16);
     for (let i = 0; i < count; i++) {
       const t = i * COLLIDER_STRIDE;
@@ -85,17 +153,15 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
       Matrix.ComposeToRef(Vector3.OneReadOnly, rotation, translation.set(group.transforms[t]!, group.transforms[t + 1]!, group.transforms[t + 2]!), matrix);
       matrix.copyToArray(matrices, i * 16);
     }
-    const mesh = new Mesh(`propCollider_${group.prop}_${group.scale}${group.phase >= 0 ? `_p${group.phase}` : ""}`, scene);
+    const mesh = new Mesh(name, scene);
     mesh.isVisible = false;
     mesh.isPickable = false;
     mesh.doNotSyncBoundingInfo = true;
     mesh.thinInstanceSetBuffer("matrix", matrices, 16, true);
     const body = new PhysicsBody(mesh, PhysicsMotionType.STATIC, false, scene);
     body.shape = shape;
-    shapes.push(shape);
     bodies.push(body);
     meshes.push(mesh);
-    propBodies += count;
   }
 
   return {
@@ -109,6 +175,9 @@ export function buildMapCollision(scene: Scene, input: MapCollisionInput): MapCo
         pane.blocking = blocking;
         pane.shape.filterMembershipMask = blocking ? pane.solid : CollisionLayer.blocker;
       }
+    },
+    removeInstance(prop: string, instance: number) {
+      return removeColliderInstance(destructible, prop, instance);
     },
     dispose() {
       for (const body of bodies) body.dispose();

@@ -101,6 +101,23 @@ export interface TerrainSpec {
  */
 export type FlattenMode = "set" | "cut" | "fill";
 
+/**
+ * Outdoor loot on a flatten region. `generateOutdoorLoot` (equipment/loot.ts) already treats every region whose centre
+ * lies inside a POI as a loot pad and rolls a pile per lattice point; this is how a map says what those rolls are worth
+ * to it, without moving the global tables Map v1 and the real-world maps are tuned against. Optional everywhere: a map
+ * that leaves it out gets exactly the defaults below.
+ */
+export interface PadLoot {
+  /** Multiplies the tier's `LOOT.outdoor.padChance` on this pad. Default 1. */
+  readonly density?: number;
+  /**
+   * `cache` (default): a gun, its ammo and one more roll — the roadside gun cache, a garnish on a map whose loot lives
+   * in buildings. `pile`: rolls like a building loot spot, so the pad also turns up medicine, armor, boosts and
+   * throwables. A map with almost no buildings (the maze) needs `pile`, or its ground loot is guns and nothing else.
+   */
+  readonly style?: "cache" | "pile";
+}
+
 interface FlattenCommon {
   /**
    * Absolute target height, or "auto": the mean terrain height over the footprint (circle/rect) or the
@@ -117,6 +134,8 @@ interface FlattenCommon {
   readonly surfaceFalloff?: number;
   /** Offset applied after resolving `height`, e.g. -0.2 to sink a pad under a building floor slab. */
   readonly heightOffset?: number;
+  /** Ground loot rolled over this pad, when its centre lies inside a POI. Absent = the `PadLoot` defaults. */
+  readonly loot?: PadLoot;
 }
 
 export type FlattenRegion =

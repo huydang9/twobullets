@@ -33,25 +33,46 @@ export const GLASS_PHASE = {
    */
   buckets: 4,
   /**
-   * Panes standing in the same `grid` × `grid` m cell share a phase. This is the maze's own lattice pitch, and it is
-   * what keeps the two 4 m pieces of an 8 m edge in step: a pane flipping mode on one half only would read as a bug.
-   * A map that places these panes off that lattice must keep each pane's pieces inside one cell.
+   * The lattice a pane's phase is read off, m: the maze's finest lane width, so every wall line lands on it. See
+   * `glassPhaseBucket`. It was 4 while every lane was a multiple of 4 m; the maze's common lane is 2 m now
+   * (map/mazeBr.ts), so lines land on multiples of 2 and neighbouring lines have to hash apart at that step.
    */
-  grid: 8,
+  grid: 2,
 } as const;
 
-/** The pane prop whose mode shifts. There is exactly one glazed wall prop; the mode is what used to be two props. */
-export const PHASE_GLASS_PROP = "wall_glass";
+/**
+ * The pane props whose mode shifts: one glazed wall in two lengths (a 4 m piece and the 2 m piece the maze's narrow
+ * lanes need). Both are the same pane — same box depth, same resting shoot-through mode, same clock.
+ */
+export const PHASE_GLASS_PROPS: readonly string[] = ["wall_glass", "wall_glass_2"];
+/** The 4 m glazed pane. Kept as a named export for the places that want one representative id. */
+export const PHASE_GLASS_PROP = PHASE_GLASS_PROPS[0]!;
 
 /** True for props whose collider mask follows `glassBlocksAt` instead of staying put. */
 export function isPhaseGlass(prop: string): boolean {
-  return prop === PHASE_GLASS_PROP;
+  return PHASE_GLASS_PROPS.includes(prop);
 }
 
-/** Phase group of the pane standing at (x, z), 0…`buckets` - 1. Position only, so nothing has to be stored or sent. */
-export function glassPhaseBucket(x: number, z: number): number {
-  const grid = GLASS_PHASE.grid;
-  return hash32(Math.floor(x / grid), Math.floor(z / grid)) % GLASS_PHASE.buckets;
+/**
+ * Phase group of the pane standing at (x, z) with yaw `yaw`, 0…`buckets` - 1. A pure function of the placement, so
+ * nothing has to be stored or sent and every client and the server derive the same answer.
+ *
+ * The group comes from the **wall line** the pane stands on, not from the cell or the piece: every piece of one wall
+ * has to agree, or half a pane would stop bullets while the other half let them through, which reads as a bug. A wall
+ * runs along its own local X, so `yaw` names its axis — yaw 0 is a wall along world X standing on a constant-Z line,
+ * ±π/2 is a wall along Z on a constant-X line — and the line's coordinate, quantised to `grid`, is the group's key.
+ *
+ * `yaw` replaced a positional trick (a line coordinate landed on the grid and its pieces landed half a step off it,
+ * so the coordinate that was on the lattice named the line). That only worked while every piece was exactly one grid
+ * step long. The maze mixes 2 m and 4 m pieces on a 2 m lattice now, where a 4 m piece's centre also lands on the
+ * lattice, and the trick silently picked the wrong axis. The yaw is already carried on every instance
+ * (`INSTANCE_STRIDE`), so this is the same information with none of the inference.
+ */
+export function glassPhaseBucket(x: number, z: number, yaw: number): number {
+  // |cos yaw| > 1/2 ⇒ the wall runs along world X ⇒ it stands on a constant-Z line.
+  const alongX = Math.abs(Math.cos(yaw)) > 0.5;
+  const line = (alongX ? z : x) / GLASS_PHASE.grid;
+  return hash32(Math.round(line), alongX ? 1 : 0) % GLASS_PHASE.buckets;
 }
 
 /**

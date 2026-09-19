@@ -1,6 +1,6 @@
 # Audio
 
-Realistic, PUBG-style game audio built from free CC0 recordings (plus three owner-supplied voice clips): spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, and an outdoor ambience bed.
+Realistic, PUBG-style game audio built from free CC0 recordings (plus three owner-supplied voice clips): spatial gunshots with speed-of-sound delay and distance layers, near-miss cracks, surface footsteps, impacts, weapon mechanics synced to the viewmodel clips, grenades (frag, smoke, flashbang, molotov) with loops and ear ringing, healing and loot foley, an outdoor ambience bed, and — for the maze maps, where you cannot see — reverb measured from the corridor you are standing in, a leaf rustle when a round goes through a hedge, and a close-range click when a glazed pane switches mode.
 
 > **Ambience is currently switched off** (`AMBIENCE_ENABLED = false` in `apps/client/src/audio/AudioSettings.ts`, by request).
 > - The gate wins over any saved ambience volume.
@@ -135,7 +135,8 @@ Raw WebAudio, not Babylon's AudioEngineV2. The v9.26 `StaticSound` API offers pa
 
 ```
 voice: buffer sources ─ layer gain/LP ─→ voice low-pass ─→ voice gain ─→ [HRTF panner] ─→ bus input
-                                                                  ├→ room send ─→ bus room tap ─→ convolver (0.9 s) ─→ indoor return ─┐
+                                                                  ├→ room send ─→ bus room tap ┬→ convolver (0.9 s) ─→ room return ──┐
+                                                                  │                            └→ corridor flutter (2 delays) ───────┤
                                                                   └→ echo send ─→ bus echo tap ─→ slapback + valley echo ─→ outdoor return ─┤
 bus input ─ [weapons: glue compressor] ─→ duck gain ─→ fader (settings) ─→ master ─→ muffle low-pass ─→ limiter (−1 dB, 20:1) ─→ out ◄──┘
 overlay voices (ear ringing) ─→ overlay gain (master volume) ──────────────────────────────────────────→ limiter
@@ -146,10 +147,13 @@ The **muffle** is a master low-pass (open at 22 kHz) that `AudioEngine.muffle()`
 
 | File | Role |
 |---|---|
-| `AudioEngine.ts` | Context unlock on first gesture; buses (weapons, impacts, footsteps, foley, ambience, ui); limiter; room reverb and outdoor echo returns; ducking; listener (Babylon's left-handed Z mirrored); voice pool |
+| `AudioEngine.ts` | Context unlock on first gesture; buses (weapons, impacts, footsteps, foley, ambience, ui); limiter; room reverb, corridor flutter and outdoor echo returns (`setRoom`); ducking; listener (Babylon's left-handed Z mirrored); voice pool |
 | `SoundBank.ts` | Format pick, fetch + `OfflineAudioContext` decode (ready before the user gesture), eager loading at startup, lazy sounds on first use, no-repeat variation picking |
 | `GameAudio.ts` | **Network-ready API.** Distance, delay, air absorption, occlusion, sends and layering per event |
-| `AudioWorldProbe.ts` | Havok raycasts, max 10 per frame: occlusion (cached 150 ms), surface under feet / at impacts, enclosure probe |
+| `AudioWorldProbe.ts` | Havok raycasts, max 10 per frame: occlusion (cached 150 ms), surface under feet / at impacts, enclosure probe, space probe (`space`, `roomSend`); holds the map's `MapPropAudio` |
+| `MapPropAudio.ts` | Sounds the placed props make on their own: hedge rustles (analytic bullet-vs-hedge, no rays) and glazed-pane clicks, both read off `MapLayout.props` |
+| `foliage.ts` | Hedge rustle: mix, cooldown, and the catalog rule that turns a colliderless prop into a volume |
+| `glassPhaseClick.ts` | Glazed-pane mode-change click: range, level, the two synthesized partials |
 | `FootstepSystem.ts` | Stride timing from distance travelled; stance; jump/land edges; local player + `FootstepEmitterSource`s |
 | `NearMissDetector.ts` | Segment-vs-head closest approach per bullet per frame, ≤ 3 m → crack (> 343 m/s) or whiz |
 | `AmbienceSystem.ts` | Wind loop (louder with height), birdsong loop (thinner with height), spatial bird calls, indoor damping |
@@ -243,6 +247,15 @@ Pistol and shotgun sit either side of the rifle.
   - The indoor amount crossfades the outdoor slapback/valley echo into a short room reverb.
   - It also damps and dulls the ambience.
   - It is provisional until buildings expose room volumes. Set `probe.enclosureProvider` to override it.
+- **How big is the space you are in** (`acoustics.roomFromSpace`, `AudioEngine.setRoom`). In a maze you cannot see, so the reverb has to say what is ahead of you before your eyes do: a 4 m squeeze rings, a 12 m boulevard slaps, the plaza opens out.
+  - **Measured, never authored.** The probe casts one horizontal ray per frame from the head, round-robin over 8 directions (4 world axes, 4 diagonals) at `SPACE.reach` = 28 m, so the whole fan refreshes in ~130 ms and is smoothed over 0.3 s. That is one more ray per frame out of the same budget of 10; the budget is unchanged. No map constant is involved, so a maze whose corridors change width changes the reverb with it.
+    - `width` = the narrowest **span** through the listener (a pair of opposite rays added together). On an axis-aligned lattice the axis pair across a corridor reads its width exactly.
+    - `meanFreePath` = the mean of all 8 distances: how much room there is in total.
+    - Space rays use their own mask: blockers **in** (a pane in its shoot-through mode and a chainlink fence are still walls to sound), players **out** (a teammate must not shrink the corridor).
+  - **What it drives.** `closeness` (1 at 4 m, 0 at 18 m) raises the room convolver return and the per-voice room send, opens the room low-pass (5000 → 6800 Hz), and feeds a **corridor flutter**: a stereo pair of short feedback delays whose time is the round trip across the space (4 m → 23 ms, a metallic ring; 12 m → 70 ms, a distinct slap), glided so walking out of a squeeze sweeps it. `openness` (mean free path 8 → 24 m) fades the open-field slapback/valley echo back in.
+  - **Voices couple by space, not by roof.** `probe.roomSend` is `max(enclosure, closeness)`; every `room:` send uses it. The old `probe.enclosure` is 0 in an open-topped corridor, which is exactly the space that rings most.
+  - **Open maps are untouched.** With nothing within reach the probe measures `2 × reach` across and `reach` of free path, which lands on room = enclosure, echo = the old `1 − indoor × 0.85`, flutter silent, tone 5000 Hz — the model Map v1 and the real-world maps already had. `verify.ts` asserts that equality.
+  - DEV: `__audio.space(4)` forces a squeeze, `__audio.space(null)` restores the rays, `__audio.space()` reads them.
 - **Near misses:**
   - Supersonic bullets: a synthesized N-wave snap, a short zip and a slap.
   - Subsonic bullets (the shotgun at 350 m/s): a Doppler-swept band-passed whiz whose panner travels ±4 m along the trajectory.
@@ -262,6 +275,8 @@ Pistol and shotgun sit either side of the rifle.
 | Casing bounce | `foley.casing` pitched per weapon (shotgun hull duller) |
 | Impact on world | `impact.concrete/metal/wood/dirt` by the hit material; occasional ricochet whine on concrete/metal |
 | Impact on bulletproof glass (`wall_glass_solid`) | The pane's own `impact.metal`, plus the owner-supplied `voice.glassBlocked` spatial at the impact point. Recognized from the prop collider the surface ray hit (`propCollider_wall_glass_solid_*`), not from the material, so the shoot-through `wall_glass` stays silent. One line every 2.5 s across all panes, so emptying a magazine into one doesn't stack it. Everything about it (clip, prop, cooldown, mix, and an `enabled` switch) is in `audio/glassBlocked.ts` |
+| Bullet through a hedge (`wall_grass`, and any walk-through bush) | A leaf rustle at the point it went in: `step.grass` at 1.35–1.6× (the CC0 grass take is a real rustle; fast and bright it reads as a bush, not a boot) + a slow `foley.cloth` for the branch + a high noise tick. Reference 2 m, range 30 m, priority `detail`, one per hedge per 0.14 s, at most 2 per frame. **No impact sound and no dust** — nothing stopped the round. Everything is in `audio/foliage.ts`; `enabled: false` silences it |
+| Glazed pane changing mode within 8 m (`wall_glass`, `map/glassPhase.ts`) | A synthesized dry tick in the glazing: two decaying partials (3.1 / 4.7 kHz) + a 8 ms noise tick, ×1.28 in pitch and shorter when the pane **opens** rather than goes armoured. Reference 1.5 m, range 8 m, rolloff 1.4 (the steepest here), gain 0.3, priority `detail`, at most 2 panes per flip. Never on the first frame of a match (joining mid-cycle must not click every pane at once). Everything is in `audio/glassPhaseClick.ts` |
 | Impact on target | `impact.flesh`, spatial |
 | Hit confirm (shooter) | `impact.flesh` thud + tick; headshot adds a metallic tink; kill adds a low thump |
 | Footstep | `step.concrete/dirt/grass/gravel/wood/metal`, gain/rate by stance |
@@ -300,6 +315,8 @@ audio.playFootstep({ position, surface?, stance: "crouch"|"walk"|"run"|"sprint",
 audio.playLanding({ position, fallSpeed, surface?, isLocal })  audio.playJump({ position, surface?, isLocal })
 audio.playImpact({ position, normal?, surface?: AcousticSurface | "flesh", weaponId?, age? })
 audio.playGlassBlocked({ position, age? })                                       // bulletproof pane; playImpact calls it
+audio.playFoliageHit(position)                                                   // bullet through a hedge (MapPropAudio)
+audio.playGlassPhaseClick(position, blocking)                                    // a pane near you switched mode
 audio.playExplosion({ position, kind?: "frag"|"flash", power?, age? })            // Detonate
 audio.playThrowableBounce({ kind, position, normal?, impactSpeed, surface? })     // derived from local stepThrowables
 audio.playThrowAction({ action: "draw"|"pinPull"|"spoon"|"throw"|"pinReturn"|"holster", kind, style?, position /* null = first person */ })
@@ -347,6 +364,10 @@ __audio.matchEnd(); __audio.matchEnd(false)  // results clip on/off
 __audio.useItem("medkit"); __audio.cancelUse(); __audio.pickup("armor"); __audio.armor(true)
 __audio.mech("pump", "shotgun"); __audio.hit("head", true)
 __audio.ambience(true)   // ambience is off by default; this turns wind/birds on for the session
+__audio.rustle(); __audio.rustle(12, -90)    // a bullet going through a hedge, 12 m away on your left
+__audio.paneClick(); __audio.paneClick(false, 2, 180)   // a pane going armoured; one opening 2 m behind you
+__audio.space(4)     // force a 4 m squeeze: everything rings. 12 = boulevard, 40 = plaza, null = live rays
+__audio.space()      // read the measured width / mean free path and the reverb it produces
 __audio.indoor(1)   // force room reverb; __audio.indoor(null) restores the probe
 __audio.volume("ambience", 0.3); __audio.stats(); __audio.voices(); __audio.overlay()
 ```
@@ -369,12 +390,20 @@ The cut points were chosen by transient analysis and spectrograms, **not by ear*
 10. **Flashbang.** `__audio.explosion(8, 0, "flash")` then `__audio.flashRing(1)`: the ring must stay audible while the rest is dull, and recover smoothly.
 11. **Loops.** `__audio.smoke()` hiss should not sound like tape noise; `__audio.fire()` crackle loop is 2.3 s, so listen for repetition.
 12. **Bulletproof glass.** `__audio.glassBlocked()`, and in game empty a magazine into a `wall_glass_solid` pane. The cut was picked by envelope analysis, not by ear: check that it starts on the first syllable and isn't the wrong half of the source (the file holds two lines), and that one line per 2.5 s feels right rather than naggy.
-13. **Pin, spoon, tape.** The pin pull uses key-in-lock recordings and the bandage tape uses tape-measure pulls; both were chosen by spectrum. Replace the cuts if they don't read as intended.
+13. **Corridor reverb** (`?map=mazebr`). Stand in a 4 m squeeze and fire: the shot should ring, tight and bright, with the open-field slap gone. Walk out into the plaza still firing — the ring should stretch into a slap and then open out, smoothly, with no click from the delay line. `__audio.space(4)` / `(12)` / `(40)` A/Bs it from anywhere; `__audio.space(null)` gives the rays back. Then check `?map=v1`: it must sound exactly as it did (`__audio.space()` should read ~56 m wide out in the open). If the flutter reads as a comb filter rather than a room, lower `FLUTTER_FEEDBACK` in `acoustics.ts`.
+14. **Hedge rustle.** Fire a burst into a `wall_grass` hedge at 5 m, then at 25 m. It should be leaves, close to silent at the far end, and it must not read as a footstep — if it does, raise the rate in `GameAudio.playFoliageHit` or drop the `foley.cloth` layer. Then stand **inside** a hedge while a bot fires into it. `__audio.rustle()` auditions it without hunting for a bush.
+15. **Pane click.** Stand beside a `wall_glass` pane and wait (a group flips every ten seconds). The tick should be quiet enough to miss while a fight is on and clear when you are listening, and armoured-vs-open should be tellable. Walk 10 m away: nothing. `__audio.paneClick(true)` then `__audio.paneClick(false)` A/Bs the two modes. If it gives the pane away too cheaply, set `openRate` to 1 (both modes identical) or drop `gain`.
+16. **Pin, spoon, tape.** The pin pull uses key-in-lock recordings and the bandage tape uses tape-measure pulls; both were chosen by spectrum. Replace the cuts if they don't read as intended.
 
 ## Known limitations
 
 - Occlusion is binary (one ray, no transmission through thin materials) and uses the listener's current position for the whole delayed sound.
 - Enclosure is a heuristic. Near tall walls it reads partly indoor.
+- The space probe measures from the listener's head only, so the reverb is the space you are standing in, not the one you are looking into. You hear a plaza as you reach it, not from three corridors away.
+- Space rays are horizontal, so on sloping ground a hillside ahead counts as a wall. That is arguably right (it does reflect), but it means a valley on a real-world map reads narrower than it looks.
+- Hedges are absent from the space measurement: they have no collider for the rays to find, which is also the honest answer acoustically — a hedge absorbs rather than reflects. A corridor walled with hedges therefore reads as open.
+- The hedge rustle is derived from the bullet's per-frame segment against the prop's own box, so it approximates the visible hedge (a 4 × 0.9 × 3 m slab), not the ragged silhouette the stand-in mesh draws. A round clipping the very top blades is silent.
+- The pane click runs off the client's `MapRuntime` phase clock. Once the match server owns combat that must be the match tick's own time, like `PropColliders.setPhaseTime`.
 - Surface resolution on building floors falls back to the terrain provider unless building meshes set `metadata.surface`.
 - The ambience height factor uses absolute Y. On the map terrain it should use height above ground.
 - Near-miss cracks are synthesized. The explosion close layer is a firework/cannon recording, not a real grenade.

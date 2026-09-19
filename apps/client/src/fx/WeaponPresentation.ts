@@ -19,8 +19,9 @@ import type { CombatView, DamageEvent, ImpactEvent, PenetrationEvent, ShotEvent 
 
 /** What a shot-through pane does about it: `MirrorWalls` implements this (world/props). */
 export interface PaneHoles {
-  /** The map prop these panes are, so a round through some other kind of pane is never offered to them. */
-  readonly paneProp: string;
+  /** The map props these panes are — a kind comes in more than one length — so a round through some other kind of pane
+   * is never offered to them. */
+  readonly paneProps: readonly string[];
   /** Cuts a see-through hole at a world point; false when no pane of theirs is there. */
   punch(point: Vector3): boolean;
   /** How wide the hole it cuts is, m. */
@@ -570,7 +571,7 @@ export class WeaponPresentation {
    */
   private handlePenetration(event: PenetrationEvent): void {
     const panes = this.panes;
-    const aperture = panes && event.prop === panes.paneProp && panes.punch(event.point) ? panes.holeDiameter : 0;
+    const aperture = panes && panes.paneProps.includes(event.prop) && panes.punch(event.point) ? panes.holeDiameter : 0;
     this.impacts.pierce(event.point, event.normal, aperture);
   }
 

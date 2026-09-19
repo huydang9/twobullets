@@ -1,6 +1,26 @@
-import { Color3, Color4, DynamicTexture, Material, Mesh, MirrorTexture, StandardMaterial, Texture, VertexData, type AbstractMesh, type Node, type Scene, type Vector3 } from "@babylonjs/core";
-import { INSTANCE_STRIDE, type PropInstanceSet } from "@twobullets/shared";
-import { MIRROR_PANEL } from "./standInMeshes";
+import {
+  Color3,
+  Color4,
+  CreateGround,
+  DynamicTexture,
+  Material,
+  MaterialPluginBase,
+  Mesh,
+  MirrorTexture,
+  ShaderLanguage,
+  StandardMaterial,
+  Texture,
+  VertexData,
+  type AbstractMesh,
+  type MaterialDefines,
+  type Node,
+  type Nullable,
+  type Scene,
+  type UniformBuffer,
+  type Vector3,
+} from "@babylonjs/core";
+import { INSTANCE_STRIDE, MIRROR_WALL_PROPS, type DestructibleWalls, type MapLayout, type PropInstanceSet } from "@twobullets/shared";
+import { MIRROR_PANEL, MIRROR_PANELS, type MirrorPanel } from "./standInMeshes";
 
 /**
  * Mirrored wall panels (`wall_mirror`): you glimpse an enemy round a corner in one.
@@ -17,9 +37,10 @@ import { MIRROR_PANEL } from "./standInMeshes";
  *   A mirror behind the camera, out of the view cone, edge-on or past `distance` never gets one.
  * - An unbound slot's texture is referenced by no drawn mesh, so Babylon never collects it and never renders it. A
  *   bound one whose mesh is frustum-culled costs nothing either, for the same reason.
- * - The render list is bounded (`getCustomRenderList`, the discipline of shadowCulling.ts) to the skybox plus nearby
- *   characters: 12 triangles of sky so the pane always reads as a mirror, and the soldiers that are the point of it.
- *   Never the terrain, the walls or the effects.
+ * - The render list is bounded (`getCustomRenderList`, the discipline of shadowCulling.ts) to the skybox, one flat
+ *   proxy floor (`MIRROR_GROUND`) and nearby characters: 12 triangles of sky so the pane always reads as a mirror, 2
+ *   of ground so it does not end in the panorama's sand, and the soldiers that are the point of it. Never the real
+ *   terrain, the walls or the effects.
  *
  * Known limit: because the walls are not in the reflection, a mirror cannot hide a character standing behind one in the
  * reflected line of sight. Adding the wall batches to the list would fix it and cost a few thousand more triangles.
@@ -35,8 +56,17 @@ import { MIRROR_PANEL } from "./standInMeshes";
  * thin-instance stand-in and into these faces — a shared core would have stood behind every hole.
  */
 
-/** The catalog prop the reflective faces belong to; its frame still goes through the thin-instance batches. */
-export const MIRROR_PROP = "wall_mirror";
+/**
+ * The catalog props the reflective faces belong to; their frames still go through the thin-instance batches. The list
+ * lives in `shared/equipment/destructible.ts`, because a frag has to know the same panes this renderer does.
+ */
+export const MIRROR_PROPS = MIRROR_WALL_PROPS;
+/** The 4 m panel, for the places that want one representative id. */
+export const MIRROR_PROP = MIRROR_PROPS[0]!;
+/** True for either length of mirrored panel. The maze's 2 m lanes carry the short one; both reflect and both hole. */
+export function isMirrorProp(prop: string): boolean {
+  return MIRROR_PROPS.includes(prop);
+}
 
 /** Tuning, all in one place. Mutable so it can be poked from the console while looking at the map. */
 export const MIRROR_TUNING = {
@@ -63,13 +93,62 @@ export const MIRROR_TUNING = {
  * tall, and `diameter` is deliberately big enough to put an eye to — "cái lỗ nó phải to để có thể nhìn xuyên qua được".
  */
 export const MIRROR_HOLE = {
-  /** Aperture across, m. A head is about 0.2 m wide; this is a hole you look and shoot through, not a bullet mark. */
-  diameter: 0.22,
+  /**
+   * Aperture across, m. A head is about 0.2 m wide; this is a hole you look and shoot through, not a bullet mark. At
+   * 0.34 m one hole is a ninth of the pane's width and a seventh of its height — plainly a hole in a wall — but it is
+   * 2.4× the area the first pass cut (0.22 m), so two or three rounds landing within a hole's width of each other now
+   * merge into an opening you can move your head behind, where it used to take six or eight. Spread evenly it would
+   * still take well over a hundred rounds to erase the 8.7 m² pane, so a magazine cannot turn a panel into a frame.
+   */
+  diameter: 0.34,
   /** Mask width in px across the pane; the height follows the pane's aspect. 256 px is about 1.5 cm a pixel. */
   resolution: 256,
   /** Soft rim as a fraction of the radius. The alpha test bites in the middle of it, which hides the texel stair. */
   feather: 0.3,
+  /** Redraws a healing pane's mask this many times over the heal: enough to read as closing, cheap enough to ignore. */
+  healSteps: 12,
 };
+
+/**
+ * What a mirror shows below the horizon (2026-09-18).
+ *
+ * The sky panorama is ground-filled: everything under the horizon is one flat sandy radiance (`SKY.groundRadiance`,
+ * about 0.45 / 0.40 / 0.21), and a mirror's reflection is nothing but that panorama, so every pane ended in a pale
+ * yellow band where the ground should be. Two fixes, because the two paths reflect different things:
+ *
+ * - A **live** pane renders its own reflection, so it can be given a real floor: one quad centred on the camera at the
+ *   pane's own base height wearing the terrain's material, which samples the same splat mask and albedo as the ground
+ *   the player is standing on. Two triangles, no extra texture, one draw call in the passes that already exist. It is
+ *   invisible to the player's camera — its layer mask is one no camera carries, and a render target with a custom
+ *   render list skips the layer-mask check — so it only ever exists inside a mirror.
+ * - An **idle** pane samples the panorama cube straight out of the material, with no scene to put anything in front of.
+ *   So its material neutralises the reflection below the horizon instead: the sand keeps its brightness and loses its
+ *   colour, which reads as dim ground rather than as desert. No colour is invented, so it follows the lighting and it
+ *   survives a change of sky.
+ */
+export const MIRROR_GROUND = {
+  /** Live panes: the proxy floor's side length, m. It only has to outrun `MIRROR_TUNING.distance` around the camera. */
+  proxySize: 160,
+  /** Idle panes: |downward| component of the reflected direction where the ground blend starts and where it is full. */
+  from: 0.0,
+  to: 0.18,
+  /** How much of the neutralised colour replaces the panorama's sand, 0..1. */
+  strength: 1,
+  /** Brightness of the ground against the sky it replaces: a floor is darker than the sky over it. */
+  darken: 0.75,
+  /** Multiplies the neutral grey. A touch warm, so it reads as ground and not as slate. */
+  tint: [1, 0.97, 0.9] as const,
+};
+
+/**
+ * A mesh on this layer alone is invisible to every camera (they carry Babylon's default 0x0FFFFFFF) but still drawn
+ * into the mirrors: a render target with a `getCustomRenderList` skips the layer-mask check
+ * (`Rendering/objectRenderer`). The same trick as `shadowCulling.SHADOW_ONLY_LAYER`, one bit over.
+ */
+const MIRROR_ONLY_LAYER = 0x40000000;
+
+/** The terrain's shared material, by the name `world/terrain/TerrainMaterial.ts` gives it. */
+const TERRAIN_MATERIAL = "mat_terrain";
 
 /** Only shows if the skybox is missing: a dim daylight grey, never black. */
 const FALLBACK_CLEAR = new Color4(0.24, 0.27, 0.31, 1);
@@ -89,11 +168,24 @@ interface MirrorWall {
   /** World panel normal (the prop's local +Z), unit. */
   readonly nx: number;
   readonly nz: number;
+  /** The instance's own y: the floor the panel stands on, which is the height the proxy ground sits at. */
+  readonly baseY: number;
   /** Where the silvered face sits either side of the wall's centre plane, m at this instance's scale. */
   readonly faceOffset: number;
   /** Half the pane's width and height at this instance's scale, m. */
   readonly halfWidth: number;
   readonly halfHeight: number;
+  /** The prop and layout instance this pane is, so the match's wall registry can name it. */
+  readonly prop: string;
+  readonly instance: number;
+  /** Index in the match's `DestructibleWalls`, or -1 while nothing is bound. */
+  wall: number;
+  /** A frag took this pane out: mesh off, slot released, and it never takes another hole. */
+  gone: boolean;
+  /** Every aperture in the pane: u, v, radius (as a fraction of the pane's width) each. Redrawn when smoke heals. */
+  readonly holes: number[];
+  /** 0..1 of the way through a smoke heal, as last drawn. -1 while the pane is not healing. */
+  drawnHeal: number;
   /** The holes shot in this pane, or null while it is whole. Allocated on the first hit and never freed. */
   mask: DynamicTexture | null;
   /** Idle material carrying `mask`, or null: a holed pane cannot use the shared one. */
@@ -119,6 +211,8 @@ export interface MirrorStats {
   readonly subjects: number;
   /** Panes with at least one hole shot through them, i.e. a mask texture and a material of their own. */
   readonly holed: number;
+  /** Panes a frag has destroyed. */
+  readonly gone: number;
 }
 
 export interface MirrorWallsOptions {
@@ -134,8 +228,13 @@ export class MirrorWalls {
   private readonly subjects: AbstractMesh[] = [];
   private readonly roots = new Set<Node>();
   private readonly chosen: Int32Array;
+  /** The floor under the live panes, drawn into the reflections only; null on a map with no mirrors. */
+  private readonly ground: Mesh | null;
   private lastSelect = -Infinity;
   private enabled = true;
+  /** The match's wall registry, once a host has bound it, and this pane list keyed by its indices. */
+  private walls: DestructibleWalls | null = null;
+  private readonly byWall = new Map<number, MirrorWall>();
 
   constructor(
     private readonly scene: Scene,
@@ -146,7 +245,8 @@ export class MirrorWalls {
     for (const set of sets) {
       for (let i = 0; i < set.data.length; i += INSTANCE_STRIDE) {
         const d = set.data;
-        const mirror = this.createMirror(`mirror_${this.mirrors.length}`, d[i]!, d[i + 1]!, d[i + 2]!, d[i + 3]!, d[i + 4]!);
+        const panel = MIRROR_PANELS[set.prop] ?? MIRROR_PANEL;
+        const mirror = this.createMirror(panel, `mirror_${this.mirrors.length}`, set.prop, i / INSTANCE_STRIDE, d[i]!, d[i + 1]!, d[i + 2]!, d[i + 3]!, d[i + 4]!);
         this.mirrors.push(mirror);
         // The faces are the panel's body now, so they are what casts its shadow (the stand-in only has the frame).
         options.shadowCaster?.(mirror.mesh);
@@ -155,6 +255,7 @@ export class MirrorWalls {
     const count = this.mirrors.length === 0 ? 0 : Math.min(MIRROR_TUNING.live, MIRROR_TUNING.maxLive, this.mirrors.length);
     for (let i = 0; i < count; i++) this.slots.push(this.createSlot(i));
     this.chosen = new Int32Array(Math.max(1, count));
+    this.ground = count === 0 ? null : this.createGround();
   }
 
   get count(): number {
@@ -166,9 +267,9 @@ export class MirrorWalls {
     return MIRROR_HOLE.diameter;
   }
 
-  /** The prop these panes are: a round through any other pane is not theirs to open. */
-  get paneProp(): string {
-    return MIRROR_PROP;
+  /** The props these panes are, in both lengths: a round through any other pane is not theirs to open. */
+  get paneProps(): readonly string[] {
+    return MIRROR_PROPS;
   }
 
   /**
@@ -191,15 +292,91 @@ export class MirrorWalls {
       // Inside the glass, not up on the frame or the sill. A hit near the rim cuts a hole that runs into the frame,
       // which is the right answer: you see the frame through it, not the corridor.
       if (Math.abs(along) > mirror.halfWidth || Math.abs(up) > mirror.halfHeight) continue;
+      if (mirror.gone) continue;
       const mask = mirror.mask ?? this.createMask(mirror);
       const u = 0.5 + along / (2 * mirror.halfWidth);
       // The mask is uploaded unflipped (`update(false)`, like the effects atlas), so canvas row 0 is v = 0 is the sill.
       const v = 0.5 + up / (2 * mirror.halfHeight);
-      cutHole(mask, u, v, radius / (2 * mirror.halfWidth));
+      const fraction = radius / (2 * mirror.halfWidth);
+      // Kept so a smoke heal can redraw the pane with the same apertures, shrinking.
+      mirror.holes.push(u, v, fraction);
+      mirror.drawnHeal = -1;
+      cutHole(mask, u, v, fraction);
       mirror.dirty = true;
+      // The match counts the aperture; a cloud that later sits on this pane is what closes it.
+      if (mirror.wall >= 0) this.walls?.addHole(mirror.wall);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Follows the match's destructible walls: the mirrors learn their index in it, so a round through a pane counts an
+   * aperture there and a pane the match destroys or heals can be found again. Read-only — the match decides, this
+   * shows it (`shared/equipment/destructible.ts`).
+   */
+  bindWalls(walls: DestructibleWalls, layout: Pick<MapLayout, "props">): void {
+    this.walls = walls;
+    this.byWall.clear();
+    const setOf = new Map<string, number>();
+    layout.props.forEach((set, i) => setOf.set(set.prop, i));
+    for (const mirror of this.mirrors) {
+      const index = walls.indexOf(setOf.get(mirror.prop) ?? -1, mirror.instance);
+      mirror.wall = index;
+      if (index >= 0) this.byWall.set(index, mirror);
+    }
+  }
+
+  /**
+   * A frag destroyed this pane: the glass goes. The mesh is disabled rather than disposed, so the slot pool, the
+   * shadow caster list and the reflection render list stay the shapes they were built as, and one `isEnabled` check
+   * is all the per-frame cost of a destroyed pane.
+   */
+  destroy(index: number): void {
+    const mirror = this.byWall.get(index);
+    if (!mirror || mirror.gone) return;
+    mirror.gone = true;
+    if (mirror.slot >= 0) this.release(mirror);
+    mirror.mesh.setEnabled(false);
+    mirror.score = -1;
+  }
+
+  /** A cloud closed this pane's apertures: the mask goes back to solid. */
+  healed(index: number): void {
+    const mirror = this.byWall.get(index);
+    if (!mirror || mirror.gone || mirror.holes.length === 0) return;
+    mirror.holes.length = 0;
+    mirror.drawnHeal = -1;
+    this.redraw(mirror, 1);
+  }
+
+  /**
+   * A cloud is `progress` of the way through closing this pane: the apertures are redrawn shrinking, so the glass
+   * grows back over the seconds the smoke sits there instead of popping shut. Redrawn on `HEAL_STEPS` steps, so a
+   * healing pane costs a few small canvas redraws in all.
+   */
+  setHeal(index: number, progress: number): void {
+    const mirror = this.byWall.get(index);
+    if (!mirror || mirror.gone || mirror.holes.length === 0) return;
+    const step = Math.round(progress * MIRROR_HOLE.healSteps) / MIRROR_HOLE.healSteps;
+    if (step === mirror.drawnHeal) return;
+    mirror.drawnHeal = step;
+    this.redraw(mirror, step);
+  }
+
+  /** Repaints a pane's mask: solid, then every aperture cut again at `1 - shrink` of its size. */
+  private redraw(mirror: MirrorWall, shrink: number): void {
+    const mask = mirror.mask;
+    if (!mask) return;
+    const size = mask.getSize();
+    const ctx = mask.getContext();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size.width, size.height);
+    const scale = 1 - shrink;
+    if (scale > 0) {
+      for (let i = 0; i < mirror.holes.length; i += 3) cutHole(mask, mirror.holes[i]!, mirror.holes[i + 1]!, mirror.holes[i + 2]! * scale);
+    }
+    mirror.dirty = true;
   }
 
   /** Call every frame with the view position; the expensive parts run on their own low-rate clock. */
@@ -233,9 +410,10 @@ export class MirrorWalls {
     if (enabled === this.enabled) return;
     this.enabled = enabled;
     this.lastSelect = -Infinity;
+    if (this.ground && !enabled) this.ground.isVisible = false;
     for (const mirror of this.mirrors) {
       if (!enabled && mirror.slot >= 0) this.release(mirror);
-      mirror.mesh.setEnabled(enabled);
+      mirror.mesh.setEnabled(enabled && !mirror.gone);
     }
   }
 
@@ -243,8 +421,12 @@ export class MirrorWalls {
     let live = 0;
     let holed = 0;
     for (const slot of this.slots) if (slot.mirror) live++;
-    for (const mirror of this.mirrors) if (mirror.mask) holed++;
-    return { mirrors: this.mirrors.length, live, subjects: this.subjects.length, holed };
+    let gone = 0;
+    for (const mirror of this.mirrors) {
+      if (mirror.mask && !mirror.gone) holed++;
+      if (mirror.gone) gone++;
+    }
+    return { mirrors: this.mirrors.length, live, subjects: this.subjects.length, holed, gone };
   }
 
   dispose(): void {
@@ -260,6 +442,8 @@ export class MirrorWalls {
     }
     this.mirrors.length = 0;
     this.subjects.length = 0;
+    // The proxy floor borrows the terrain's material, so it is the mesh's to drop and not the material's.
+    this.ground?.dispose(false, false);
     this.fallback.dispose();
   }
 
@@ -315,6 +499,7 @@ export class MirrorWalls {
       const flen = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
       for (const mirror of mirrors) {
         mirror.score = -1;
+        if (mirror.gone) continue;
         const dx = mirror.cx - camera.x;
         const dy = mirror.cy - camera.y;
         const dz = mirror.cz - camera.z;
@@ -348,6 +533,8 @@ export class MirrorWalls {
       const mirror = mirrors[index]!;
       if (mirror.slot < 0) this.bind(mirror);
     }
+    // chosen[0] is the nearest live pane, so its floor is the one worth standing the proxy ground on.
+    this.placeGround(camera, chosen[0]! >= 0 ? mirrors[chosen[0]!]! : null);
   }
 
   private bind(mirror: MirrorWall): void {
@@ -384,6 +571,9 @@ export class MirrorWalls {
     const roots = this.roots;
     subjects.length = 0;
     roots.clear();
+    // The proxy floor, so a reflection has ground under its horizon instead of the panorama's sand. It is in the list
+    // whenever it exists; `placeGround` gates it with `isVisible`, which is what the render target actually checks.
+    if (this.ground) subjects.push(this.ground);
     const meshes = this.scene.meshes;
     const rangeSq = MIRROR_TUNING.subjectRange * MIRROR_TUNING.subjectRange;
     for (let i = 0; i < meshes.length; i++) {
@@ -406,6 +596,35 @@ export class MirrorWalls {
     }
   }
 
+  /**
+   * The proxy floor: one flat quad that exists only inside the reflections (see `MIRROR_GROUND`). It wears the
+   * terrain's own material, which reads its layers from world XZ, so it looks like the ground it stands in for. The
+   * material is looked up rather than injected because it is built with the map, after the props; until it turns up
+   * the quad stays hidden and the reflection is exactly what it was before.
+   */
+  private createGround(): Mesh {
+    const size = MIRROR_GROUND.proxySize;
+    // Not `mirror_…`: that prefix is the silvered faces, and this is the one mesh in the list that is not a subject.
+    const mesh = CreateGround("mirrorGround", { width: size, height: size, subdivisions: 1 }, this.scene);
+    mesh.layerMask = MIRROR_ONLY_LAYER;
+    mesh.isVisible = false;
+    mesh.isPickable = false;
+    mesh.receiveShadows = true;
+    mesh.alwaysSelectAsActiveMesh = true;
+    mesh.doNotSyncBoundingInfo = true;
+    return mesh;
+  }
+
+  /** Puts the proxy floor under the camera at the nearest live pane's floor height, on the selection tick. */
+  private placeGround(camera: { x: number; y: number; z: number }, mirror: MirrorWall | null): void {
+    const mesh = this.ground;
+    if (!mesh) return;
+    if (!mesh.material) mesh.material = this.scene.getMaterialByName(TERRAIN_MATERIAL);
+    mesh.isVisible = this.enabled && mirror !== null && mesh.material !== null;
+    if (!mesh.isVisible || !mirror) return;
+    mesh.position.set(camera.x, mirror.baseY, camera.z);
+  }
+
   private createSlot(index: number): MirrorSlot {
     const texture = new MirrorTexture(`mirror_rt${index}`, MIRROR_TUNING.resolution, this.scene, false);
     texture.renderList = [];
@@ -419,8 +638,8 @@ export class MirrorWalls {
     return { texture, material, mirror: null };
   }
 
-  private createMirror(name: string, x: number, y: number, z: number, yaw: number, scale: number): MirrorWall {
-    const mesh = buildFaces(name, this.scene);
+  private createMirror(panel: MirrorPanel, name: string, prop: string, instance: number, x: number, y: number, z: number, yaw: number, scale: number): MirrorWall {
+    const mesh = buildFaces(panel, name, this.scene);
     mesh.position.set(x, y, z);
     mesh.rotation.y = yaw;
     mesh.scaling.setAll(scale);
@@ -432,7 +651,7 @@ export class MirrorWalls {
     // Local +Z under a yaw about Y (Babylon's row-vector convention): (sin, 0, cos).
     const nx = Math.sin(yaw);
     const nz = Math.cos(yaw);
-    const mid = ((MIRROR_PANEL.bottom + MIRROR_PANEL.top) / 2) * scale;
+    const mid = ((panel.bottom + panel.top) / 2) * scale;
     return {
       mesh,
       cx: x,
@@ -440,9 +659,16 @@ export class MirrorWalls {
       cz: z,
       nx,
       nz,
-      faceOffset: MIRROR_PANEL.faceOffset * scale,
-      halfWidth: MIRROR_PANEL.halfWidth * scale,
-      halfHeight: ((MIRROR_PANEL.top - MIRROR_PANEL.bottom) / 2) * scale,
+      baseY: y,
+      faceOffset: panel.faceOffset * scale,
+      halfWidth: panel.halfWidth * scale,
+      halfHeight: ((panel.top - panel.bottom) / 2) * scale,
+      prop,
+      instance,
+      wall: -1,
+      gone: false,
+      holes: [],
+      drawnHeal: -1,
       mask: null,
       holed: null,
       dirty: false,
@@ -470,8 +696,8 @@ function characterRoot(mesh: AbstractMesh): Node {
  * Both faces carry the same UVs, keyed to the panel's own left-to-right and bottom-to-top: a texel is a place on the
  * panel, whichever side you are standing on. That is what makes one hole mask cut a hole right through.
  */
-function buildFaces(name: string, scene: Scene): Mesh {
-  const { halfWidth: w, bottom: y0, top: y1, faceOffset: f } = MIRROR_PANEL;
+function buildFaces(panel: MirrorPanel, name: string, scene: Scene): Mesh {
+  const { halfWidth: w, bottom: y0, top: y1, faceOffset: f } = panel;
   // Left-handed winding, as in standInMeshes' box().
   const positions = [
     -w, y0, f, w, y0, f, w, y1, f, -w, y0, f, w, y1, f, -w, y1, f,
@@ -536,5 +762,60 @@ function createMirrorMaterial(scene: Scene, name: string): StandardMaterial {
   material.diffuseColor = PANE_TINT;
   material.specularColor = PANE_SPECULAR;
   material.specularPower = 256;
+  new MirrorGroundPlugin(material);
   return material;
+}
+
+/**
+ * Takes the colour out of the sky panorama's ground fill where a pane reflects it, leaving its brightness: the band
+ * below the horizon reads as floor instead of as sand. Compiles to nothing unless the material is sampling a cube
+ * (`REFLECTIONMAP_3D`), so a live pane — whose reflection is a planar render target, and which has the proxy floor in
+ * it anyway — is untouched by the same plugin on the same material.
+ */
+const GROUND_FRAGMENT = /* glsl */ `
+#if defined(REFLECTION) && defined(REFLECTIONMAP_3D)
+  {
+    float mgBelow = -normalize(vReflectionUVW).y;
+    float mgAmount = smoothstep(mirrorGroundBand.x, mirrorGroundBand.y, mgBelow) * mirrorGroundBand.z;
+    float mgLuma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    color.rgb = mix(color.rgb, vec3(mgLuma) * mirrorGroundTint.rgb, mgAmount);
+  }
+#endif
+`;
+
+class MirrorGroundPlugin extends MaterialPluginBase {
+  constructor(material: StandardMaterial) {
+    super(material, "MirrorGround", 250, { MIRROR_GROUND: false }, true, true);
+  }
+
+  override getClassName(): string {
+    return "MirrorGroundPlugin";
+  }
+
+  override isCompatible(shaderLanguage: ShaderLanguage): boolean {
+    return shaderLanguage === ShaderLanguage.GLSL;
+  }
+
+  override prepareDefines(defines: MaterialDefines): void {
+    defines["MIRROR_GROUND"] = true;
+  }
+
+  override getUniforms() {
+    const names = ["mirrorGroundBand", "mirrorGroundTint"];
+    return {
+      ubo: names.map((name) => ({ name, size: 4, type: "vec4" })),
+      fragment: names.map((name) => `uniform vec4 ${name};`).join("\n"),
+    };
+  }
+
+  override bindForSubMesh(ubo: UniformBuffer): void {
+    const g = MIRROR_GROUND;
+    ubo.updateFloat4("mirrorGroundBand", g.from, g.to, g.strength, 0);
+    ubo.updateFloat4("mirrorGroundTint", g.tint[0] * g.darken, g.tint[1] * g.darken, g.tint[2] * g.darken, 0);
+  }
+
+  override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
+    // Right after the reflection has been folded into `color` and before fog and tone mapping touch it.
+    return shaderType === "fragment" ? { CUSTOM_FRAGMENT_BEFORE_FOG: GROUND_FRAGMENT } : null;
+  }
 }

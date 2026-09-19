@@ -2,7 +2,7 @@ import type { BuildingPrefab } from "../types";
 import { barn } from "./farm";
 import { smallHouse, twoStoryHouse } from "./houses";
 import { closedContainer, openContainer, radarStation, warehouse } from "./industrial";
-import { barracks, guardBooth, watchtower } from "./military";
+import { barracks, guardBooth, smallWatchtower, watchtower } from "./military";
 import { TUBE_HOUSES, TUBE_HOUSE_VARIANTS, tubeHouse } from "./tubeHouses";
 import { BRIDGES, bridge } from "./bridges";
 import { church, marketHall, pagoda, school } from "./vnCivic";
@@ -17,6 +17,7 @@ const PREFABS = [
   warehouse(),
   barracks(),
   watchtower(),
+  smallWatchtower(),
   guardBooth(),
   radarStation(),
   openContainer("container_open", "Container (open, red)", "containerRed"),
@@ -52,6 +53,7 @@ export type BuildingPrefabId =
   | "warehouse"
   | "barracks"
   | "watchtower"
+  | "watchtower_small"
   | "guard_booth"
   | "radar_station"
   | "container_open"

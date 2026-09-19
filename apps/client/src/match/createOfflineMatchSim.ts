@@ -10,11 +10,12 @@ import {
   type GroundLoot,
   type MatchExternalActor,
   type NavQuery,
+  type PointOfInterest,
   type RaycastFn,
   type TeamSpawnPlan,
   type Vec3,
 } from "@twobullets/shared";
-import { MatchSim, type MatchSimEquipment, type PlayerBody } from "@twobullets/sim";
+import { MatchSim, type MatchSimEquipment, type MatchWalls, type PlayerBody } from "@twobullets/sim";
 import type { OfflineMatchOptions } from "./options";
 
 export const OFFLINE_HUMAN_SLOT = 0;
@@ -28,6 +29,8 @@ export interface OfflineMatchSimInput {
   readonly humanSlot: number | null;
   /** The map's `terrain.playableHalfExtent`: scales the zone to the map (default Map v1's 250 m). */
   readonly playableHalfExtent?: number;
+  /** The map's POIs: the hottest one pulls the late circles in on a scaled-down map. */
+  readonly pois?: readonly PointOfInterest[];
   readonly spawns: readonly TeamSpawnPlan[];
   readonly killY: number;
   readonly raycastWorld: RaycastFn;
@@ -35,12 +38,14 @@ export interface OfflineMatchSimInput {
   readonly isValidZoneCenter: (x: number, z: number) => boolean;
   readonly groundLoot: GroundLoot;
   readonly equipment: MatchSimEquipment;
+  /** The maze's destructible mirrors and hedges; omitted on a map with none (Map v1, the real-world maps, the arena). */
+  readonly walls?: MatchWalls;
   readonly external: readonly MatchExternalActor[];
   createBody(feet: Vec3): PlayerBody;
   readonly profile?: boolean;
 }
 
-export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed" | "options" | "difficulty" | "humanSlot" | "playableHalfExtent">): BrMatchConfig {
+export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed" | "options" | "difficulty" | "humanSlot" | "playableHalfExtent" | "pois">): BrMatchConfig {
   return createBrMatchConfig({
     seed: input.seed,
     maxPlayers: input.options.maxPlayers,
@@ -49,6 +54,7 @@ export function createOfflineMatchConfig(input: Pick<OfflineMatchSimInput, "seed
     humanTeammate: input.options.teammate,
     difficulty: input.difficulty,
     playableHalfExtent: input.playableHalfExtent,
+    pois: input.pois,
     timeScale: input.options.zoneScale,
   });
 }
@@ -71,6 +77,7 @@ export function createOfflineMatchSim(input: OfflineMatchSimInput): MatchSim {
       profileFor: botProfile,
       createBody: (feet) => input.createBody(feet),
       equipment: input.equipment,
+      walls: input.walls,
       external: input.external,
       isValidZoneCenter: input.isValidZoneCenter,
     },

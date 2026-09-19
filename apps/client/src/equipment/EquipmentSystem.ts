@@ -55,6 +55,7 @@ import {
   type ConsumableItemId,
   type DamageOutcome,
   type DamageRequest,
+  type DestructibleWalls,
   type DropTarget,
   type EquipmentInput,
   type EquipmentModifiers,
@@ -402,6 +403,14 @@ export class EquipmentSystem implements EquipmentItemsView, EquipmentItemActions
   /** Overrides the `teammates` option: downed teammates the local player can revive. Null restores it. */
   setTeammatesSource(source: (() => readonly ReviveTarget[]) | null): void {
     this.teammatesSource = source;
+  }
+
+  /**
+   * The match's destructible walls (`MatchSimEquipment.setWalls`): this world's frags, smoke and fire then write into
+   * the match's own state, so the host and the sim can never disagree about which pane is gone.
+   */
+  setWalls(walls: DestructibleWalls): void {
+    this.world.walls = walls;
   }
 
   /** A throwable released by an actor the client doesn't step here (an offline match bot); `slot` is its entity id. */

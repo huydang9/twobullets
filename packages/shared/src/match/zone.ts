@@ -1,6 +1,7 @@
 import { SIMULATION } from "../constants";
 import { hash32 } from "../equipment/math";
-import type { ZoneCircle, ZonePhase, ZoneSpec, ZoneStage, ZoneState } from "./types";
+import type { PointOfInterest } from "../map/types";
+import type { ZoneCenterBias, ZoneCircle, ZonePhase, ZonePhaseSpec, ZoneSpec, ZoneStage, ZoneState } from "./types";
 
 // Shrinking zone (docs/bots/design.md §8.2): a pure schedule of phases and `zoneAt(tick)`. The rules, HUD, bots and the
 // future networked client compute the same circle from the announced phases. No engine imports, no Math.random.
@@ -37,24 +38,98 @@ export function zonePlayableHalfExtent(spec: ZoneSpec): number {
 }
 
 /**
+ * Defaults for `ZoneCenterBias`: the pull ramps over the trailing 5 of the 7 phases up to 0.8 of the way to the
+ * target. The ramp makes the first two of those a nudge (0.16, 0.32) and the endgame a real pull, measured on the maze
+ * at ±96 m with its nav check, the last circle with a real radius overlaps the plaza 75 % of the time instead of 34 %,
+ * and its center still varies by ±24 m (a quarter of the half extent) across seeds, so matches don't all end in the
+ * same corner. The thresholds are ratios, not metres, so a resized map keeps them.
+ */
+export const ZONE_CENTER_BIAS = { phases: 5, strength: 0.8 } as const;
+
+/** Options `zoneSpecForHalfExtent` shapes a scaled-down spec with. All of them are inert at the base spec's own size. */
+export interface ZoneScaleOptions {
+  /**
+   * Smallest radius a circle may shrink to, m (the terminal 0-radius circle is exempt). Default: the smallest non-zero
+   * radius `base` itself uses — i.e. a small map never plays an endgame circle tighter than the one Map v1 ships.
+   */
+  readonly minRadius?: number;
+  /**
+   * Smallest radius drop between consecutive circles once the floor bites, m (default `minRadius / 2`). Containment
+   * caps a center's move at `from.r − to.r`, so without this the floored phases would freeze the circle in place.
+   */
+  readonly minShrink?: number;
+  /** Late-phase center pull (`zoneCenterBiasForPois`); omitted keeps `base`'s, null clears it. */
+  readonly centerBias?: ZoneCenterBias | null;
+}
+
+/** Smallest non-zero phase radius of a spec, m (0 when every phase closes to a point). */
+function smallestPhaseRadius(spec: ZoneSpec): number {
+  let min = 0;
+  for (const phase of spec.phases) if (phase.radius > 0 && (min === 0 || phase.radius < min)) min = phase.radius;
+  return min;
+}
+
+/**
  * `base` scaled to a map whose playable square is ±`halfExtent` m: every radius (the initial circle included) and the
  * edge margin scale with the map; timings, dps and the phase count don't (that is the 2026-09-16 halving, generalized).
  * The initial circle keeps its 1.42 × half extent, so it still covers the square (√2 ≈ 1.4142).
  *
+ * On a small map pure proportional scaling shrinks the endgame below one room (the maze at ±96 m: 9.6 m and 4.61 m,
+ * a fraction of one corridor lane), so the scaled radii are then floored at `minRadius` and spread apart by
+ * `minShrink`, and `centerBias` pulls the last circles toward the map's hottest POI. All three are part of the
+ * scaling: a spec asked for its own half extent is returned as-is.
+ *
  * Returns `base` itself at its own half extent, so Map v1, the real-world maps and every hand-written spec (arena) come
- * out untouched.
+ * out untouched — options or not.
  */
-export function zoneSpecForHalfExtent(halfExtent: number, base: ZoneSpec = DEFAULT_ZONE_SPEC): ZoneSpec {
+export function zoneSpecForHalfExtent(halfExtent: number, base: ZoneSpec = DEFAULT_ZONE_SPEC, options: ZoneScaleOptions = {}): ZoneSpec {
   if (!(halfExtent > 0)) throw new Error(`zone half extent must be positive (got ${halfExtent})`);
   const scale = halfExtent / zonePlayableHalfExtent(base);
   if (scale === 1) return base;
+  const initialR = round2(base.initial.r * scale);
+  const minRadius = Math.max(0, options.minRadius ?? smallestPhaseRadius(base));
+  const minShrink = Math.max(0, options.minShrink ?? minRadius / 2);
+  const phases: ZonePhaseSpec[] = base.phases.map((phase) => ({ ...phase, radius: round2(phase.radius * scale) }));
+  // Back to front: lift anything under the floor, then keep every step at least `minShrink` wide so centers can move.
+  for (let i = phases.length - 1; i >= 0; i--) {
+    const phase = phases[i]!;
+    if (phase.radius <= 0) continue; // the terminal close stays a point, as it is on the tuned map
+    const next = phases[i + 1];
+    const floor = Math.max(minRadius, next && next.radius > 0 ? next.radius + minShrink : minRadius);
+    if (phase.radius < floor) phases[i] = { ...phase, radius: round2(floor) };
+  }
+  // A map small enough for the floors to outgrow the map itself still gets a monotone schedule inside the first circle.
+  let ceiling = initialR;
+  for (let i = 0; i < phases.length; i++) {
+    const phase = phases[i]!;
+    if (phase.radius > ceiling) phases[i] = { ...phase, radius: ceiling };
+    else ceiling = phase.radius;
+  }
+  const bias = options.centerBias === undefined ? base.lateCenterBias : (options.centerBias ?? undefined);
+  const { lateCenterBias: _dropped, ...rest } = base; // re-added below, so `centerBias: null` really clears it
   return {
-    ...base,
-    initial: { cx: round2(base.initial.cx * scale), cz: round2(base.initial.cz * scale), r: round2(base.initial.r * scale) },
-    phases: base.phases.map((phase) => ({ ...phase, radius: round2(phase.radius * scale) })),
+    ...rest,
+    initial: { cx: round2(base.initial.cx * scale), cz: round2(base.initial.cz * scale), r: initialR },
+    phases,
     edgeMargin: round2(base.edgeMargin * scale),
     playableHalfExtent: halfExtent,
+    ...(bias ? { lateCenterBias: bias } : {}),
   };
+}
+
+/**
+ * The center pull for a map's POIs: its highest-tier POI (ties: the bigger one, then the lower id — no `Math.random`,
+ * no map-file coupling). On Map v1 that is a hot drop; on the maze it is the tower plaza. Training ranges are skipped.
+ * Returns null when the map has no POI to aim at.
+ */
+export function zoneCenterBiasForPois(pois: readonly PointOfInterest[], options: Omit<ZoneCenterBias, "x" | "z"> = {}): ZoneCenterBias | null {
+  let best: PointOfInterest | null = null;
+  for (const poi of pois) {
+    if (poi.kind === "training") continue;
+    if (best === null || poi.lootTier > best.lootTier || (poi.lootTier === best.lootTier && (poi.radius > best.radius || (poi.radius === best.radius && poi.id < best.id)))) best = poi;
+  }
+  if (best === null) return null;
+  return { x: best.center[0], z: best.center[1], ...options };
 }
 
 /** Seconds before a shrink at which `zoneWarning` events fire. */
@@ -83,6 +158,10 @@ export function zoneCloseSeconds(spec: ZoneSpec): number {
  * combat). The center is seeded by `hash32(seed, index, try)`: inside `from.r − to.r` of the previous center (so the
  * next circle is contained in the current one) and inside ±(half − edgeMargin − to.r / 2) of the origin. A center the
  * check rejects is re-rolled up to 16 times, then the previous center is kept.
+ *
+ * With `spec.lateCenterBias`, the last phases lerp that seeded sample toward the bias point (clamped into the same
+ * reach disc and square, both convex, so a biased center is contained exactly like an unbiased one). The pull ramps up
+ * over the trailing phases and is 0 before them, so early circles stay as varied as they ever were.
  */
 export function computeZonePhase(
   spec: ZoneSpec,
@@ -110,16 +189,37 @@ export function computeZonePhase(
   const maxX = Math.min(bound, from.cx + reach);
   const minZ = Math.max(-bound, from.cz - reach);
   const maxZ = Math.min(bound, from.cz + reach);
+  const pull = centerBiasWeight(spec, index);
+  // The bias point as far as this circle can actually reach it: clamped into the square, then onto the reach disc.
+  let ax = 0;
+  let az = 0;
+  if (pull > 0) {
+    const bias = spec.lateCenterBias!;
+    ax = clampAbs(bias.x, bound);
+    az = clampAbs(bias.z, bound);
+    const bdx = ax - from.cx;
+    const bdz = az - from.cz;
+    const d2 = bdx * bdx + bdz * bdz;
+    if (d2 > reach * reach) {
+      const k = reach / Math.sqrt(d2);
+      ax = from.cx + bdx * k;
+      az = from.cz + bdz * k;
+    }
+  }
   if (reach > 0 && minX <= maxX && minZ <= maxZ) {
     for (let attempt = 0; attempt < CENTER_TRIES; attempt++) {
       const h = hash32(seed, index, attempt);
       const u = (h & 0xffff) / 0x10000;
       const v = (h >>> 16) / 0x10000;
-      const x = minX + (maxX - minX) * u;
-      const z = minZ + (maxZ - minZ) * v;
+      let x = minX + (maxX - minX) * u;
+      let z = minZ + (maxZ - minZ) * v;
       const dx = x - from.cx;
       const dz = z - from.cz;
       if (dx * dx + dz * dz > reach * reach) continue;
+      if (pull > 0) {
+        x += (ax - x) * pull;
+        z += (az - z) * pull;
+      }
       if (isValidCenter && !isValidCenter(x, z)) continue;
       cx = round2(x);
       cz = round2(z);
@@ -134,6 +234,20 @@ export function computeZonePhase(
     }
   }
   return { index, waitStartTick, shrinkStartTick, shrinkEndTick, from, to: { cx, cz, r: toR }, dps: row.dps };
+}
+
+/**
+ * How hard phase `index` is pulled toward `spec.lateCenterBias`, 0..1. 0 outside the trailing `phases` window, then a
+ * linear ramp to `strength` on the last phase, so only the endgame is shaped.
+ */
+function centerBiasWeight(spec: ZoneSpec, index: number): number {
+  const bias = spec.lateCenterBias;
+  if (!bias) return 0;
+  const window = Math.max(1, Math.round(bias.phases ?? ZONE_CENTER_BIAS.phases));
+  const first = spec.phases.length - window + 1;
+  if (index < first) return 0;
+  const strength = Math.min(1, Math.max(0, bias.strength ?? ZONE_CENTER_BIAS.strength));
+  return (strength * (index - first + 1)) / window;
 }
 
 /** Every phase of the spec at once (tests, tooling and replays; a live match announces them one by one). */

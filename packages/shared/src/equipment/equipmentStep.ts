@@ -2,6 +2,7 @@ import { MOVEMENT } from "../constants";
 import type { Vec3 } from "../movement/types";
 import type { RaycastFn } from "../weapons/types";
 import type { DamageKind } from "./armor";
+import { fireBurnsWalls, fragDestroysWalls, smokeRepairsWalls, WallChange, type DestructibleWalls } from "./destructible";
 import { blastOrigin, computeExplosionHits, EXPLOSION, type EntitySample, type ExplosionHit } from "./explosion";
 import { createFirePatch, fireDamageTargets, FIRE, isFireExpired, stepFirePatch, type FirePatch } from "./fire";
 import { flashExposure, type FlashExposure } from "./flash";
@@ -199,10 +200,18 @@ export interface EquipmentWorld {
   fires: readonly FirePatch[];
   /** Match seed; smoke and fire shapes are seeded from it and the throwable id. */
   readonly seed: number;
+  /**
+   * Walls this world's blasts, clouds and fires can take out of the map (`destructible.ts`), or null on a map with
+   * none. The match owns the state and installs it here; the step only writes into it, so two hosts running the same
+   * ticks destroy the same panes. The colliders, the meshes and the nav grid are the owner's to patch.
+   */
+  walls: DestructibleWalls | null;
+  /** This world's read position in the wall change log; every other watcher keeps its own. */
+  wallCursor: number;
 }
 
 export function createEquipmentWorld(seed: number, capacity = 64): EquipmentWorld {
-  return { throwables: createThrowableSet(capacity), smokes: [], fires: [], seed };
+  return { throwables: createThrowableSet(capacity), smokes: [], fires: [], seed, walls: null, wallCursor: 0 };
 }
 
 /** An entity area effects can reach: feet/posture for damage, eye and look direction for flashes. */
@@ -227,7 +236,13 @@ export type EquipmentWorldEvent =
   | { readonly type: "fireSpawned"; readonly patch: FirePatch }
   | { readonly type: "fireExpired"; readonly id: number }
   | { readonly type: "damage"; readonly request: DamageRequest; readonly explosion: ExplosionHit | null }
-  | { readonly type: "flashed"; readonly targetId: number; readonly sourceId: number; readonly exposure: FlashExposure };
+  | { readonly type: "flashed"; readonly targetId: number; readonly sourceId: number; readonly exposure: FlashExposure }
+  /**
+   * A destructible wall changed (`destructible.ts`): `destroyed` is a mirror pane a frag took out or a hedge a
+   * molotov burnt away, `repaired` a pane whose bullet holes a smoke cloud closed. `index` is the wall's index in
+   * `world.walls`, which is derived from the map layout and is the same number on every machine.
+   */
+  | { readonly type: "wall"; readonly index: number; readonly change: WallChange };
 
 /** Spawns a released throwable at the wall-resolved hand position. Returns its id, or -1 if the world is full. */
 export function spawnRelease(world: EquipmentWorld, release: ThrowRelease, owner: number, ownerSlot: number, raycast: RaycastFn): number {
@@ -256,6 +271,8 @@ export function stepEquipmentWorld(world: EquipmentWorld, dt: number, raycast: R
     switch (event.kind) {
       case "frag": {
         const origin = blastOrigin(event.position, event.normal);
+        // Before the damage, because the panes the blast takes out are not cover any more this tick either.
+        if (world.walls) fragDestroysWalls(world.walls, origin.x, origin.y, origin.z);
         for (const hit of computeExplosionHits(origin, EXPLOSION.frag, entities, raycast)) {
           const request: DamageRequest = { targetId: hit.targetId, sourceId: event.owner, amount: hit.amount, kind: "explosion", position: origin };
           events.push({ type: "damage", request, explosion: hit });
@@ -312,4 +329,17 @@ export function stepEquipmentWorld(world: EquipmentWorld, dt: number, raycast: R
 
   world.smokes = liveSmokes;
   world.fires = liveFires;
+
+  // Area effects against the map itself: clouds close a pane's bullet holes, fire takes a hedge away. Tick-timed like
+  // fire damage, and drained into the same event list the host already walks.
+  const walls = world.walls;
+  if (walls) {
+    smokeRepairsWalls(walls, liveSmokes, dt);
+    fireBurnsWalls(walls, liveFires, dt);
+    for (; world.wallCursor < walls.logged; world.wallCursor++) {
+      const packed = walls.changeAt(world.wallCursor);
+      if (packed < 0) continue;
+      events.push({ type: "wall", index: packed >> 1, change: (packed & 1) as WallChange });
+    }
+  }
 }

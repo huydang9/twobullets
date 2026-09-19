@@ -1,7 +1,7 @@
-import { GLASS_PHASE, PHASE_GLASS_PROP, getMapProp, glassBlocksAt } from "@twobullets/shared";
+import { GLASS_PHASE, PHASE_GLASS_PROP, PHASE_GLASS_PROPS, getMapProp, glassBlocksAt } from "@twobullets/shared";
 import { describe, expect, it } from "vitest";
 import { AUDIO_MANIFEST } from "../../src/audio/audioManifest";
-import { GLASS_BLOCKED, GLASS_BLOCKED_COLLIDER, isGlassBlockedImpact } from "../../src/audio/glassBlocked";
+import { GLASS_BLOCKED, GLASS_BLOCKED_COLLIDER, GLASS_BLOCKED_COLLIDERS, isGlassBlockedImpact } from "../../src/audio/glassBlocked";
 import { colliderName } from "../../src/world/props/PropColliders";
 
 // The owner's line for a bullet stopping dead in a transparent pane. The clip is a joke, so the checks here are the
@@ -28,8 +28,10 @@ describe("blocked glass line", () => {
   });
 
   it("names the phase-shifting pane, which exists in the shared map layout and does stop bullets", () => {
-    expect(GLASS_BLOCKED.prop).toBe(PHASE_GLASS_PROP);
-    expect(getMapProp(GLASS_BLOCKED.prop).collision).toMatchObject({ kind: "box" });
+    // One glazed wall in two lengths, and the line belongs to both: a 2 m pane that stopped a round in silence would
+    // read as a bug. The maze is mostly 2 m lanes, so that is the commoner pane now.
+    expect(GLASS_BLOCKED.props).toEqual(PHASE_GLASS_PROPS);
+    for (const prop of GLASS_BLOCKED.props) expect(getMapProp(prop).collision, prop).toMatchObject({ kind: "box" });
     // Its resting mode is shoot-through; every phase group spends half its cycle stopping rounds, which is when the
     // line can fire. If a change ever left a group permanently shoot-through, the line would go silent for it.
     for (let bucket = 0; bucket < GLASS_PHASE.buckets; bucket++) {
@@ -40,14 +42,19 @@ describe("blocked glass line", () => {
   });
 
   it("matches that pane's collider meshes only", () => {
-    expect(GLASS_BLOCKED_COLLIDER).toBe(`propCollider_${GLASS_BLOCKED.prop}_`);
+    expect(GLASS_BLOCKED_COLLIDERS).toEqual(GLASS_BLOCKED.props.map((prop) => `propCollider_${prop}_`));
+    expect(GLASS_BLOCKED_COLLIDER).toBe("propCollider_wall_glass_");
     // Panes get one collider group per phase group, so their mesh names carry the group too.
     expect(isGlassBlockedImpact(colliderName(PHASE_GLASS_PROP, 1, 0))).toBe(true);
     expect(isGlassBlockedImpact(colliderName(PHASE_GLASS_PROP, 1.25, 3))).toBe(true);
-    expect(isGlassBlockedImpact(`propCollider_${GLASS_BLOCKED.prop}_1`)).toBe(true);
+    for (const prop of GLASS_BLOCKED.props) expect(isGlassBlockedImpact(colliderName(prop, 1, 2)), prop).toBe(true);
+    expect(isGlassBlockedImpact("propCollider_wall_glass_1")).toBe(true);
+    expect(isGlassBlockedImpact("propCollider_wall_glass_2_1")).toBe(true);
     expect(isGlassBlockedImpact("propCollider_wall_concrete_1")).toBe(false);
     // The mirror is shoot-through now: a round never stops in one, so it never says the line.
     expect(isGlassBlockedImpact("propCollider_wall_mirror_1")).toBe(false);
+    expect(isGlassBlockedImpact("propCollider_wall_mirror_2_1")).toBe(false);
+    expect(isGlassBlockedImpact("propCollider_wall_concrete_2_1")).toBe(false);
     expect(isGlassBlockedImpact("")).toBe(false);
   });
 });

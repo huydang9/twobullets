@@ -23,7 +23,13 @@ import { CollisionLayer } from "./hitboxes";
  * 0.3 m wall box either way, so a hole left on the collider face would float a finger's width off the glass; these put
  * it on the glass. Chainlink and picket fences are shoot-through too and are not panes: they get nothing.
  */
-const PANE_FACE: Readonly<Record<string, number>> = { wall_glass: GLASS_PANEL.paneOffset, wall_mirror: MIRROR_PANEL.faceOffset };
+const PANE_FACE: Readonly<Record<string, number>> = {
+  wall_glass: GLASS_PANEL.paneOffset,
+  wall_mirror: MIRROR_PANEL.faceOffset,
+  // The maze's 2 m pieces. Only the span differs, and a face offset is a depth: the same numbers hold.
+  wall_glass_2: GLASS_PANEL.paneOffset,
+  wall_mirror_2: MIRROR_PANEL.faceOffset,
+};
 
 /** `world/props/PropColliders.ts` names each collider group mesh `propCollider_<prop>_<scale>`. */
 const COLLIDER_PREFIX = "propCollider_";

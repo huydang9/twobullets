@@ -245,6 +245,25 @@ export const MIRROR_PANEL = {
   frameOffset: 0.15,
 } as const;
 
+export interface MirrorPanel {
+  readonly halfWidth: number;
+  readonly bottom: number;
+  readonly top: number;
+  readonly faceOffset: number;
+  readonly frameOffset: number;
+}
+
+/**
+ * The same panel on the maze's 2 m wall piece: the frame is the same width all round, so only the glass narrows.
+ * `MIRROR_PANELS` maps each mirror prop to its geometry, which is what lets both lengths reflect and take holes.
+ */
+export const MIRROR_PANEL_SHORT: MirrorPanel = { ...MIRROR_PANEL, halfWidth: 0.88 };
+
+export const MIRROR_PANELS: Readonly<Record<string, MirrorPanel>> = {
+  wall_mirror: MIRROR_PANEL,
+  wall_mirror_2: MIRROR_PANEL_SHORT,
+};
+
 /**
  * Glazed panel geometry (`wall_glass`), prop-local meters: the pane inside its frame. A pane looks exactly the same
  * whether it is stopping bullets or letting them through — that is the whole deception — so there is nothing here that
@@ -264,16 +283,17 @@ export const GLASS_PANEL = {
  * bullets. What a pane does to a bullet changes on a clock instead (map/glassPhase.ts), and the tell is drawn over the
  * pane by `PhaseGlass`, not built into it here: the geometry is thin-instanced and shared by every pane in the maze.
  */
-function glassPanel(): StandInSpec {
-  const { halfWidth: w, bottom: y0, top: y1 } = GLASS_PANEL;
+function glassPanel(half = 2): StandInSpec {
+  const w = half - (2 - GLASS_PANEL.halfWidth);
+  const { bottom: y0, top: y1 } = GLASS_PANEL;
   const d = 0.12; // frame half depth (the concrete wall's cap reaches 0.18)
   const m = 0.05; // half a mullion
   const frame = (b: Builder, mullion: boolean) => {
-    b.box([-2, -0.4, -d], [-w, 2.6, d], C.metal);
-    b.box([w, -0.4, -d], [2, 2.6, d], C.metal);
+    b.box([-half, -0.4, -d], [-w, 2.6, d], C.metal);
+    b.box([w, -0.4, -d], [half, 2.6, d], C.metal);
     b.box([-w, -0.4, -d], [w, y0, d], C.metal);
     b.box([-w, y1, -d], [w, 2.6, d], C.metal);
-    b.box([-2, 2.6, -d - 0.03], [2, 2.7, d + 0.03], C.metal);
+    b.box([-half, 2.6, -d - 0.03], [half, 2.7, d + 0.03], C.metal);
     if (mullion) b.box([-m, y0, -0.08], [m, y1, 0.08], C.metal);
   };
   const g = GLASS_PANEL.paneOffset;
@@ -310,12 +330,13 @@ function glassPanel(): StandInSpec {
  * Cull distance and shadows deliberately match `wall_concrete` (720 m, casting): a hedge that faded out or stopped
  * casting where its neighbours did not would mark every walk-through wall on the map from across the maze.
  */
-function grassWall(): StandInSpec {
+function grassWall(half = 2): StandInSpec {
   const SEED = 0x67_72_73;
-  const SEGMENTS = 12;
+  // Twelve columns over a 4 m span, six over a 2 m one: the same ragged silhouette at the same density either way.
+  const SEGMENTS = Math.round(3 * half);
   const rnd = (i: number, salt: number) => hash2(i, salt, SEED) / 4294967296;
   /** One column of the slab: its place along the wall, its crown height and half its thickness. */
-  const column = (i: number) => ({ x: -2 + (i / SEGMENTS) * 4, top: 2.2 + 0.45 * rnd(i, 1), half: 0.24 + 0.16 * rnd(i, 2) });
+  const column = (i: number) => ({ x: -half + (i / SEGMENTS) * 2 * half, top: 2.2 + 0.45 * rnd(i, 1), half: 0.24 + 0.16 * rnd(i, 2) });
 
   const slab = (b: Builder): void => {
     let a = column(0);
@@ -342,8 +363,8 @@ function grassWall(): StandInSpec {
     for (let i = 0; i < crown; i++) {
       const t = rnd(i, 3);
       const u = rnd(i, 4);
-      const x = -1.94 + (3.88 * (i + t * 0.7)) / crown;
-      const c = column(Math.min(SEGMENTS, Math.round(((x + 2) / 4) * SEGMENTS)));
+      const x = -(half - 0.06) + (2 * (half - 0.06) * (i + t * 0.7)) / crown;
+      const c = column(Math.min(SEGMENTS, Math.round(((x + half) / (2 * half)) * SEGMENTS)));
       const z = (u * 2 - 1) * c.half;
       blade(b, x, c.top - 0.12, z, (t - 0.5) * 0.3, 0.3 + 0.45 * u, (u - 0.5) * 0.35, 0.05 + 0.04 * t, i % 3 === 0 ? C.grassTip : C.grass);
     }
@@ -351,8 +372,8 @@ function grassWall(): StandInSpec {
       const t = rnd(i, 5);
       const u = rnd(i, 6);
       for (const side of [-1, 1] as const) {
-        const x = -1.9 + (3.8 * (i + (side > 0 ? t : u) * 0.8)) / face;
-        const c = column(Math.min(SEGMENTS, Math.round(((x + 2) / 4) * SEGMENTS)));
+        const x = -(half - 0.1) + (2 * (half - 0.1) * (i + (side > 0 ? t : u) * 0.8)) / face;
+        const c = column(Math.min(SEGMENTS, Math.round(((x + half) / (2 * half)) * SEGMENTS)));
         const y = 0.2 + (c.top - 0.5) * (side > 0 ? t : u);
         blade(b, x, y, side * c.half * 0.9, (t - 0.5) * 0.25, 0.25 + 0.4 * u, side * (0.12 + 0.16 * t), 0.05 + 0.03 * u, i % 4 === 0 ? C.grassTip : C.grass);
       }
@@ -363,12 +384,40 @@ function grassWall(): StandInSpec {
     cullDistance: 720,
     castShadow: true,
     levels: [
-      { distance: 0, build: (b) => (slab(b), foliage(b, 34, 17)) },
-      { distance: 45, build: (b) => (slab(b), foliage(b, 20, 0)) },
+      { distance: 0, build: (b) => (slab(b), foliage(b, Math.round(17 * half), Math.round(8.5 * half))) },
+      { distance: 45, build: (b) => (slab(b), foliage(b, Math.round(10 * half), 0)) },
       // The slab survives to the cull distance: the silhouette is the lie, and it must never change shape.
       { distance: 150, build: slab },
     ],
   };
+}
+
+/** Poured concrete wall panel with its cap, `half` m either side of the origin along local X. */
+function concreteWall(half = 2): StandInSpec {
+  return solid(
+    700,
+    (b) => (b.box([-half, -0.4, -0.15], [half, 2.6, 0.15], C.concrete), b.box([-half, 2.6, -0.18], [half, 2.7, 0.18], C.concrete)),
+    (b) => b.box([-half, -0.4, -0.15], [half, 2.7, 0.15], C.concrete),
+  );
+}
+
+/**
+ * Mirrored panel: the metal frame only, at the concrete wall's size so every kind swaps in a lattice. The two silvered
+ * faces are NOT here — MirrorWalls draws them per mirror, because a reflection needs a per-plane material and cannot
+ * live in a thin-instance batch, and because since 2026-09-18 a round punches a see-through hole in one, which is a
+ * per-pane texture. Those faces are opaque and are what fills the frame; there is no shared core behind them any more,
+ * since a core in this batch would still be standing behind every hole. One level only: a far level with a plain solid
+ * box would swallow the faces.
+ */
+function mirrorWall(panel: MirrorPanel, half: number): StandInSpec {
+  return solid(700, (b) => {
+    const { halfWidth: w, bottom, top, frameOffset: f } = panel;
+    b.box([-half, -0.4, -f], [-w, 2.6, f], C.metal);
+    b.box([w, -0.4, -f], [half, 2.6, f], C.metal);
+    b.box([-w, -0.4, -f], [w, bottom, f], C.metal);
+    b.box([-w, top, -f], [w, 2.6, f], C.metal);
+    b.box([-half, 2.6, -0.18], [half, 2.7, 0.18], C.metal);
+  });
 }
 
 const solid = (cull: number, build: (b: Builder) => void, far?: (b: Builder) => void): StandInSpec => ({
@@ -433,28 +482,17 @@ const SPECS: Readonly<Record<string, StandInSpec>> = {
     for (const x of [-1.95, 0, 1.95]) b.box([x - 0.06, -0.1, -0.06], [x + 0.06, 1.1, 0.06], C.wood);
     for (const y of [0.45, 0.95]) b.box([-2, y - 0.06, -0.03], [2, y + 0.06, 0.03], C.wood);
   }),
-  wall_concrete: solid(
-    700,
-    (b) => (b.box([-2, -0.4, -0.15], [2, 2.6, 0.15], C.concrete), b.box([-2, 2.6, -0.18], [2, 2.7, 0.18], C.concrete)),
-    (b) => b.box([-2, -0.4, -0.15], [2, 2.7, 0.15], C.concrete),
-  ),
+  wall_concrete: concreteWall(),
   // Same size as wall_concrete so they all swap in a lattice.
   wall_glass: glassPanel(),
-  // Mirrored panel: the metal frame only, at wall_concrete's size so the three swap in a lattice. The two silvered
-  // faces are NOT here — MirrorWalls draws them per mirror, because a reflection needs a per-plane material and cannot
-  // live in a thin-instance batch, and because since 2026-09-18 a round punches a see-through hole in one, which is a
-  // per-pane texture. Those faces are opaque and are what fills the frame; there is no shared core behind them any
-  // more, since a core in this batch would still be standing behind every hole. One level only: a far level with a
-  // plain solid box would swallow the faces.
-  wall_mirror: solid(700, (b) => {
-    const { halfWidth: w, bottom, top, frameOffset: f } = MIRROR_PANEL;
-    b.box([-2, -0.4, -f], [-w, 2.6, f], C.metal);
-    b.box([w, -0.4, -f], [2, 2.6, f], C.metal);
-    b.box([-w, -0.4, -f], [w, bottom, f], C.metal);
-    b.box([-w, top, -f], [w, 2.6, f], C.metal);
-    b.box([-2, 2.6, -0.18], [2, 2.7, 0.18], C.metal);
-  }),
+  wall_mirror: mirrorWall(MIRROR_PANEL, 2),
   wall_grass: grassWall(),
+  // The maze's 2 m pieces: the same four panels at half the span, built by the same functions so a short wall can
+  // never drift from its long twin (map/mazeBr.ts emits one of these across every 2 m squeeze).
+  wall_concrete_2: concreteWall(1),
+  wall_glass_2: glassPanel(1),
+  wall_mirror_2: mirrorWall(MIRROR_PANEL_SHORT, 1),
+  wall_grass_2: grassWall(1),
   sandbags: solid(250, (b) => {
     for (let row = 0; row < 3; row++) {
       for (let i = 0; i < 4 - (row % 2); i++) {

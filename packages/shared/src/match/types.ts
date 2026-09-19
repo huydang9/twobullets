@@ -43,6 +43,19 @@ export interface ZonePhaseSpec {
   readonly dps: number;
 }
 
+/**
+ * Pulls the late circles toward a point (a map's hottest POI, see `zoneCenterBiasForPois`). Absent = every center is
+ * sampled uniformly, as Map v1 and the real maps do.
+ */
+export interface ZoneCenterBias {
+  readonly x: number;
+  readonly z: number;
+  /** How many trailing phases are pulled; the pull ramps up over them (default `ZONE_CENTER_BIAS.phases`). */
+  readonly phases?: number;
+  /** Pull at the last phase, 0..1: the fraction of the way from a uniform sample to the target (default `ZONE_CENTER_BIAS.strength`). */
+  readonly strength?: number;
+}
+
 export interface ZoneSpec {
   /** Circle before phase 1 (covers the playable square; no damage). */
   readonly initial: ZoneCircle;
@@ -55,6 +68,8 @@ export interface ZoneSpec {
   readonly edgeMargin: number;
   /** Half extent of the map's playable square the radii are tuned for and centers stay inside, m (default 250). */
   readonly playableHalfExtent?: number;
+  /** Small-map shaping: the last phases' centers are pulled toward this point (`zoneSpecForHalfExtent`). Absent = uniform. */
+  readonly lateCenterBias?: ZoneCenterBias;
 }
 
 /**

@@ -100,6 +100,18 @@ const DEFS = [
   // same reason — with no collider the footprint IS this prop's extent to everything downstream, and 2 m around each of
   // an edge's two pieces covers the whole 8 m edge with no unflagged gap in the middle.
   { id: "wall_grass", category: "bush", footprint: 2, collision: { kind: "none" }, surface: "grass", sink: 0.4 },
+  // Short (2 m) wall pieces. The maze's common lane is 2 m wide (1.7 m clear, single file) and every lane has to be a
+  // whole number of wall pieces, so each of the four wall kinds comes in a second length. Same 2.6 m height, same 0.3 m
+  // depth, same sink, same surface and the same `bulletproof` flag as their 4 m twin — only the span differs. A scaled
+  // 4 m piece would not do: `PropPlacement.scale` is uniform, so halving the length halves the height and players see
+  // over the wall. The client builds the stand-ins for both lengths from the same geometry functions.
+  { id: "wall_concrete_2", category: "prop", footprint: 0.4, collision: { kind: "box", size: [2, 2.6, 0.3], bulletproof: true }, surface: "concrete", sink: 0.4 },
+  { id: "wall_glass_2", category: "prop", footprint: 0.4, collision: { kind: "box", size: [2, 2.6, 0.3], bulletproof: false }, surface: "metal", sink: 0.4 },
+  { id: "wall_mirror_2", category: "prop", footprint: 0.4, collision: { kind: "box", size: [2, 2.6, 0.3], bulletproof: false }, surface: "metal", sink: 0.4 },
+  // Footprint 1 rather than wall_grass's 2, for the same reason it is 2 there: a hedge has no collider, so its
+  // footprint IS its extent to the nav grid, the loot generator and the bullet-rustle audio, and half the span covers
+  // a 2 m piece with no unflagged gap.
+  { id: "wall_grass_2", category: "bush", footprint: 1, collision: { kind: "none" }, surface: "grass", sink: 0.4 },
   { id: "sandbags", category: "prop", footprint: 1, collision: { kind: "box", size: [2.4, 0.9, 0.7], bulletproof: true }, surface: "dirt" },
   { id: "hay_bale", category: "prop", footprint: 1, collision: { kind: "box", size: [1.3, 1.5, 1.5], bulletproof: true }, surface: "grass" },
   { id: "hay_stack", category: "prop", footprint: 1.6, collision: { kind: "box", size: [2.6, 1.9, 1.3], bulletproof: true }, surface: "grass" },

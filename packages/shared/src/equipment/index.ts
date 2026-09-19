@@ -1,6 +1,7 @@
 // Pure equipment rules: items, inventory, vitals and armor, consumables, throwables, area effects and loot.
 // No engine imports; the client and a headless server run the same code with an injected world raycast.
 export * from "./armor";
+export * from "./destructible";
 export * from "./equipmentStep";
 export * from "./explosion";
 export * from "./fire";

@@ -13,11 +13,14 @@ import {
   zoneCloseSeconds,
   zonePlayableHalfExtent,
   zoneSpecForHalfExtent,
+  zoneCenterBiasForPois,
   zoneTickDamage,
   type ZoneCenterCheck,
 } from "./zone";
 import { MAP_V1 } from "../map/mapV1";
+import { MAZE_BR } from "../map/mazeBr";
 import { REAL_TERRAIN } from "../map/real/convert/elevation";
+import type { PointOfInterest } from "../map/types";
 import type { ZoneSpec } from "./types";
 
 const spec = DEFAULT_ZONE_SPEC;
@@ -170,15 +173,17 @@ describe("scaling to the map", () => {
     });
   });
 
-  it("a smaller map gets the same schedule with every radius scaled", () => {
-    const half = 72; // the maze
+  it("a smaller map gets the same schedule with every radius scaled, down to the floor", () => {
+    const half = 72; // a 144 m map
     const small = zoneSpecForHalfExtent(half);
     const k = half / ZONE_PLAYABLE_HALF_EXTENT;
     expect(zonePlayableHalfExtent(small)).toBe(half);
     expect(small.initial).toEqual({ cx: 0, cz: 0, r: 102.24 });
     // The first circle still covers the playable square, as 355 does at ±250 m.
     expect(small.initial.r).toBeGreaterThan(half * Math.SQRT2);
-    expect(small.phases.map((p) => p.radius)).toEqual(spec.phases.map((p) => Math.round(p.radius * k * 100) / 100));
+    // Radii above the floor scale proportionally; the tail is floored at 12 m and kept 6 m apart.
+    expect(small.phases.map((p) => p.radius)).toEqual([57.6, 36, 30, 24, 18, 12, 0]);
+    expect(small.phases.slice(0, 2).map((p) => p.radius)).toEqual(spec.phases.slice(0, 2).map((p) => Math.round(p.radius * k * 100) / 100));
     // Phase 1 squeezes the map instead of containing it (the bug: 200 m on a 144 m map).
     expect(small.phases[0]!.radius).toBeLessThan(half);
     // Timings, damage and the phase count are untouched: this is a scaling fix, not a re-design.
@@ -186,6 +191,32 @@ describe("scaling to the map", () => {
     expect(zoneCloseSeconds(small)).toBe(zoneCloseSeconds(spec));
     expect(small.firstAnnounceSeconds).toBe(spec.firstAnnounceSeconds);
     expect(small.damageIntervalTicks).toBe(spec.damageIntervalTicks);
+  });
+
+  it("the floor keeps the endgame a room, not a tile, on any small map", () => {
+    const floor = 12; // DEFAULT_ZONE_SPEC's own smallest circle
+    for (const half of [40, 72, 90, 100, 150, 200, 249]) {
+      const small = zoneSpecForHalfExtent(half);
+      const radii = small.phases.map((p) => p.radius);
+      for (const r of radii) expect(r === 0 || r >= floor, `half ${half}: ${radii.join()}`).toBe(true);
+      // Strictly decreasing, and every step wide enough (>= 6 m) that the next center can still move.
+      for (let i = 1; i < radii.length; i++) {
+        expect(radii[i]!, `half ${half}`).toBeLessThan(radii[i - 1]!);
+        if (radii[i]! > 0) expect(radii[i - 1]! - radii[i]!, `half ${half}`).toBeGreaterThanOrEqual(6 - 1e-9);
+      }
+      expect(radii[0]!).toBeLessThanOrEqual(small.initial.r);
+      expect(radii[radii.length - 1]).toBe(0); // the zone still closes to a point
+    }
+  });
+
+  it("the floor and the pull are inert at or above the tuned size, options or not", () => {
+    const bias = zoneCenterBiasForPois(MAP_V1.pois);
+    expect(bias).not.toBeNull();
+    // Map v1 and the real maps: same object back, so nothing can perturb their shipped schedule.
+    expect(zoneSpecForHalfExtent(ZONE_PLAYABLE_HALF_EXTENT, DEFAULT_ZONE_SPEC, { centerBias: bias, minRadius: 40 })).toBe(DEFAULT_ZONE_SPEC);
+    // And a larger map is scaled up untouched by the floor: every radius is already above it.
+    const big = zoneSpecForHalfExtent(400);
+    expect(big.phases.map((p) => p.radius)).toEqual(spec.phases.map((p) => Math.round(p.radius * 1.6 * 100) / 100));
   });
 
   it("keeps a small map's circles inside its playable square", () => {
@@ -202,15 +233,93 @@ describe("scaling to the map", () => {
     }
   });
 
-  it("scaling is proportional: the same seed draws the same picture on both maps", () => {
+  it("scaling is proportional while the floor doesn't bite: the same seed draws the same picture on both maps", () => {
     const k = 0.288; // 72 / 250
-    const small = zoneSpecForHalfExtent(72);
+    const small = zoneSpecForHalfExtent(72, DEFAULT_ZONE_SPEC, { centerBias: null });
     for (const seed of SEEDS) {
       const big = scheduleZonePhases(spec, seed, 0);
-      scheduleZonePhases(small, seed, 0).forEach((p, i) => {
-        expect(p.to.cx).toBeCloseTo(big[i]!.to.cx * k, 1);
-        expect(p.to.cz).toBeCloseTo(big[i]!.to.cz * k, 1);
-      });
+      scheduleZonePhases(small, seed, 0)
+        .slice(0, 2)
+        .forEach((p, i) => {
+          expect(p.to.cx).toBeCloseTo(big[i]!.to.cx * k, 1);
+          expect(p.to.cz).toBeCloseTo(big[i]!.to.cz * k, 1);
+        });
+    }
+  });
+
+  it("picks the hottest POI as the pull target, deterministically and without the training range", () => {
+    expect(zoneCenterBiasForPois([])).toBeNull();
+    expect(zoneCenterBiasForPois(MAZE_BR.pois)).toEqual({ x: 0, z: 0 });
+    const pois: readonly PointOfInterest[] = [
+      { id: "b", name: "B", kind: "town", center: [10, 20], radius: 40, lootTier: 1 },
+      { id: "a", name: "A", kind: "military", center: [-5, 5], radius: 30, lootTier: 2 },
+      { id: "t", name: "T", kind: "training", center: [99, 99], radius: 90, lootTier: 2 },
+    ];
+    expect(zoneCenterBiasForPois(pois)).toEqual({ x: -5, z: 5 });
+    // Ties break on size, then id: no ordering surprise between the client and the server.
+    const tied = pois.map((poi) => ({ ...poi, kind: "town" as const, lootTier: 2 as const, radius: 30 }));
+    expect(zoneCenterBiasForPois(tied)).toEqual({ x: -5, z: 5 }); // "a" before "b"
+    expect(zoneCenterBiasForPois(tied.map((poi) => (poi.id === "b" ? { ...poi, radius: 50 } : poi)))).toEqual({ x: 10, z: 20 });
+    expect(zoneCenterBiasForPois(pois, { strength: 0.5, phases: 2 })).toEqual({ x: -5, z: 5, strength: 0.5, phases: 2 });
+  });
+
+  it("pulls the late circles toward the hottest POI and leaves the early ones alone", () => {
+    const half = MAZE_BR.terrain.playableHalfExtent;
+    const plain = zoneSpecForHalfExtent(half, DEFAULT_ZONE_SPEC, { centerBias: null });
+    const biased = zoneSpecForHalfExtent(half, DEFAULT_ZONE_SPEC, { centerBias: zoneCenterBiasForPois(MAZE_BR.pois) });
+    expect(biased.lateCenterBias).toEqual({ x: 0, z: 0 });
+    expect(biased.phases).toEqual(plain.phases);
+    const plaza = MAZE_BR.pois.find((poi) => poi.id === "plaza")!;
+    const stats = (zone: ZoneSpec, index: number) => {
+      let distance = 0;
+      let overlaps = 0;
+      let sx = 0;
+      let sx2 = 0;
+      const n = 200;
+      for (let seed = 0; seed < n; seed++) {
+        const phase = scheduleZonePhases(zone, seed, 0)[index - 1]!;
+        const d = Math.sqrt(phase.to.cx ** 2 + phase.to.cz ** 2);
+        distance += d;
+        if (d < phase.to.r + plaza.radius) overlaps++;
+        sx += phase.to.cx;
+        sx2 += phase.to.cx * phase.to.cx;
+      }
+      return { distance: distance / n, overlap: overlaps / n, spread: Math.sqrt(sx2 / n - (sx / n) ** 2) };
+    };
+    // Phases 1-2 are outside the ramp: byte-identical to the unbiased schedule.
+    for (const seed of SEEDS) {
+      expect(scheduleZonePhases(biased, seed, 0).slice(0, 2).map((p) => p.to)).toEqual(scheduleZonePhases(plain, seed, 0).slice(0, 2).map((p) => p.to));
+    }
+    // Every threshold below is a ratio, or a fraction of the map, so it keeps its meaning whenever the maze is resized
+    // (it grew from 144 m to 192 m mid-change): absolute distances scale with the map, these don't.
+    const lateBiased = stats(biased, 6); // the last circle with a real radius
+    const latePlain = stats(plain, 6);
+    // It sits over the plaza far more often, and markedly closer to it.
+    expect(lateBiased.overlap).toBeGreaterThan(latePlain.overlap + 0.15);
+    expect(lateBiased.distance).toBeLessThan(latePlain.distance * 0.85);
+    // ...but not in the same place every match: the centers still spread over a good part of the map.
+    expect(lateBiased.spread).toBeGreaterThan(half * 0.15);
+    // The mid game keeps both its distance and its spread: the ramp makes the pull there a nudge, not a magnet.
+    const midBiased = stats(biased, 3);
+    const midPlain = stats(plain, 3);
+    expect(midBiased.distance).toBeGreaterThan(midPlain.distance * 0.85);
+    expect(midBiased.spread).toBeGreaterThan(midPlain.spread * 0.85);
+  });
+
+  it("a biased circle is still contained and inside the square, for many seeds", () => {
+    const half = MAZE_BR.terrain.playableHalfExtent;
+    const biased = zoneSpecForHalfExtent(half, DEFAULT_ZONE_SPEC, { centerBias: { x: 60, z: -60, strength: 1, phases: 7 } });
+    const check: ZoneCenterCheck = (x, z) => x + z > -40;
+    for (let seed = 0; seed < 200; seed++) {
+      const phases = scheduleZonePhases(biased, seed, 0, 1, check);
+      expect(phases).toEqual(scheduleZonePhases(biased, seed, 0, 1, check)); // deterministic
+      for (const p of phases) {
+        const d = Math.sqrt((p.to.cx - p.from.cx) ** 2 + (p.to.cz - p.from.cz) ** 2);
+        expect(d + p.to.r, `seed ${seed} phase ${p.index}`).toBeLessThanOrEqual(p.from.r + 1e-9);
+        const bound = half - biased.edgeMargin - 0.5 * p.to.r;
+        expect(Math.abs(p.to.cx), `seed ${seed} phase ${p.index}`).toBeLessThanOrEqual(bound + 1e-9);
+        expect(Math.abs(p.to.cz), `seed ${seed} phase ${p.index}`).toBeLessThanOrEqual(bound + 1e-9);
+      }
     }
   });
 

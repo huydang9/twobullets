@@ -1,5 +1,5 @@
 import { Matrix, Vector3, type Mesh, type Scene } from "@babylonjs/core";
-import { CAMERA, INSTANCE_STRIDE, getMapProp, type MapPropDef, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
+import { CAMERA, INSTANCE_STRIDE, SIMULATION, WallChange, getMapProp, wallRepairProgress, type DestructibleWalls, type MapLayout, type MapPropDef, type PropCategory, type PropInstanceSet } from "@twobullets/shared";
 import { OPTIMIZATIONS } from "../../perf/flags";
 import type { Environment } from "../environment";
 import { freezeStaticMaterial } from "../materialFreeze";
@@ -7,7 +7,7 @@ import { invalidateStaticShadows, markStaticShadowCaster } from "../shadowCullin
 import { LodBands, lodZoom } from "./lodBands";
 import { LodCell, type InstanceBatch, type LodCellSpec, type LodStep } from "./LodCell";
 import { LOD_FADE_ATTRIBUTE, attachLodFade } from "./lodFadePlugin";
-import { MIRROR_PROP, MirrorWalls, type MirrorStats } from "./MirrorWalls";
+import { MirrorWalls, isMirrorProp, type MirrorStats } from "./MirrorWalls";
 import type { PropVisual, PropVisuals } from "./PropVisuals";
 
 export interface PropInstancesOptions {
@@ -68,6 +68,9 @@ interface Padding {
 
 interface Cell {
   readonly key: string;
+  readonly prop: string;
+  /** Layout instance index of each of the cell's slots, so a destroyed wall can be found by (prop, instance). */
+  readonly instances: Int32Array;
   readonly visual: PropVisual;
   readonly lod: LodCell;
   readonly maxScale: number;
@@ -99,6 +102,12 @@ export class PropInstances {
   private lastTime = -1;
   private lastHysteresis = true;
   private enabled = true;
+  /** The match's destructible walls, once a host has bound them, and this renderer's own read position in their log. */
+  private walls: DestructibleWalls | null = null;
+  private wallLayout: Pick<MapLayout, "props"> | null = null;
+  private wallCursor = 0;
+  /** Panes with apertures a cloud is currently closing, so the heal is only redrawn while one is under way. */
+  private healing: number[] = [];
 
   constructor(
     private readonly scene: Scene,
@@ -119,7 +128,7 @@ export class PropInstances {
     const axis = new Vector3();
     // A reflection needs a per-plane matrix, so mirror faces cannot share a batch; their frames still do.
     // The silvered faces are the mirror panel's body (its stand-in is only the frame), so they cast its shadow.
-    this.mirrors = new MirrorWalls(scene, sets.filter((set) => set.prop === MIRROR_PROP), {
+    this.mirrors = new MirrorWalls(scene, sets.filter((set) => isMirrorProp(set.prop)), {
       shadowCaster: (mesh) => {
         environment.shadowGenerator.addShadowCaster(mesh, false);
         markStaticShadowCaster(mesh);
@@ -145,6 +154,7 @@ export class PropInstances {
       for (const [key, offsets] of byCell) {
         const matrices = new Float32Array(offsets.length * 16);
         const positions = new Float32Array(offsets.length * 3);
+        const instances = Int32Array.from(offsets, (offset) => offset / INSTANCE_STRIDE);
         let maxScale = 0;
         let tilted = false;
         offsets.forEach((offset, n) => {
@@ -158,6 +168,8 @@ export class PropInstances {
         const batches = spec.bands.levelCount * 2;
         this.cells.push({
           key: `${set.prop}@${key}`,
+          prop: set.prop,
+          instances,
           visual,
           lod: new LodCell(spec, positions, matrices),
           maxScale,
@@ -174,6 +186,60 @@ export class PropInstances {
     return this.cells.reduce((n, c) => n + c.lod.count, 0);
   }
 
+  /**
+   * Follows the match's destructible walls (`shared/equipment/destructible.ts`): a pane a frag took out or a hedge a
+   * molotov burnt disappears from the batches, and a pane a smoke cloud is healing has its apertures closed up.
+   *
+   * The match owns the state; this only reads it. Call it once, right after the match starts, with the same layout
+   * the props were built from. The mirrors also get it, so a round through a pane counts an aperture there.
+   */
+  bindWalls(walls: DestructibleWalls, layout: Pick<MapLayout, "props">): void {
+    this.walls = walls;
+    this.wallLayout = layout;
+    this.wallCursor = walls.logged;
+    this.mirrors.bindWalls(walls, layout);
+    // Panes and hedges destroyed before the bind (a rejoin, a replay) are applied in one pass.
+    for (let i = 0; i < walls.count; i++) if (walls.destroyed[i] === 1) this.hideWall(walls, layout, i);
+  }
+
+  /** Applies the wall changes since the last frame, and advances any pane a cloud is healing. */
+  private stepWalls(layout: Pick<MapLayout, "props">, walls: DestructibleWalls): void {
+    for (; this.wallCursor < walls.logged; this.wallCursor++) {
+      const packed = walls.changeAt(this.wallCursor);
+      if (packed < 0) continue;
+      const index = packed >> 1;
+      if ((packed & 1) === WallChange.destroyed) this.hideWall(walls, layout, index);
+      else this.mirrors.healed(index);
+    }
+    // A pane under a cloud closes up gradually, so the player sees it happen rather than pop. Nothing is scanned
+    // until somebody has actually shot a mirror.
+    const healing = this.healing;
+    healing.length = 0;
+    if (walls.holedCount === 0) return;
+    for (let i = 0; i < walls.count; i++) {
+      if (walls.destroyed[i] === 1 || walls.holes[i] === 0 || walls.ticks[i] === 0) continue;
+      healing.push(i);
+      this.mirrors.setHeal(i, wallRepairProgress(walls, i, 1 / SIMULATION.tickRate));
+    }
+  }
+
+  private hideWall(walls: DestructibleWalls, layout: Pick<MapLayout, "props">, index: number): void {
+    const prop = layout.props[walls.set[index]!]?.prop;
+    if (prop === undefined) return;
+    const instance = walls.instance[index]!;
+    this.mirrors.destroy(index);
+    for (const cell of this.cells) {
+      if (cell.prop !== prop) continue;
+      for (let slot = 0; slot < cell.instances.length; slot++) {
+        if (cell.instances[slot] !== instance) continue;
+        cell.lod.hide(slot);
+        this.upload(cell);
+        invalidateStaticShadows();
+        return;
+      }
+    }
+  }
+
   /** Per-cell LOD state, for headless checks; `lodCellProps` has the prop id of each. */
   get lodCells(): readonly LodCell[] {
     return this.cells.map((c) => c.lod);
@@ -188,6 +254,7 @@ export class PropInstances {
    * (performance.now by default); `force` re-selects everything without fading.
    */
   update(camera: Vector3, force = false, now = performance.now()): void {
+    if (this.walls && this.wallLayout) this.stepWalls(this.wallLayout, this.walls);
     if (!this.enabled) return;
     const dt = this.lastTime < 0 ? 0 : Math.min(0.25, (now - this.lastTime) / 1000);
     this.lastTime = now;

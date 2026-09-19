@@ -37,7 +37,7 @@ export interface MapChoice {
 
 export const MAP_V1_ID = "v1";
 
-/** `?map=mazebr`: the 144 x 144 m maze battle-royale map (shared/map/mazeBr.ts) — a full MapData, not the `maze` level. */
+/** `?map=mazebr`: the 192 x 192 m maze battle-royale map (shared/map/mazeBr.ts) — a full MapData, not the `maze` level. */
 export const MAZE_BR_ID = MAZE_BR.id;
 
 /** `?map=maze`: the 150 x 150 m maze level (shared/level/maze.ts). */

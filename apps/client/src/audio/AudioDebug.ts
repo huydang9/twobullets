@@ -1,5 +1,5 @@
 import { ITEMS, MOVEMENT, getWeaponDef, type HitZone, type Projectile, type WeaponId } from "@twobullets/shared";
-import { gainToDb, strideLength, type Vec3Like } from "./acoustics";
+import { gainToDb, roomFromSpace, strideLength, type Vec3Like } from "./acoustics";
 import { smokeHissLevel } from "./equipmentMix";
 import type { AudioDirector } from "./AudioDirector";
 import type { AudioVolumeKey } from "./AudioSettings";
@@ -89,6 +89,9 @@ export class AudioDebug {
             "__audio.mech(kind='boltOpen', weapon='sniper')",
             "__audio.hit(zone='head', killed=false)",
             "__audio.landing(fallSpeed=10)",
+            "__audio.rustle(distance=6, bearing=0)   // leaf rustle of a bullet going through a hedge",
+            "__audio.paneClick(blocking=true, distance=3, bearing=0)   // glazed pane switching mode beside you",
+            "__audio.space(width, meanFreePath)   // force the measured space: 4 = squeeze, 12 = boulevard, 40 = plaza, null = live rays, no arg = read it",
             "__audio.ambience(on=true)   // off by default (AMBIENCE_ENABLED)  __audio.indoor(1 | 0 | null)",
             "__audio.volume('weapons', 0.5)  __audio.voices()  __audio.stats()  __audio.overlay(on=true)",
           ].join("\n"),
@@ -166,6 +169,15 @@ export class AudioDebug {
       indoor: (value: number | null) => {
         director.probe.enclosureOverride = value;
       },
+      rustle: (distance = 6, bearing = 0) => audio.playFoliageHit(this.around(distance, bearing, -0.4)),
+      paneClick: (blocking = true, distance = 3, bearing = 0) => audio.playGlassPhaseClick(this.around(distance, bearing, -0.3), blocking),
+      // No argument prints what the probe measures; a width forces it (null restores the rays).
+      space: (width?: number | null, meanFreePath?: number) => {
+        const probe = director.probe;
+        if (width === undefined) return { ...probe.space, roomSend: probe.roomSend, forced: probe.spaceOverride !== null, ...roomFromSpace(probe.space, probe.enclosure) };
+        probe.spaceOverride = width === null ? null : { width, meanFreePath: meanFreePath ?? Math.max(width, width / 2 + 4) };
+        return probe.space;
+      },
       volume: (key: AudioVolumeKey, value: number) => director.settings.set(key, value),
       voices: () =>
         console.table(
@@ -185,6 +197,8 @@ export class AudioDebug {
         culled: director.engine.culled,
         stolen: director.engine.stolen,
         indoor: director.probe.enclosure.toFixed(2),
+        corridor: `${director.probe.space.width.toFixed(1)} m wide, ${director.probe.space.meanFreePath.toFixed(1)} m free path`,
+        hedges: director.probe.mapProps?.hedgeCount ?? 0,
         ambience: director.settings.ambienceEnabled,
         raysSkipped: director.probe.raysSkipped,
         context: director.engine.live ? "running" : "not started (click the page)",
@@ -255,7 +269,7 @@ export class AudioDebug {
     const now = engine.now;
     const lines = [
       `audio ${engine.live ? "running" : "suspended"}  ${bank.format}  voices ${engine.activeVoices.length}  culled ${engine.culled}  stolen ${engine.stolen}`,
-      `indoor ${probe.enclosure.toFixed(2)}  rays ${probe.raysThisFrame}/frame  skipped ${probe.raysSkipped}`,
+      `indoor ${probe.enclosure.toFixed(2)}  space ${probe.space.width.toFixed(1)}m wide / ${probe.space.meanFreePath.toFixed(1)}m free  send ${probe.roomSend.toFixed(2)}  rays ${probe.raysThisFrame}/frame  skipped ${probe.raysSkipped}`,
     ];
     for (const v of engine.activeVoices.slice(-18)) {
       const o = v.options;

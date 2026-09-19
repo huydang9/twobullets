@@ -7,7 +7,7 @@ import type { PropInstanceSet } from "../map/layout/mapLayout";
 import { getMapProp } from "../map/layout/props";
 import { mapPaths } from "../map/layout/roads";
 import { INSTANCE_STRIDE } from "../map/layout/scatter";
-import type { FlattenRegion, PointOfInterest } from "../map/types";
+import type { FlattenRegion, PadLoot, PointOfInterest } from "../map/types";
 import type { ItemInstance } from "./inventory";
 import { ITEMS, type ItemCategory, type ItemId } from "./items";
 import { createRng, hash32, hashString, len2, len3, pickWeighted } from "./math";
@@ -113,7 +113,10 @@ export const LOOT = {
   /** A weapon comes with this many stacks of its ammo. */
   weaponAmmoStacks: [2, 3],
 
-  /** Ground piles outside buildings (only when `generateLoot` gets an `OutdoorLootWorld`): always a gun and its ammo. */
+  /**
+   * Ground piles outside buildings (only when `generateLoot` gets an `OutdoorLootWorld`): a gun and its ammo, unless
+   * the pad asks for a full pile (`FlattenRegion.loot`).
+   */
   outdoor: {
     /** Roadside stations along painted roads, m apart, each on a seeded side of the road. */
     roadSpacing: 20,
@@ -122,10 +125,14 @@ export const LOOT = {
     /** Pile chance per road station inside a POI, by tier; stations outside every POI use `outskirtsChance`. */
     roadChance: [0.35, 0.5, 0.65],
     outskirtsChance: 0.2,
-    /** Grid step over POI pads (flatten circles and rects whose center is inside a POI), m, and chance per point. */
+    /**
+     * Grid step over POI pads (flatten circles and rects whose center is inside a POI), m, and chance per point. A pad
+     * may scale its own chance and roll fuller piles with `FlattenRegion.loot` (map/types.ts `PadLoot`); these are what
+     * a pad that says nothing gets.
+     */
     padStep: 9,
     padChance: [0.2, 0.3, 0.4],
-    /** Chance of one more roll after the gun. */
+    /** Chance of one more roll after the gun (`cache` pads and roadsides). */
     extraItemChance: 0.5,
     /** Clear distance from building bounds, prop footprints and other outdoor piles, m. */
     buildingClearance: 2.5,
@@ -194,7 +201,8 @@ export interface OutdoorLootWorld {
  * nearly every pile starts with a gun and its ammo, then 1–3 rolls from tier tables. Every spot is seeded from
  * (seed, building id, spot index), so adding or moving one building never reshuffles the others. Buildings get a
  * minimum number of piles by size and are topped up with primary weapons by size. With `outdoor`, roadsides and POI
- * pads get gun piles too (after all building piles). Pure data; the same result in the browser, the server and tests.
+ * pads get piles too (after all building piles) — gun caches, or full piles where the pad asks for them (`PadLoot`).
+ * Pure data; the same result in the browser, the server and tests.
  */
 export function generateLoot(seed: number, pois: readonly PointOfInterest[], buildings: readonly LootBuilding[], outdoor?: OutdoorLootWorld): LootLayout {
   const piles: LootPile[] = [];
@@ -327,11 +335,18 @@ function generateOutdoorLoot(seed: number, pois: readonly PointOfInterest[], wor
     if (blockers.query(x, z, 0, (p) => (p.x - x) ** 2 + (p.z - z) ** 2 < p.r * p.r)) return false;
     return !placed.query(x, z, cfg.pileSpacing, (p) => (p.x - x) ** 2 + (p.z - z) ** 2 < cfg.pileSpacing * cfg.pileSpacing);
   };
-  const place = (x: number, z: number, random: () => number, kind: "road" | "pad"): void => {
+  const place = (x: number, z: number, random: () => number, kind: "road" | "pad", pad?: PadLoot): void => {
     const poi = pois.find((p) => len2(x - p.center[0], z - p.center[1]) <= p.radius) ?? null;
     const context: RollContext = { tier: poi?.lootTier ?? 0, military: poi?.kind === "military", gunAmmo: [], primaries: 0, supplies: { heal: 0, armor: 0, backpack: 0, throwable: 0 } };
-    const instances = rollWeapon(random, context, false);
-    if (random() < cfg.extraItemChance) instances.push(...rollCategory(pickWeighted<LootCategory>(LOOT.category[context.tier], random()), random, context));
+    // A `pile` pad rolls exactly what a building loot spot rolls, so ground loot on a map without buildings is not
+    // guns and ammo alone; everything else stays the gun cache (`rollWeapon` then one more roll).
+    let instances: ItemInstance[];
+    if (pad?.style === "pile") {
+      instances = rollPile(random, context, LOOT.pileWeaponChance[context.tier]);
+    } else {
+      instances = rollWeapon(random, context, false);
+      if (random() < cfg.extraItemChance) instances.push(...rollCategory(pickWeighted<LootCategory>(LOOT.category[context.tier], random()), random, context));
+    }
     placed.insert({ x, z }, x, z, 0);
     const position = roundTuple([x, terrain.sampleHeight(x, z), z]);
     pushPile(piles, items, instances, position, random, terrain, { buildingId: "", roomId: kind, poi: poi?.id ?? null, outdoor: kind });
@@ -377,10 +392,10 @@ function generateOutdoorLoot(seed: number, pois: readonly PointOfInterest[], wor
         const lz = gz * cfg.padStep;
         if (region.shape === "circle" ? lx * lx + lz * lz > (region.radius - 1) ** 2 : Math.abs(lx) > region.halfExtents[0] - 1 || Math.abs(lz) > region.halfExtents[1] - 1) continue;
         const random = createRng(hash32(outdoorSeed ^ 0x9ad, index, (gx + 512) * 1024 + gz + 512));
-        if (random() >= cfg.padChance[poi.lootTier]) continue;
+        if (random() >= cfg.padChance[poi.lootTier]! * (region.loot?.density ?? 1)) continue;
         const x = region.center[0] + lx * cos + lz * sin;
         const z = region.center[1] - lx * sin + lz * cos;
-        if (clear(x, z)) place(x, z, random, "pad");
+        if (clear(x, z)) place(x, z, random, "pad", region.loot);
       }
     }
   });

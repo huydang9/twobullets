@@ -28,7 +28,9 @@ import {
   type MixLayer,
 } from "./equipmentMix";
 import { addCrackle, addUseCue, addZip, createHissBuffer } from "./equipment/foley";
+import { FOLIAGE_RUSTLE } from "./foliage";
 import { GLASS_BLOCKED, isGlassBlockedImpact } from "./glassBlocked";
+import { GLASS_PHASE_CLICK } from "./glassPhaseClick";
 import { FOOTSTEP_SOUND, FOOTSTEP_TRIM, IMPACT_SOUND, LOCAL_MIX, STANCE, WEAPON_SOUNDS, firstPersonShot, type WeaponSound } from "./soundDesign";
 import type { SoundBank } from "./SoundBank";
 import type {
@@ -114,6 +116,11 @@ export class GameAudio {
     readonly settings: AudioSettings,
   ) {}
 
+  /** Context time, or null while audio hasn't started (before the first user gesture). */
+  get now(): number | null {
+    return this.engine.live?.currentTime ?? null;
+  }
+
   get listenerPosition(): Vec3Like {
     return this.listener;
   }
@@ -140,7 +147,8 @@ export class GameAudio {
     const ctx = this.engine.live;
     if (!ctx) return;
     const now = ctx.currentTime;
-    const indoor = this.probe.enclosure;
+    // How much the space couples into the room reverb: the roof overhead or the walls either side (AudioWorldProbe).
+    const indoor = this.probe.roomSend;
 
     if (event.shooterIsLocal) {
       this.playFirstPersonShot(design, event.suppressed === true, indoor, now);
@@ -261,7 +269,7 @@ export class GameAudio {
       if (!place) return;
       options = { bus: "foley", priority: Priority.normal, label: `mech.${event.kind}`, position: event.position, gain: place.gain, lowpass: place.lowpass, distance: place.distance, tag: event.tag };
     } else {
-      options = { bus: "foley", priority: Priority.local, label: `mech.${event.kind}`, gain: LOCAL_MIX.mechanical, room: 0.15 * this.probe.enclosure, tag: event.tag };
+      options = { bus: "foley", priority: Priority.local, label: `mech.${event.kind}`, gain: LOCAL_MIX.mechanical, room: 0.15 * this.probe.roomSend, tag: event.tag };
     }
     const voice = this.engine.voice(options);
     if (!voice) return;
@@ -334,7 +342,7 @@ export class GameAudio {
     const rate = stance.rate * (0.94 + Math.random() * 0.12);
     const id = FOOTSTEP_SOUND[surface];
     if (event.isLocal) {
-      const voice = this.engine.voice({ bus: "footsteps", priority: Priority.local, label: id, gain: level * LOCAL_MIX.footstep, room: 0.2 * this.probe.enclosure });
+      const voice = this.engine.voice({ bus: "footsteps", priority: Priority.local, label: id, gain: level * LOCAL_MIX.footstep, room: 0.2 * this.probe.roomSend });
       if (voice) this.layer(voice, id, { when: ctx.currentTime, rate });
       return;
     }
@@ -347,7 +355,7 @@ export class GameAudio {
       position: event.position,
       gain: level * place.gain,
       lowpass: place.lowpass,
-      room: 0.2 * this.probe.enclosure,
+      room: 0.2 * this.probe.roomSend,
       distance: place.distance,
       occluded: place.occluded,
     });
@@ -402,7 +410,7 @@ export class GameAudio {
       panning: place.distance < 20 ? "HRTF" : "equalpower",
       gain: place.gain * heavy * (flesh?.gain ?? 1),
       lowpass: place.lowpass,
-      room: 0.25 * this.probe.enclosure,
+      room: 0.25 * this.probe.roomSend,
       echo: 0.08,
       distance: place.distance,
       occluded: place.occluded,
@@ -420,6 +428,67 @@ export class GameAudio {
       voice.addTone({ when: when + 0.01, gain: 0.08, type: "triangle", frequency: from, frequencyEnd: from * 0.55, sweep: 0.25, attack: 0.01, decay: 0.08 });
       voice.addNoise({ when: when + 0.01, gain: 0.12, filter: "bandpass", frequency: from, frequencyEnd: from * 0.5, sweep: 0.25, q: 6, decay: 0.08 });
     }
+  }
+
+  /**
+   * A bullet going through a hedge (`foliage.ts`): leaves letting go, a branch swinging back, no impact. There is
+   * nothing to stop the round and nothing to hit, so this is not an impact sound — no thud, no dust, no ricochet, and
+   * a priority below one, so a rustle never steals a voice from the gunfire around it.
+   */
+  playFoliageHit(position: Vec3Like): void {
+    const ctx = this.engine.live;
+    if (!ctx || !FOLIAGE_RUSTLE.enabled) return;
+    const place = this.place(position, FOLIAGE_RUSTLE.reference, FOLIAGE_RUSTLE.range, 1.1);
+    if (!place) return;
+    const voice = this.engine.voice({
+      bus: "impacts",
+      priority: Priority.detail,
+      label: "foliage.rustle",
+      position,
+      gain: place.gain * FOLIAGE_RUSTLE.gain,
+      lowpass: place.lowpass,
+      room: 0.15 * this.probe.roomSend,
+      echo: FOLIAGE_RUSTLE.echo,
+      distance: place.distance,
+      occluded: place.occluded,
+    });
+    if (!voice) return;
+    const when = ctx.currentTime + place.delay;
+    // The grass footstep take is a real leaf rustle; taken fast and bright it reads as a bush, not a boot.
+    this.layer(voice, "step.grass", { when, rate: 1.35 + Math.random() * 0.25, gain: 1 });
+    this.layer(voice, "foley.cloth", { when: when + 0.01, rate: 0.75, gain: 0.45, lowpass: 3000 });
+    voice.addNoise({ when, gain: 0.18, filter: "highpass", frequency: 4200, decay: 0.05 });
+  }
+
+  /**
+   * A glazed pane changing mode within a few metres of the listener (`glassPhaseClick.ts`): a dry tick in the glazing,
+   * lower and damped as the pane goes armoured, shorter and brighter as it opens. Deliberately quiet and short-range —
+   * the pane gives nothing away to anyone further off, which is the whole design of it.
+   */
+  playGlassPhaseClick(position: Vec3Like, blocking: boolean): void {
+    const ctx = this.engine.live;
+    if (!ctx || !GLASS_PHASE_CLICK.enabled) return;
+    // Rolloff 1.4: steeper than any other cue here, so it is already gone at the far end of a corridor.
+    const place = this.place(position, GLASS_PHASE_CLICK.reference, GLASS_PHASE_CLICK.range, 1.4);
+    if (!place) return;
+    const voice = this.engine.voice({
+      bus: "impacts",
+      priority: Priority.detail,
+      label: "glass.phase",
+      position,
+      gain: place.gain * GLASS_PHASE_CLICK.gain,
+      lowpass: place.lowpass,
+      room: 0.1 * this.probe.roomSend,
+      distance: place.distance,
+      occluded: place.occluded,
+    });
+    if (!voice) return;
+    const when = ctx.currentTime;
+    const rate = blocking ? 1 : GLASS_PHASE_CLICK.openRate;
+    for (const partial of GLASS_PHASE_CLICK.partials) {
+      voice.addTone({ when, gain: partial.gain, frequency: partial.frequency * rate, attack: 0.001, decay: partial.decay * (blocking ? 1 : 0.7) });
+    }
+    voice.addNoise({ when, gain: 0.22, filter: "highpass", frequency: 5200 * rate, decay: 0.008 });
   }
 
   /**
@@ -442,7 +511,7 @@ export class GameAudio {
       panning: d < 60 ? "HRTF" : "equalpower",
       gain: Math.min(1, place.gain * power),
       lowpass: place.lowpass,
-      room: 0.5 * this.probe.enclosure,
+      room: 0.5 * this.probe.roomSend,
       echo: blastEcho(design, d) * (place.occluded ? 1.3 : 1),
       distance: d,
       occluded: place.occluded,
@@ -489,7 +558,7 @@ export class GameAudio {
       position: event.position,
       gain: place.gain * (0.35 + 0.65 * force),
       lowpass: place.lowpass,
-      room: 0.2 * this.probe.enclosure,
+      room: 0.2 * this.probe.roomSend,
       distance: place.distance,
       occluded: place.occluded,
     });
@@ -756,7 +825,7 @@ export class GameAudio {
     let voice: Voice | null;
     let when = ctx.currentTime;
     if (!event.position) {
-      voice = this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: FRAG_CALLOUT.localGain, room: 0.15 * this.probe.enclosure });
+      voice = this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: FRAG_CALLOUT.localGain, room: 0.15 * this.probe.roomSend });
     } else {
       const place = this.place(event.position, FRAG_CALLOUT.reference, FRAG_CALLOUT.range, FRAG_CALLOUT.rolloff, event.age);
       if (!place) return;
@@ -768,7 +837,7 @@ export class GameAudio {
         position: event.position,
         gain: Math.min(1, place.gain * FRAG_CALLOUT.remoteGain),
         lowpass: place.lowpass,
-        room: 0.3 * this.probe.enclosure,
+        room: 0.3 * this.probe.roomSend,
         echo: 0.15,
         distance: place.distance,
         occluded: place.occluded,
@@ -881,7 +950,7 @@ export class GameAudio {
   /** First-person foley when `position` is null, otherwise a spatial foley voice within `range`. */
   private foleyVoice(label: string, position: Vec3Like | null, range: number, localGain: number, tag?: string): Voice | null {
     if (!position) {
-      return this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: localGain, room: 0.15 * this.probe.enclosure, ...(tag ? { tag } : {}) });
+      return this.engine.voice({ bus: "foley", priority: Priority.local, label, gain: localGain, room: 0.15 * this.probe.roomSend, ...(tag ? { tag } : {}) });
     }
     const place = this.place(position, 1.5, range, 1, 0, 0.3);
     if (!place) return null;
@@ -898,7 +967,7 @@ export class GameAudio {
       position: event.position,
       gain: Math.min(1, place.gain * level),
       lowpass: place.lowpass,
-      room: 0.3 * this.probe.enclosure,
+      room: 0.3 * this.probe.roomSend,
       echo,
       distance: place.distance,
       occluded: place.occluded,
@@ -922,7 +991,7 @@ export class GameAudio {
   private startLoop(area: AreaLoop, gain: number, lowpass: number): Voice | null {
     const ctx = this.engine.live;
     if (!ctx) return null;
-    const voice = this.engine.voice({ bus: "ambience", priority: Priority.important, label: area.kind === "fire" ? "fire.loop" : "smoke.hiss", position: area.position, gain: 0, lowpass, room: 0.2 * this.probe.enclosure, distance: distance(area.position, this.listener) });
+    const voice = this.engine.voice({ bus: "ambience", priority: Priority.important, label: area.kind === "fire" ? "fire.loop" : "smoke.hiss", position: area.position, gain: 0, lowpass, room: 0.2 * this.probe.roomSend, distance: distance(area.position, this.listener) });
     if (!voice) return null;
     const now = ctx.currentTime;
     if (area.kind === "smoke") {

@@ -16,8 +16,35 @@ const PIERCE_FADE = 3;
 /** Half sizes, m: the rim of shattered glass and the dark bore through it. The pane is 4 m across. */
 const PIERCE_RIM = 0.045;
 const PIERCE_BORE = 0.017;
-/** The ring decal's own shape peaks at 0.8 of its half size, so a ring drawn round a real hole is scaled up to sit on its rim. */
-const RING_SCALE = 1.3;
+
+/**
+ * The crazing round a *real* see-through aperture — the holes `MirrorWalls.punch` cuts out of a mirror. All in one
+ * place so it can be tuned without hunting.
+ *
+ * The whole point of the aperture is to look through it, so this is a hint at its rim and nothing more. It used to be
+ * drawn at 1.3× the hole's radius and held at half opacity for forty-five seconds, which put the ring's bright band
+ * (the sprite peaks at 0.8 of its half size) right across the opening and stacked one pale quad per round on top of
+ * the view — worst of all against the dark corridor you were trying to see into. Now it sits strictly outside the
+ * glass, it is faint, and it is gone in a couple of seconds, leaving a clean hole behind.
+ */
+export const MIRROR_CRAZING = {
+  /**
+   * Ring half size as a multiple of the aperture's radius. The ring sprite is transparent inside 0.62 of its half size
+   * (`fxAtlas.drawRing`), so anything above 1 / 0.62 ≈ 1.62 clears the hole entirely; 1.8 keeps a margin for the
+   * hole's own soft edge.
+   */
+  scale: 1.8,
+  /** Peak opacity. Alpha-blended over whatever the hole shows, so it has to stay a hint. */
+  alpha: 0.18,
+  /** Seconds it is drawn for, and the tail it fades over. The hole is permanent; the crazing round it is not. */
+  life: 2.5,
+  fade: 2,
+  /**
+   * Two apertures reported in the same frame this close together are one hole and get one ring, m. A mirror's two
+   * silvered faces are 0.26 m apart (`MIRROR_PANEL.faceOffset`), and a square shot punches both.
+   */
+  mergeWithin: 0.4,
+};
 
 const SPARK = Color3.FromHexString("#ffb347");
 const SPARK_HOT = Color3.FromHexString("#ffe08a");
@@ -128,8 +155,12 @@ export class ImpactEffects {
    * `aperture` is the width, in m, of a real see-through hole the pane cut in itself (mirrors do; `MirrorWalls.punch`).
    * Then this only draws the crazing round its rim, because the middle is gone. Zero means the pane is still whole
    * where the round crossed it — a window you could already see through — and the hole is drawn: dark bore, pale rim.
+   *
+   * A round that goes squarely through a pane reports both faces it crossed, a finger's width apart, and both are the
+   * same hole to look at: the second one reuses the first's ring rather than doubling its opacity over the opening.
    */
   pierce(point: Vector3, normal: Vector3, aperture = 0): void {
+    if (aperture > 0 && this.sameAperture(point)) return;
     const decal = this.take();
     offsetAlong(decal.position, point, normal, DECAL_SURFACE_OFFSET);
     decal.normal.copyFrom(normal);
@@ -175,13 +206,15 @@ export class ImpactEffects {
     for (const decal of this.decals) {
       const age = this.time - decal.born;
       if (decal.pierced) {
-        if (age >= PIERCE_LIFE) continue;
-        const alpha = Math.min(1, (PIERCE_LIFE - age) / PIERCE_FADE);
         if (decal.aperture > 0) {
-          // The hole is real and the middle of it is gone: only the crazed ring round its edge is drawn.
-          this.decalBatch.decal(decal.position, decal.normal, (decal.aperture / 2) * RING_SCALE * decal.size, decal.rotation, FxCell.ring, PIERCE_CRACKS, alpha * 0.5);
+          // The hole is real and the middle of it is gone: a faint ring outside its rim, and only for a moment.
+          if (age >= MIRROR_CRAZING.life) continue;
+          const crazing = Math.min(1, (MIRROR_CRAZING.life - age) / MIRROR_CRAZING.fade) * MIRROR_CRAZING.alpha;
+          this.decalBatch.decal(decal.position, decal.normal, (decal.aperture / 2) * MIRROR_CRAZING.scale, decal.rotation, FxCell.ring, PIERCE_CRACKS, crazing);
           continue;
         }
+        if (age >= PIERCE_LIFE) continue;
+        const alpha = Math.min(1, (PIERCE_LIFE - age) / PIERCE_FADE);
         // Rim first, bore second: within one batch the later quad draws over the earlier one.
         this.decalBatch.decal(decal.position, decal.normal, PIERCE_RIM * decal.size, decal.rotation, FxCell.hole, PIERCE_CRACKS, alpha * 0.55);
         this.decalBatch.decal(decal.position, decal.normal, PIERCE_BORE * decal.size, decal.rotation, FxCell.spark, PIERCE_HOLE, alpha * 0.95);
@@ -197,6 +230,16 @@ export class ImpactEffects {
     const decal = this.decals[this.nextDecal] as Decal;
     this.nextDecal = (this.nextDecal + 1) % DECAL_CAPACITY;
     return decal;
+  }
+
+  /** True when the decal taken last is a crazing ring from this same frame, close enough to be the same hole. */
+  private sameAperture(point: Vector3): boolean {
+    const last = this.decals[(this.nextDecal + DECAL_CAPACITY - 1) % DECAL_CAPACITY] as Decal;
+    if (!last.pierced || last.aperture <= 0 || last.born !== this.time) return false;
+    const dx = last.position.x - point.x;
+    const dy = last.position.y - point.y;
+    const dz = last.position.z - point.z;
+    return dx * dx + dy * dy + dz * dz < MIRROR_CRAZING.mergeWithin * MIRROR_CRAZING.mergeWithin;
   }
 
   clear(): void {

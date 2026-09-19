@@ -24,7 +24,7 @@ import { loadMap } from "./loadMap.ts";
 export async function createMapHeadlessMatch(havok: HavokModule, mapId: string, options: HeadlessMatchOptions): Promise<HeadlessMatch & { readonly navMs: number }> {
   const { map, terrain, layout } = await loadMap(mapId);
   const world = createMapSimWorld(havok, { terrain, layout });
-  const config = createBrMatchConfig({ seed: options.seed, mapId, playableHalfExtent: map.terrain.playableHalfExtent, timeScale: options.timeScale ?? 1, difficulty: options.difficulty ?? "normal", ...options.config });
+  const config = createBrMatchConfig({ seed: options.seed, mapId, playableHalfExtent: map.terrain.playableHalfExtent, pois: map.pois, timeScale: options.timeScale ?? 1, difficulty: options.difficulty ?? "normal", ...options.config });
   const spawns = options.spawns?.(world, config) ?? planTeamSpawns(config.seed, config.teamCount, config.teamSize, map.pois, map.spawns, (x, z) => terrain.sampleHeight(x, z));
   const ground = createGroundLoot(generateLoot(config.seed, map.pois, layout.buildings).items);
   let nav: NavQuery;

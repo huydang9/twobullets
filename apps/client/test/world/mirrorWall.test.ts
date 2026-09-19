@@ -157,6 +157,36 @@ describe("MirrorWalls", () => {
     mirrors.dispose();
   });
 
+  it("puts a floor under the reflection, seen by no camera but the mirrors", () => {
+    const { scene } = world();
+    // The terrain's own material, which is what the proxy floor wears so it matches the ground beside it.
+    const terrain = new PBRMaterial("mat_terrain", scene);
+    const mirrors = new MirrorWalls(scene, set([[0, 10]]));
+    mirrors.update({ x: 3, y: 1.6, z: -2 }, 1000);
+
+    const ground = scene.meshes.find((m) => m.name === "mirrorGround")!;
+    expect(ground.material).toBe(terrain);
+    expect(ground.isVisible).toBe(true);
+    // Two triangles, under the camera, at the pane's own floor height.
+    expect(ground.getTotalIndices()).toBe(6);
+    expect([ground.position.x, ground.position.y, ground.position.z]).toEqual([3, 0, -2]);
+    // In every reflection, and in no camera's view: a render target with a custom list ignores the layer mask.
+    expect(textureOf(faces(scene)[0]!).getCustomRenderList!(0, null, 0)!).toContain(ground);
+    expect(ground.layerMask & scene.activeCamera!.layerMask).toBe(0);
+
+    mirrors.dispose();
+    expect(scene.meshes.some((m) => m.name === "mirrorGround")).toBe(false);
+    expect(scene.materials).toContain(terrain);
+  });
+
+  it("leaves the reflection alone on a map with no terrain material to borrow", () => {
+    const { scene } = world();
+    const mirrors = new MirrorWalls(scene, set([[0, 10]]));
+    mirrors.update({ x: 0, y: 1.6, z: 0 }, 1000);
+    expect(scene.meshes.find((m) => m.name === "mirrorGround")!.isVisible).toBe(false);
+    mirrors.dispose();
+  });
+
   it("frees every texture and material on dispose", () => {
     const { scene } = world();
     character(scene, "bot");

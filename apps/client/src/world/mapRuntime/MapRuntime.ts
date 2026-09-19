@@ -14,6 +14,7 @@ import {
 } from "@twobullets/shared";
 import { buildBuilding, createTerrainBody, type BuiltBuilding, type TerrainBody } from "@twobullets/sim";
 import type { AudioWorldProbe } from "../../audio/AudioWorldProbe";
+import { MapPropAudio } from "../../audio/MapPropAudio";
 import { t, type MessageKey } from "../../i18n";
 import { terrainSurfaceProvider } from "../../audio/surfaces";
 import { BuildingVisuals } from "../buildings";
@@ -200,6 +201,9 @@ export class MapRuntime {
     if (audio) {
       audio.surfaceProviders.push(this.buildingAcoustics.surface, terrainSurfaceProvider(this.terrain.surface));
       audio.enclosureProvider = this.buildingAcoustics.enclosure;
+      // Sounds the placed props make on their own: a bullet through a hedge, a glazed pane switching mode. It reads
+      // the layout's prop instances and this runtime's phase clock — the same one the colliders switch on.
+      audio.mapProps = new MapPropAudio(this.layout, () => this.phaseSeconds);
     }
     this.overlay?.hideLoading();
   }

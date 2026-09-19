@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GLASS_PHASE, PHASE_GLASS_PROP, glassBlocksAt, glassPhaseBucket, glassPhaseRemaining, isPhaseGlass } from "./glassPhase";
+import { GLASS_PHASE, PHASE_GLASS_PROP, PHASE_GLASS_PROPS, glassBlocksAt, glassPhaseBucket, glassPhaseRemaining, isPhaseGlass } from "./glassPhase";
 import { getMapProp } from "./layout/props";
 
 // The glazed pane's mode is server-bound gameplay: the headless match server and every client must land on the same
@@ -9,37 +9,64 @@ describe("glass phase", () => {
   const { holdSeconds: hold, buckets } = GLASS_PHASE;
   const cycle = hold * 2;
 
-  it("names one pane prop, and it exists", () => {
+  /** A wall running along world X stands on a constant-Z line; one running along Z stands on a constant-X line. */
+  const ALONG_X = 0;
+  const ALONG_Z = Math.PI / 2;
+
+  it("names the pane props, and they exist", () => {
+    // One glazed wall in two lengths: the 4 m piece and the 2 m piece the maze's narrow lanes are built from.
+    expect(PHASE_GLASS_PROPS).toEqual(["wall_glass", "wall_glass_2"]);
+    for (const prop of PHASE_GLASS_PROPS) {
+      expect(isPhaseGlass(prop), prop).toBe(true);
+      // Resting mode: shoot-through, which is what the pure layout, the nav grid and any world with no clock see.
+      expect(getMapProp(prop).collision, prop).toMatchObject({ kind: "box", bulletproof: false });
+    }
     expect(isPhaseGlass(PHASE_GLASS_PROP)).toBe(true);
-    expect(isPhaseGlass("wall_concrete")).toBe(false);
-    expect(isPhaseGlass("wall_mirror")).toBe(false);
-    // Resting mode: shoot-through, which is what the pure layout, the nav grid and any world with no clock see.
-    expect(getMapProp(PHASE_GLASS_PROP).collision).toMatchObject({ kind: "box", bulletproof: false });
+    for (const other of ["wall_concrete", "wall_concrete_2", "wall_mirror", "wall_mirror_2"]) {
+      expect(isPhaseGlass(other), other).toBe(false);
+    }
   });
 
-  it("gives a pane the same group wherever it is asked, and the same one for both pieces of an 8 m edge", () => {
+  it("gives a pane the same group wherever it is asked, and the same one for every piece of a wall", () => {
     for (let i = 0; i < 200; i++) {
       const x = -72 + i * 0.73;
       const z = 71 - i * 1.31;
-      expect(glassPhaseBucket(x, z)).toBe(glassPhaseBucket(x, z));
-      expect(glassPhaseBucket(x, z)).toBeGreaterThanOrEqual(0);
-      expect(glassPhaseBucket(x, z)).toBeLessThan(buckets);
+      const yaw = i % 2 === 0 ? ALONG_X : ALONG_Z;
+      expect(glassPhaseBucket(x, z, yaw)).toBe(glassPhaseBucket(x, z, yaw));
+      expect(glassPhaseBucket(x, z, yaw)).toBeGreaterThanOrEqual(0);
+      expect(glassPhaseBucket(x, z, yaw)).toBeLessThan(buckets);
     }
-    // A maze edge is two 4 m pieces 4 m apart, both inside the same 8 m lattice cell.
-    for (let k = 0; k <= 18; k++) {
-      for (let j = 0; j < 18; j++) {
-        const line = -72 + k * 8;
-        const centre = -68 + j * 8;
-        expect(glassPhaseBucket(line, centre - 2)).toBe(glassPhaseBucket(line, centre + 2));
-        expect(glassPhaseBucket(centre - 2, line)).toBe(glassPhaseBucket(centre + 2, line));
+    // A wall is pieces laid end to end on a lattice line — one 2 m piece on the maze's common squeeze, or one to three
+    // 4 m pieces on a wider lane. The group is read off the line the wall stands on, which `yaw` names, so every piece
+    // of the wall agrees whatever length they are. Mixed lengths is exactly what broke the old positional derivation.
+    const grid = GLASS_PHASE.grid;
+    for (let k = -40; k <= 40; k++) {
+      const line = k * grid;
+      for (const length of [2, 4]) {
+        for (let span = 1; span * length <= 12; span++) {
+          for (let start = -40; start <= 40; start += 3) {
+            const from = start * grid;
+            const pieces = Array.from({ length: span }, (_, p) => from + (p + 0.5) * length);
+            expect(new Set(pieces.map((along) => glassPhaseBucket(line, along, ALONG_Z))).size, `V wall at x=${line}`).toBe(1);
+            expect(new Set(pieces.map((along) => glassPhaseBucket(along, line, ALONG_X))).size, `H wall at z=${line}`).toBe(1);
+          }
+        }
       }
     }
   });
 
   it("spreads panes over every group", () => {
     const seen = new Set<number>();
-    for (let x = -72; x <= 72; x += 8) for (let z = -72; z <= 72; z += 8) seen.add(glassPhaseBucket(x, z));
+    const grid = GLASS_PHASE.grid;
+    for (let k = -24; k <= 24; k++) {
+      seen.add(glassPhaseBucket(k * grid, 2, ALONG_Z));
+      seen.add(glassPhaseBucket(2, k * grid, ALONG_X));
+    }
     expect(seen.size).toBe(buckets);
+    // Neighbouring wall lines rarely agree: the hash spreads the groups rather than banding the map.
+    let same = 0;
+    for (let k = -24; k < 24; k++) if (glassPhaseBucket(k * grid, 2, ALONG_Z) === glassPhaseBucket((k + 1) * grid, 2, ALONG_Z)) same++;
+    expect(same).toBeLessThan(24);
   });
 
   it("holds each mode for exactly holdSeconds and repeats", () => {
@@ -91,9 +118,9 @@ describe("glass phase", () => {
     // Two independent walks over the same times in different orders (a client predicting ahead, a server stepping
     // ticks) see the same modes. Nothing is memoised, so nothing can diverge.
     const forward: boolean[] = [];
-    for (let tick = 0; tick < 600; tick++) forward.push(glassBlocksAt(glassPhaseBucket(12, -36), tick / 60));
+    for (let tick = 0; tick < 600; tick++) forward.push(glassBlocksAt(glassPhaseBucket(12, -36, ALONG_Z), tick / 60));
     const backward: boolean[] = new Array(600);
-    for (let tick = 599; tick >= 0; tick--) backward[tick] = glassBlocksAt(glassPhaseBucket(12, -36), tick / 60);
+    for (let tick = 599; tick >= 0; tick--) backward[tick] = glassBlocksAt(glassPhaseBucket(12, -36, ALONG_Z), tick / 60);
     expect(backward).toEqual(forward);
   });
 });

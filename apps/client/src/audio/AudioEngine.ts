@@ -1,4 +1,4 @@
-import { clamp, dbToGain, type Vec3Like } from "./acoustics";
+import { clamp, dbToGain, roomFromSpace, SPACE, type RoomAcoustics, type Vec3Like } from "./acoustics";
 import type { AudioSettings, AudioVolumeKey } from "./AudioSettings";
 import type { AudioBusId } from "./types";
 
@@ -24,6 +24,8 @@ const BUS_CAP: Readonly<Record<AudioBusId, number>> = { weapons: 20, impacts: 12
 const STEAL_FADE = 0.025;
 const NOISE_SECONDS = 2;
 const ROOM_SECONDS = 0.9;
+/** Left/right flutter delay times as multiples of the measured round trip: detuned so the ring has width. */
+const FLUTTER_SPREAD = [1, 1.19] as const;
 /** Master low-pass cutoff when nothing is muffled, Hz. */
 const MUFFLE_OPEN = 22_000;
 
@@ -258,6 +260,13 @@ export class AudioEngine {
   private overlay: GainNode | null = null;
   private roomReturn: GainNode | null = null;
   private echoReturn: GainNode | null = null;
+  private roomTone: BiquadFilterNode | null = null;
+  /** Corridor flutter: input level, the two delay lines and their feedback gains (see {@link buildRoom}). */
+  private flutterIn: GainNode | null = null;
+  private readonly flutterDelays: DelayNode[] = [];
+  private readonly flutterLoops: GainNode[] = [];
+  /** Last values written to the graph, so a per-frame setRoom schedules nothing for changes nobody can hear. */
+  private room: RoomAcoustics = roomFromSpace({ width: 2 * SPACE.reach, meanFreePath: SPACE.reach }, 0);
   private noise: AudioBuffer | null = null;
   private readonly buses = new Map<AudioBusId, Bus>();
   private readonly voices: Voice[] = [];
@@ -367,17 +376,37 @@ export class AudioEngine {
     }
   }
 
-  /** 0 = open air (outdoor slapback echo), 1 = enclosed (short room reverb). */
+  /** 0 = open air, 1 = roofed. Kept for the debug readout and the ambience damping; {@link setRoom} mixes with it. */
   setEnvironment(indoor: number): void {
-    const value = clamp(indoor, 0, 1);
-    // Called every frame: skip automation events for changes nobody can hear.
-    if (Math.abs(value - this.indoor) < 0.01) return;
-    this.indoor = value;
-    this.applyEnvironment();
+    this.indoor = clamp(indoor, 0, 1);
   }
 
   get environment(): number {
     return this.indoor;
+  }
+
+  /**
+   * The reverb the space around the listener calls for (`acoustics.roomFromSpace`). Called every frame: each parameter
+   * is compared against what the graph already holds, so a listener standing still schedules nothing.
+   */
+  setRoom(next: RoomAcoustics): void {
+    const ctx = this.context;
+    const current = this.room;
+    this.room = next;
+    if (!ctx || !this.roomReturn || !this.echoReturn || !this.roomTone || !this.flutterIn) return;
+    const now = ctx.currentTime;
+    if (Math.abs(next.room - current.room) > 0.01) this.roomReturn.gain.setTargetAtTime(next.room, now, 0.2);
+    if (Math.abs(next.echo - current.echo) > 0.01) this.echoReturn.gain.setTargetAtTime(next.echo, now, 0.2);
+    if (Math.abs(next.flutter - current.flutter) > 0.01) this.flutterIn.gain.setTargetAtTime(next.flutter, now, 0.25);
+    if (Math.abs(next.tone - current.tone) > 40) this.roomTone.frequency.setTargetAtTime(next.tone, now, 0.3);
+    if (Math.abs(next.flutterSeconds - current.flutterSeconds) > 0.002) {
+      // Glided, not stepped: a delay line whose time jumps clicks. Walking out of a squeeze into a boulevard sweeps
+      // the flutter down into a slap, which is the space opening up and is exactly what should be audible.
+      for (let i = 0; i < this.flutterDelays.length; i++) (this.flutterDelays[i] as DelayNode).delayTime.setTargetAtTime(next.flutterSeconds * FLUTTER_SPREAD[i]!, now, 0.4);
+    }
+    if (Math.abs(next.flutterFeedback - current.flutterFeedback) > 0.01) {
+      for (const loop of this.flutterLoops) loop.gain.setTargetAtTime(next.flutterFeedback, now, 0.25);
+    }
   }
 
   /** Briefly lowers a bus (e.g. ambience under your own gunfire). Overlapping ducks keep the deepest. */
@@ -468,6 +497,8 @@ export class AudioEngine {
   }
 
   private buildGraph(ctx: AudioContext): void {
+    this.flutterDelays.length = 0;
+    this.flutterLoops.length = 0;
     // Safety limiter only: mix levels (weaponMix.ts) keep the loudest shot about 1 dB under it at full volume.
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -1;
@@ -536,17 +567,19 @@ export class AudioEngine {
       echoTap.connect(echoIn);
       this.buses.set(id, { input, direct, duck, fader, clear, roomTap, echoTap, duckUntil: 0, duckDepth: 1 });
     }
-    this.applyEnvironment();
+    // Push the current room into the fresh graph: every parameter differs from its node default.
+    const room = this.room;
+    this.room = { ...room, room: -1, echo: -1, flutter: -1, tone: -1, flutterSeconds: -1, flutterFeedback: -1 };
+    this.setRoom(room);
   }
 
-  private applyEnvironment(): void {
-    const ctx = this.context;
-    if (!ctx || !this.roomReturn || !this.echoReturn) return;
-    this.roomReturn.gain.setTargetAtTime(this.indoor, ctx.currentTime, 0.2);
-    this.echoReturn.gain.setTargetAtTime(1 - this.indoor * 0.85, ctx.currentTime, 0.2);
-  }
-
-  /** Short, bright room: procedural stereo impulse with dense early reflections. */
+  /**
+   * Short, bright room: a procedural stereo impulse with dense early reflections, plus a corridor flutter in parallel
+   * with it — a stereo pair of short feedback delays whose time is the round trip across the space the listener is
+   * standing in. The convolver says "enclosed"; the flutter says how wide, and it is the flutter you hear change as a
+   * squeeze opens into a boulevard. Both are silent-by-default: at open-field spacing the flutter level is 0 and the
+   * convolver return is the enclosure estimate, exactly as before this existed.
+   */
   private buildRoom(ctx: AudioContext): GainNode {
     const length = Math.floor(ctx.sampleRate * ROOM_SECONDS);
     const ir = ctx.createBuffer(2, length, ctx.sampleRate);
@@ -563,9 +596,32 @@ export class AudioEngine {
     const tone = ctx.createBiquadFilter();
     tone.type = "lowpass";
     tone.frequency.value = 5000;
+    this.roomTone = tone;
     this.roomReturn = ctx.createGain();
     this.roomReturn.gain.value = 0;
     input.connect(tone).connect(convolver).connect(this.roomReturn).connect(this.master as GainNode);
+
+    const flutterIn = ctx.createGain();
+    flutterIn.gain.value = 0;
+    input.connect(flutterIn);
+    const merger = ctx.createChannelMerger(2);
+    merger.connect(this.master as GainNode);
+    for (let channel = 0; channel < 2; channel++) {
+      const delay = ctx.createDelay(0.5);
+      delay.delayTime.value = 0.03 * FLUTTER_SPREAD[channel]!;
+      // Each bounce loses its highs off a plaster or glass face, so the ring darkens as it repeats.
+      const damp = ctx.createBiquadFilter();
+      damp.type = "lowpass";
+      damp.frequency.value = 3600;
+      const loop = ctx.createGain();
+      loop.gain.value = 0;
+      flutterIn.connect(delay).connect(damp);
+      damp.connect(loop).connect(delay);
+      damp.connect(merger, 0, channel);
+      this.flutterDelays.push(delay);
+      this.flutterLoops.push(loop);
+    }
+    this.flutterIn = flutterIn;
     return input;
   }
 

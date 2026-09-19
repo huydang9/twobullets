@@ -20,12 +20,14 @@ import { loadHavok } from "../../src/node/loadHavok";
 // that decides whether a shot connected. The client half is apps/client/test/world/phaseGlassColliders.test.ts, which
 // builds the same panes through its own collider class and must agree tick for tick.
 
-/** Panes on an 8 m spacing, all facing +Z, so each one lands in the phase group its own cell hashes to. */
+/** A pane standing on a constant-X lattice line runs along Z, so its yaw is -π/2 (map/mazeBr.ts). */
+const PANE_YAW = -Math.PI / 2;
+/** Panes on an 8 m spacing, each on its own wall line, so each one lands in the phase group that line hashes to. */
 const PANES = [-32, -24, -16, -8, 0, 8, 16, 24, 32, 40];
 
 function layoutOf(): MapLayout {
   const data = new Float32Array(PANES.length * INSTANCE_STRIDE);
-  PANES.forEach((x, i) => data.set([x, 0, 0, 0, 1, 0, 0], i * INSTANCE_STRIDE));
+  PANES.forEach((x, i) => data.set([x, 0, 0, PANE_YAW, 1, 0, 0], i * INSTANCE_STRIDE));
   return { props: [{ prop: PHASE_GLASS_PROP, data }], buildings: [] } as unknown as MapLayout;
 }
 
@@ -51,7 +53,7 @@ describe("glass phase collision (headless server)", () => {
 
   it("splits the panes into a collider group per phase group", () => {
     // One shape per group, not one per pane and not one for all of them: a group switches without touching the others.
-    const groups = new Set(PANES.map((x) => glassPhaseBucket(x, 0)));
+    const groups = new Set(PANES.map((x) => glassPhaseBucket(x, 0, PANE_YAW)));
     expect(groups.size).toBeGreaterThan(1);
     expect(collision.stats.propShapes).toBe(groups.size);
     expect(collision.stats.propBodies).toBe(PANES.length);
@@ -67,7 +69,7 @@ describe("glass phase collision (headless server)", () => {
       const seconds = step / 4;
       collision.setPhaseTime(seconds);
       for (const x of PANES) {
-        const bucket = glassPhaseBucket(x, 0);
+        const bucket = glassPhaseBucket(x, 0, PANE_YAW);
         expect(stopsBullets(x), `pane at ${x} (group ${bucket}) at ${seconds} s`).toBe(glassBlocksAt(bucket, seconds));
       }
     }
@@ -91,6 +93,6 @@ describe("glass phase collision (headless server)", () => {
     for (let step = 0; step <= at * 60; step++) collision.setPhaseTime(step / 60);
     collision.setPhaseTime(at);
     expect(PANES.map((x) => stopsBullets(x))).toEqual(jumped);
-    expect(jumped).toEqual(PANES.map((x) => glassBlocksAt(glassPhaseBucket(x, 0), at)));
+    expect(jumped).toEqual(PANES.map((x) => glassBlocksAt(glassPhaseBucket(x, 0, PANE_YAW), at)));
   });
 });

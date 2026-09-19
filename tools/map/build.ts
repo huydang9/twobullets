@@ -188,7 +188,7 @@ function mazePreviewSvg(map: MapData, layout: MapLayout): string {
   ];
 
   // Each wall instance is a box lying along its own local X: a segment of `size[0]` centered on the instance.
-  for (const [prop, color] of [["wall_concrete", "#514f4a"], ["wall_glass", "#7fb7c9"], ["wall_mirror", "#b9c6cc"], ["wall_grass", "#6f8f4a"]] as const) {
+  for (const [prop, color] of [["wall_concrete", "#514f4a"], ["wall_glass", "#7fb7c9"], ["wall_mirror", "#b9c6cc"], ["wall_grass", "#6f8f4a"], ["wall_concrete_2", "#514f4a"], ["wall_glass_2", "#7fb7c9"], ["wall_mirror_2", "#b9c6cc"], ["wall_grass_2", "#6f8f4a"]] as const) {
     const set = layout.props.find((s) => s.prop === prop);
     if (!set) continue;
     const collision = getMapProp(prop).collision;

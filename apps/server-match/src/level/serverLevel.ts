@@ -14,7 +14,7 @@ import { buildTerrain, type Terrain } from "@twobullets/shared/map/terrain/terra
 import type { MapData } from "@twobullets/shared/map/types";
 import { planTeamSpawns } from "@twobullets/shared/match/spawns";
 import type { TeamSpawnPlan, ZoneSpec } from "@twobullets/shared/match/types";
-import { DEFAULT_ZONE_SPEC, zoneSpecForHalfExtent, type ZoneCenterCheck } from "@twobullets/shared/match/zone";
+import { DEFAULT_ZONE_SPEC, zoneCenterBiasForPois, zoneSpecForHalfExtent, type ZoneCenterCheck } from "@twobullets/shared/match/zone";
 import { createMapSimWorld, createSimWorld, type HavokModule, type SimWorld } from "@twobullets/sim";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -211,7 +211,7 @@ export async function resolveServerLevel(mapId: string, options: ResolveLevelOpt
     mapId,
     name: map.name,
     killY: map.bounds.killY,
-    zone: zoneSpecForHalfExtent(map.terrain.playableHalfExtent),
+    zone: zoneSpecForHalfExtent(map.terrain.playableHalfExtent, undefined, { centerBias: zoneCenterBiasForPois(map.pois) }),
     heightAt: (x, z) => terrain.sampleHeight(x, z),
     isValidZoneCenter: (x, z) => terrain.isPlayable(x, z) && terrain.slopeTanAt(x, z) < 0.7,
     planTeamSpawns: (seed, teamCount, teamSize) => planTeamSpawns(seed, teamCount, teamSize, map.pois, map.spawns, (x, z) => terrain.sampleHeight(x, z)),

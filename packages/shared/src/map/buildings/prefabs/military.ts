@@ -119,6 +119,67 @@ export function watchtower(): BuildingPrefab {
     .build();
 }
 
+/**
+ * Small watchtower: the plaza tower's little brother. Same concrete core and same square spiral of steel treads, but
+ * **two** flights instead of three, so the platform is 6 m up rather than 9 m and the roof tops out at 8.6 m rather
+ * than 11.6 m. The maze's corner POIs carry one each (map/mazeBr.ts) and the difference in height is the whole point:
+ * from a corner tower you see over the wall fabric around you, and the plaza tower still sees over you. The footprint
+ * is the plaza tower's 5.6 m, which is what keeps the stair run and the 1.15 m corner landing unchanged — everything
+ * that makes this one secondary is vertical.
+ *
+ * `watchtower()` above is deliberately left alone: the plaza depends on it piece for piece.
+ */
+export function smallWatchtower(): BuildingPrefab {
+  const b = new PrefabBuilder("watchtower_small", "Small watchtower");
+  const core = 1.4;
+  const outer = 2.5;
+  const panel = KIT.balustrade.thickness;
+  const inner = outer - panel;
+  const flightHeight = 3;
+  const platformY = 2 * flightHeight;
+  const slabBottom = platformY - KIT.slabThickness;
+  const parapetTop = platformY + 1.1;
+  const roofBottom = parapetTop + 1.3;
+  const steel = "paintedSteel";
+  const run = KIT.stairs.run;
+
+  b.foundation([-2.8, 2.8], [-2.8, 2.8], "concrete");
+  b.box([-core, core], [0, slabBottom], [-core, core], "concrete", "structure");
+
+  // Flight 1: south side, climbing east. Flight 2: east side, climbing north onto the platform.
+  const end1 = b.flight({ dir: "+x", start: -core, across: [-outer, -core], fromY: 0, toY: flightHeight, solid: false, material: steel, balustrade: ["min"] });
+  const end2 = b.flight({ dir: "+z", start: -core, across: [core, outer], fromY: flightHeight, toY: platformY, solid: false, material: steel, balustrade: ["max"] });
+
+  // The one corner landing, where flight 1 turns north.
+  b.box([end1, inner], [flightHeight - run, flightHeight], [-inner, -core], steel, "stairs");
+  for (const p of [
+    { x: [end1, outer] as Range, z: [-outer, -inner] as Range },
+    { x: [inner, outer] as Range, z: [-inner, -core] as Range },
+  ]) {
+    b.box(p.x, [flightHeight - run, flightHeight + KIT.balustrade.height], p.z, steel, "railing");
+  }
+
+  // Platform: open above flight 2 so climbers keep their headroom; flight 2 ends on its north-east corner.
+  b.slab({ x: [-outer, outer], z: [-outer, outer], y: [slabBottom, platformY], holes: [{ x: [core, outer], z: [-core, end2] }], top: "concrete", bottom: steel, side: steel, role: "floor" });
+  b.railing([[outer - 0.13, -core - 0.03], [core - 0.03, -core - 0.03], [core - 0.03, end2 + 0.03]], platformY, steel);
+
+  const parapet = (x: Range, z: Range) => b.box(x, [platformY, parapetTop], z, "corrugated", "railing");
+  parapet([-outer, outer], [-outer, -outer + 0.1]);
+  parapet([-outer, -outer + 0.1], [-outer + 0.1, outer]);
+  parapet([-outer + 0.1, outer], [outer - 0.1, outer]);
+  parapet([outer - 0.1, outer], [-outer + 0.1, -core]);
+  parapet([outer - 0.1, outer], [end2, outer - 0.1]);
+  for (const x of [-outer, outer - 0.1]) {
+    for (const z of [-outer, outer - 0.1]) b.box([x, x + 0.1], [parapetTop, roofBottom], [z, z + 0.1], steel, "structure");
+  }
+  b.slab({ x: [-2.8, 2.8], z: [-2.8, 2.8], y: [roofBottom, roofBottom + KIT.slabThickness], top: "corrugated", bottom: steel, side: steel, role: "roof" });
+
+  return b
+    .room("platform", platformY, [-outer + 0.1, core - 0.06], [-outer + 0.1, outer - 0.1], false)
+    .entrance(-3.2, 0, -2)
+    .build();
+}
+
 /** 2.4 m checkpoint booth on a raised base, windows on three sides, with a boom barrier. */
 export function guardBooth(): BuildingPrefab {
   const b = new PrefabBuilder("guard_booth", "Guard booth");

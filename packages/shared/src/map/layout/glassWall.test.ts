@@ -6,7 +6,8 @@ import { INSTANCE_STRIDE, isHardCover } from "./scatter";
 // wall_glass: the same panel as wall_concrete, on the movement-only collision layer (see-through, shoot-through,
 // walk-into). Nothing breaks it; there is no destructible system.
 
-const instance = (x: number, z: number) => [x, 0, z, 0, 1, 0, 0];
+/** One piece on a constant-X lattice line: the wall runs along Z, so its yaw is -π/2 (map/mazeBr.ts). */
+const instance = (x: number, z: number) => [x, 0, z, -Math.PI / 2, 1, 0, 0];
 
 describe("wall_glass", () => {
   const glass = getMapProp("wall_glass");
@@ -31,9 +32,12 @@ describe("wall_glass", () => {
   });
 
   it("builds movement-only collider groups the same shape as the concrete wall", () => {
+    // Two pieces of one 8 m wall standing on the lattice line x = 0 — their yaw says they run along Z — which is what
+    // puts them in one phase group (map/glassPhase.ts reads the group off the wall's line, so every piece of a wall
+    // shares a collider group).
     const layout = {
       props: [
-        { prop: "wall_glass", data: new Float32Array([...instance(0, 0), ...instance(4, 0)]) },
+        { prop: "wall_glass", data: new Float32Array([...instance(0, -2), ...instance(0, 2)]) },
         { prop: "wall_concrete", data: new Float32Array(instance(8, 0)) },
       ],
     };

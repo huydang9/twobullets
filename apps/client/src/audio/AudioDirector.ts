@@ -5,7 +5,7 @@ import type { EquipmentView } from "../equipment/types";
 import type { PlayerController } from "../player/PlayerController";
 import type { TargetRange } from "../targets/TargetRange";
 import type { ClipPlan } from "../viewmodel/clipPlans";
-import type { Vec3Like } from "./acoustics";
+import { roomFromSpace, type Vec3Like } from "./acoustics";
 import { AmbienceSystem } from "./AmbienceSystem";
 import { AudioDebug } from "./AudioDebug";
 import { AudioEngine } from "./AudioEngine";
@@ -81,6 +81,9 @@ export class AudioDirector {
     const head = camera.position;
     this.probe.update(dt, head);
     this.engine.setEnvironment(this.probe.enclosure);
+    // Reverb from the measured space, not from the map: a 4 m squeeze rings, a plaza opens out, open ground is
+    // unchanged from the old model (acoustics.roomFromSpace).
+    this.engine.setRoom(roomFromSpace(this.probe.space, this.probe.enclosure));
     this.audio.setListener(head, this.forward, this.up);
     this.engine.update();
 
@@ -88,6 +91,7 @@ export class AudioDirector {
     // Every combat projectile is the local player's until remote shots exist (M3); fly-bys are remote.
     this.ownShots.projectiles = this.combat.projectiles;
     this.nearMiss.update(this.projectileLists, head);
+    this.probe.mapProps?.update(this.audio, head, this.projectileLists);
     this.ambience.update(dt, head);
     if (this.equipment) this.equipment.update(dt);
     else this.audio.updateAreas(dt);

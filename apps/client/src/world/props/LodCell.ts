@@ -164,6 +164,8 @@ export class LodCell {
   private readonly outSlot: Int32Array;
   private readonly fading: Int32Array;
   private fadingCount = 0;
+  /** Instances taken out of the world for good (a wall a grenade destroyed); null while the cell has none. */
+  private hidden: Uint8Array | null = null;
   /** Shared (level + 1) × 2 + shadow of every instance while all are settled alike, else MIXED. */
   private uniform = 0;
   private readonly min: Float64Array;
@@ -206,6 +208,27 @@ export class LodCell {
     return this.level[instance]!;
   }
 
+  /**
+   * Takes one instance out of every batch and keeps selection from putting it back: the mirrored pane a frag
+   * destroyed, the hedge a molotov burnt. Permanent, and it does not fade — the wall goes with its explosion.
+   */
+  hide(instance: number): void {
+    const hidden = (this.hidden ??= new Uint8Array(this.count));
+    if (hidden[instance] === 1) return;
+    hidden[instance] = 1;
+    if (this.outLevel[instance] !== CULLED) this.removeOut(instance);
+    if (this.level[instance] !== CULLED) this.removeMain(instance);
+    this.level[instance] = CULLED;
+    this.progress[instance] = 1;
+    // The cell's instances are no longer all alike, so the whole-box early-out has to re-check.
+    this.uniform = MIXED;
+    this.dirty = true;
+  }
+
+  isHidden(instance: number): boolean {
+    return this.hidden !== null && this.hidden[instance] === 1;
+  }
+
   castsShadow(instance: number): boolean {
     return this.shadow[instance] === 1;
   }
@@ -229,8 +252,13 @@ export class LodCell {
     if (this.uniform !== MIXED && this.fadingCount === 0 && this.fitsBand(bands, s, zoomSq)) return;
 
     const { positions, level, shadow } = this;
+    const hidden = this.hidden;
     let uniform = -2;
     for (let i = 0; i < this.count; i++) {
+      if (hidden !== null && hidden[i] === 1) {
+        uniform = MIXED;
+        continue;
+      }
       const dx = positions[i * 3]! - s.x;
       const dy = positions[i * 3 + 1]! - s.y;
       const dz = positions[i * 3 + 2]! - s.z;

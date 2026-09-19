@@ -3,8 +3,9 @@ import type { DamageKind } from "../equipment/armor";
 import { ITEMS } from "../equipment/items";
 import type { LifeState } from "../equipment/vitals";
 import type { WeaponId } from "../weapons/types";
-import { secondsToTicks, ZONE_PLAYABLE_HALF_EXTENT, zoneSpecForHalfExtent } from "./zone";
+import { secondsToTicks, ZONE_PLAYABLE_HALF_EXTENT, zoneCenterBiasForPois, zoneSpecForHalfExtent } from "./zone";
 import { clampMaxPlayers, TEAM_MODE_SIZE, teamModeOfSize, type TeamMode } from "./teams";
+import type { PointOfInterest } from "../map/types";
 import type { ActorConfig, BrEndReason, BrMatchConfig, BrRules, BrTimings, KillCause, MatchEvent, TeamResult, TeamState, ZoneSpec } from "./types";
 
 // Battle royale rules (docs/bots/design.md §8.1, §8.3): configuration defaults, phase schedule, team counts,
@@ -37,6 +38,8 @@ export interface BrMatchConfigOptions {
   readonly zone?: ZoneSpec;
   /** The map's `terrain.playableHalfExtent`, m: scales the default zone to the map (default 250, Map v1's). Ignored when `zone` is given. */
   readonly playableHalfExtent?: number;
+  /** The map's POIs: on a map the zone has to scale to, the hottest one pulls the late circles in. Ignored when `zone` is given or the map is the tuned size. */
+  readonly pois?: readonly PointOfInterest[];
   readonly timings?: Partial<BrTimings>;
   readonly timeScale?: number;
 }
@@ -88,7 +91,7 @@ export function createBrMatchConfig(options: BrMatchConfigOptions): BrMatchConfi
     teamMode: options.teamMode ?? teamModeOfSize(size.teamSize) ?? undefined,
     actors: createActorConfigs(options),
     rules: { ...DEFAULT_BR_RULES, ...options.rules },
-    zone: options.zone ?? zoneSpecForHalfExtent(options.playableHalfExtent ?? ZONE_PLAYABLE_HALF_EXTENT),
+    zone: options.zone ?? zoneSpecForHalfExtent(options.playableHalfExtent ?? ZONE_PLAYABLE_HALF_EXTENT, undefined, { centerBias: options.pois ? zoneCenterBiasForPois(options.pois) : undefined }),
     timings: { ...DEFAULT_BR_TIMINGS, ...options.timings },
     timeScale: options.timeScale ?? 1,
   };

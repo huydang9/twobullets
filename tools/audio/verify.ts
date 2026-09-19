@@ -12,6 +12,8 @@ import {
   distanceGain,
   gunshotLayers,
   isSupersonic,
+  roomFromSpace,
+  SPACE,
   strideLength,
 } from "../../apps/client/src/audio/acoustics.ts";
 import { AUDIO_FORMATS, AUDIO_MANIFEST, type SoundId } from "../../apps/client/src/audio/audioManifest.ts";
@@ -144,6 +146,33 @@ check("crack vs whiz", () => {
   // Muzzle velocities from packages/shared/src/weapons/weapons.ts: shotgun 350 m/s decays below Mach 1 → whiz.
   assert.ok(isSupersonic(620) && isSupersonic(400) && isSupersonic(380));
   assert.ok(!isSupersonic(330));
+});
+check("room from corridor width", () => {
+  // An open map measures the probe's full reach in every direction: the model must land exactly on the open-field mix
+  // it replaced, or Map v1 and the real-world maps change the day this ships.
+  const open = roomFromSpace({ width: 2 * SPACE.reach, meanFreePath: SPACE.reach }, 0);
+  assert.equal(open.room, 0, "open ground: no room reverb");
+  assert.equal(open.flutter, 0, "open ground: no corridor flutter");
+  assert.ok(Math.abs(open.echo - 1) < 1e-9, "open ground: the full open-field echo");
+  assert.equal(open.tone, 5000, "open ground: the tone the convolver always had");
+  const roofed = roomFromSpace({ width: 2 * SPACE.reach, meanFreePath: SPACE.reach }, 1);
+  assert.equal(roofed.room, 1, "a roof alone still puts you indoors");
+  assert.ok(Math.abs(roofed.echo - 0.15) < 1e-9, "indoors: the old 1 - indoor * 0.85");
+
+  // Corridors, with no roof over them at all: the width has to carry the whole cue.
+  const squeeze = roomFromSpace({ width: 4, meanFreePath: 9 }, 0);
+  const boulevard = roomFromSpace({ width: 12, meanFreePath: 18 }, 0);
+  const plaza = roomFromSpace({ width: 40, meanFreePath: 26 }, 0);
+  assert.ok(squeeze.room > 0.7 && squeeze.flutter > 0.8, "a 4 m squeeze rings under open sky");
+  assert.ok(squeeze.room > boulevard.room && boulevard.room > plaza.room, "wider is drier");
+  assert.ok(squeeze.echo < boulevard.echo && boulevard.echo < plaza.echo, "wider gets the open-field slapback back");
+  assert.ok(squeeze.tone > plaza.tone, "hard close walls keep their highs");
+  assert.equal(plaza.flutter, 0, "a plaza does not flutter");
+  // Flutter time is the round trip across the space, which is what makes width audible rather than just loud.
+  assert.ok(Math.abs(squeeze.flutterSeconds - 8 / 343) < 1e-6, "4 m corridor: ~23 ms");
+  assert.ok(boulevard.flutterSeconds > squeeze.flutterSeconds * 2.5, "12 m corridor: a distinct slap");
+  assert.ok(squeeze.flutterFeedback > boulevard.flutterFeedback, "the tighter space rings longer");
+  assert.ok(squeeze.send > 0.9 && plaza.send === 0, "voices only couple into the room where there is one");
 });
 check("stride cadence", () => {
   const cadence = (speed: number) => speed / strideLength(speed);

@@ -133,3 +133,76 @@ export function isSupersonic(speed: number): boolean {
 export function strideLength(speed: number): number {
   return clamp(0.55 + 0.25 * speed, 0.7, 3);
 }
+
+// --- Enclosed space: how big is the room you are standing in ---------------------------------------------------------
+
+/**
+ * Sizes at which a space stops being a corridor, m. Everything below reads these off rays the probe casts around the
+ * listener (AudioWorldProbe.space), so a map that changes its corridor widths changes the reverb with no constants to
+ * follow. A map with nothing within reach (Map v1, the real-world maps) measures `reach` in every direction, which
+ * lands on `closeness` 0 / `openness` 1 — the open-field mix this file described before any of this existed.
+ */
+export const SPACE = {
+  /** How far the space rays look, m. Beyond this a direction counts as open sky. */
+  reach: 28,
+  /** Span across the narrowest axis at which a space stops ringing like a corridor: 4 m squeeze … 18 m room. */
+  tight: 4,
+  loose: 18,
+  /**
+   * Mean free path over which the open-field slapback fades back in. `open` sits under `reach` on purpose: open ground
+   * can only ever measure `reach` in every direction, and it has to land on fully open, not on nearly.
+   */
+  enclosed: 8,
+  open: 24,
+} as const;
+
+/** What the listener's surroundings measure, m: both are spans through the listener, not distances to one wall. */
+export interface SpaceMeasure {
+  /** Narrowest span through the listener across any sampled axis — a corridor's width. */
+  readonly width: number;
+  /** Mean distance to whatever is around, all directions: how much room there is in total. */
+  readonly meanFreePath: number;
+}
+
+/** Reverb the engine builds from a measured space (AudioEngine.setRoom). */
+export interface RoomAcoustics {
+  /** Room convolver return, 0..1. */
+  readonly room: number;
+  /** Open-field slapback / valley echo return, 0..1. */
+  readonly echo: number;
+  /** Level of the corridor flutter tap, 0..1: the ring of two close parallel walls. */
+  readonly flutter: number;
+  /** Flutter round trip, s: sound crossing the corridor and coming back. */
+  readonly flutterSeconds: number;
+  readonly flutterFeedback: number;
+  /** Room low-pass, Hz. Hard close walls keep their highs; a big space eats them. */
+  readonly tone: number;
+  /** How much a sound couples into the room at all, 0..1 (the per-voice `room` send scale). */
+  readonly send: number;
+}
+
+/** Strongest flutter feedback, at `SPACE.tight`. Above ~0.6 the tap rings on past the sound that fed it. */
+const FLUTTER_FEEDBACK = 0.5;
+
+/**
+ * Reverb from geometry: a tight corridor rings, a plaza opens out, and a roof over your head still puts you indoors.
+ *
+ * `indoor` is the enclosure probe's roof estimate and only ever adds — an open-topped 4 m corridor (the maze) reads
+ * `indoor` 0 and must still ring, and a room with a ceiling must still sound like a room in the middle of a hall. The
+ * numbers are spans, so nothing here knows what a maze is: on a map with no walls within reach every term collapses to
+ * the open-field mix (room = indoor, echo = the old `1 - indoor * 0.85`, flutter silent, tone 5000 Hz).
+ */
+export function roomFromSpace(space: SpaceMeasure, indoor: number): RoomAcoustics {
+  const closeness = 1 - smoothstep(SPACE.tight, SPACE.loose, space.width);
+  const openness = smoothstep(SPACE.enclosed, SPACE.open, space.meanFreePath);
+  return {
+    room: clamp(Math.max(indoor, closeness * 0.8), 0, 1),
+    echo: (1 - indoor * 0.85) * (0.3 + 0.7 * openness),
+    flutter: 0.9 * closeness,
+    // One bounce across the corridor and back: 4 m → 23 ms (a metallic ring), 12 m → 70 ms (a distinct slap).
+    flutterSeconds: clamp((2 * space.width) / SPEED_OF_SOUND, 0.008, 0.09),
+    flutterFeedback: FLUTTER_FEEDBACK * closeness,
+    tone: 5000 + 1800 * closeness,
+    send: clamp(Math.max(indoor, closeness), 0, 1),
+  };
+}

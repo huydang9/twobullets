@@ -1,6 +1,7 @@
 import { buildNavGrid, createNavQuery, isValidZoneCenter } from "@twobullets/shared/bots/nav/index";
 import { BOT_PROFILES } from "@twobullets/shared/bots/profiles/profiles";
 import type { BotBrainFactory, BotDifficulty, NavGrid, NavQuery } from "@twobullets/shared/bots/types";
+import { buildDestructibleWalls } from "@twobullets/shared/equipment/destructible";
 import { createGroundLoot, generateLoot, type GroundLoot } from "@twobullets/shared/equipment/loot";
 import { buildMapLayout } from "@twobullets/shared/map/layout/mapLayout";
 import { MAP_V1 } from "@twobullets/shared/map/mapV1";
@@ -12,7 +13,7 @@ import { planTeamSpawns } from "@twobullets/shared/match/spawns";
 import type { MatchEvent } from "@twobullets/shared/match/types";
 import type { HavokModule } from "../../src/index";
 import { createMapSimWorld, type MapSimWorld } from "../../src/map/mapCollision";
-import { MatchSim } from "../../src/match/MatchSim";
+import { MatchSim, type MatchWalls } from "../../src/match/MatchSim";
 import { loadoutFor, type HeadlessMatch, type HeadlessMatchOptions } from "./harness";
 
 // Headless match on any MapData (the maze repro and its Map v1 control). `harness.ts` is Map v1 only and loads the
@@ -44,10 +45,15 @@ export function loadMapNavGrid(map: MapData): NavGrid {
 export interface MapMatchOptions extends Omit<HeadlessMatchOptions, "nav"> {
   readonly map?: MapData;
   readonly nav?: NavQuery;
+  /**
+   * Wires the map's destructible walls (mirror panes, grass hedges) and builds this match its **own** nav grid, so a
+   * test that patches the grid at runtime never touches the cached one every other test shares.
+   */
+  readonly destructible?: boolean;
 }
 
 /** A bots-only headless match on `map` (default the maze) with the real nav grid and real outdoor loot. */
-export function createMapMatch(havok: HavokModule, options: MapMatchOptions): HeadlessMatch {
+export function createMapMatch(havok: HavokModule, options: MapMatchOptions): HeadlessMatch & { readonly nav: NavQuery } {
   const map = options.map ?? MAZE_BR;
   const { terrain, layout } = loadMapWorld(map);
   const world = createMapSimWorld(havok, { terrain, layout });
@@ -55,6 +61,7 @@ export function createMapMatch(havok: HavokModule, options: MapMatchOptions): He
     seed: options.seed,
     mapId: map.id,
     playableHalfExtent: map.terrain.playableHalfExtent,
+    pois: map.pois,
     timeScale: options.timeScale ?? 1,
     difficulty: options.difficulty ?? "normal",
     ...(options.config as Partial<BrMatchConfigOptions> | undefined),
@@ -63,8 +70,11 @@ export function createMapMatch(havok: HavokModule, options: MapMatchOptions): He
   const ground = createGroundLoot(
     generateLoot(config.seed, map.pois, layout.buildings, { flatten: map.flatten, terrain, layout }).items,
   );
-  const grid = loadMapNavGrid(map);
+  const grid = options.destructible ? buildNavGrid({ map, terrain, layout }) : loadMapNavGrid(map);
   const nav = options.nav ?? createNavQuery(grid);
+  const walls: MatchWalls | undefined = options.destructible
+    ? { layout, walls: buildDestructibleWalls(layout), removeCollider: (prop, instance) => world.collision.removeInstance(prop, instance) }
+    : undefined;
   const sim = new MatchSim({
     config,
     spawns,
@@ -79,12 +89,14 @@ export function createMapMatch(havok: HavokModule, options: MapMatchOptions): He
       profileFor: (difficulty: BotDifficulty) => BOT_PROFILES[difficulty],
       createBody: (feet) => world.createBody(feet),
       isValidZoneCenter: isValidZoneCenter(grid),
+      walls,
     },
   });
   const events: MatchEvent[] = [];
   sim.onEvent((event) => events.push(event));
   return {
     sim,
+    nav,
     world: world as MapSimWorld,
     ground,
     events,
